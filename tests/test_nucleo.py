@@ -739,10 +739,39 @@ def teste_classificacao_de_erro() -> None:
     checar(not W._e_cota(1008, "", "invalid authentication credentials"),
            "recusa por credencial NÃO é cota — desligar a busca não a resolveria")
 
-    checar("política" in W._dica(1008, "", ""), "1008 é recusa por política")
+    # Autenticação vestida de 1008 — o mesmo truque da cota vestida de 1011.
+    # Esta é a mensagem literal que o serviço devolveu para uma chave de
+    # formato errado, e o classificador respondia "violação de política":
+    # uma pista que mandava a pessoa procurar no lugar errado.
+    auth_1008 = W._dica(
+        1008, "",
+        "1008 None. Request had invalid authentication credentials. Expected OAuth 2 "
+        "access token, login cookie or other valid authentication credential.",
+    )
+    checar("Credencial recusada" in auth_1008, "credencial vestida de 1008 fala da credencial")
+    checar("política" not in auth_1008, "e NÃO fala em violação de política")
+    checar("Credencial recusada" in W._dica(None, "", "API key not valid"),
+           "'API key not valid' sem código nenhum também é reconhecido")
+    checar("política" in W._dica(1008, "", ""), "1008 sem pista de auth segue sendo política")
+
+    # A causa mais comum de UNAUTHENTICATED não é chave errada: é chave criada
+    # há dois minutos, que o serviço ainda não reconhece. Quem não sabe disso
+    # gera outra chave e recomeça a espera — a dica precisa dizer isso PRIMEIRO.
+    recente = W._dica(
+        401, "UNAUTHENTICATED",
+        "Request had invalid authentication credentials. Expected OAuth 2 access token, "
+        "login cookie or other valid authentication credential. "
+        "reason: ACCESS_TOKEN_TYPE_UNSUPPORTED",
+    )
+    checar("espere alguns minutos" in recente, "dica menciona a chave em propagação")
+    checar(
+        recente.index("espere alguns minutos") < recente.index("confira GEMINI_API_KEY"),
+        "e a menciona ANTES de mandar conferir o .env",
+    )
+    checar("aistudio.google.com/apikey" in recente, "e diz onde pegar a chave certa")
     checar("instabilidade de rede" in W._dica(1006, "", ""), "1006 é queda abrupta")
-    checar("Chave de API inválida" in W._dica(401, "", ""), "401 fala da chave")
-    checar("Chave de API inválida" in W._dica(None, "PERMISSION_DENIED", ""), "status sozinho basta")
+    checar("Credencial recusada" in W._dica(401, "", ""), "401 fala da credencial")
+    checar("Credencial recusada" in W._dica(None, "PERMISSION_DENIED", ""), "status sozinho basta")
     checar("Modelo não encontrado" in W._dica(404, "", ""), "404 fala do modelo")
     checar("voz não" in W._dica(400, "", ""), "400 fala da configuração da sessão")
     checar("temporariamente indisponível" in W._dica(503, "", ""), "503 é indisponibilidade")

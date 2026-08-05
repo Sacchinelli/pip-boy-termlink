@@ -313,6 +313,24 @@ class LiveSessionWorker:
     )
     _FRASES_DIARIO = ("per day", "perday", "rpd", "daily limit", "per-day")
 
+    # Frases com que o serviço sinaliza credencial inválida. Precisam ser
+    # testadas ANTES do código de fechamento pelo mesmo motivo das de cota: a
+    # Live API entrega falha de autenticação fechando o WebSocket com 1008, que
+    # significa apenas "violação de política". Classificando pelo número, quem
+    # colava uma chave do formato errado recebia "o serviço recusou a sessão por
+    # violação de política" — uma pista que manda a pessoa procurar no lugar
+    # errado, e que é pior do que não dar pista nenhuma.
+    _FRASES_AUTH = (
+        "invalid authentication credentials",
+        "expected oauth 2 access token",
+        "api key not valid",
+        "api_key_invalid",
+        "api key expired",
+        "unauthenticated",
+        "caller does not have permission",
+        "permission denied",
+    )
+
     @classmethod
     def _e_cota(cls, codigo: int | None, status: str, mensagem: str) -> bool:
         """O serviço recusou por esgotamento de cota?
@@ -362,6 +380,27 @@ class LiveSessionWorker:
                 "Cada conexão consome cota. Espere a renovação ou troque GEMINI_MODEL."
             )
 
+        # Autenticação, também pelo CONTEÚDO e antes do código de fechamento.
+        if (
+            any(f in baixo for f in cls._FRASES_AUTH)
+            or codigo in (401, 403)
+            or status in ("UNAUTHENTICATED", "PERMISSION_DENIED")
+        ):
+            # A causa mais comum é também a menos óbvia, e por isso vem primeiro:
+            # uma chave RECÉM-CRIADA leva alguns minutos para valer, e nesse
+            # intervalo o serviço responde exatamente este erro. Quem acabou de
+            # gerar a chave conclui que ela está errada, gera outra, e recomeça
+            # a espera do zero — um laço que se resolve sozinho fazendo nada.
+            return (
+                "Credencial recusada pelo serviço.\n"
+                "    Se você acabou de criar a chave, espere alguns minutos e tente de "
+                "novo: chaves novas levam um tempo para valer, e até lá o serviço "
+                "responde exatamente isto.\n"
+                "    Se persistir, confira GEMINI_API_KEY no .env e confirme que é uma "
+                "CHAVE DE API de https://aistudio.google.com/apikey — não um token de "
+                "acesso nem credencial do Google Cloud, que são coisas diferentes."
+            )
+
         # Códigos de fechamento de WebSocket (1000–4999) não são status HTTP.
         if codigo is not None and 1000 <= codigo <= 4999:
             if codigo == 1008:
@@ -371,12 +410,6 @@ class LiveSessionWorker:
             return (
                 "O serviço encerrou a conexão. A causa real está na mensagem abaixo "
                 "e no pipboy.log."
-            )
-
-        if codigo in (401, 403) or status in ("UNAUTHENTICATED", "PERMISSION_DENIED"):
-            return (
-                "Chave de API inválida ou sem permissão para este modelo. "
-                "Confira GEMINI_API_KEY no .env."
             )
         if codigo == 404 or status == "NOT_FOUND":
             return (
