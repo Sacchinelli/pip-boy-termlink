@@ -313,11 +313,11 @@ class LiveSessionWorker:
     )
     _FRASES_DIARIO = ("per day", "perday", "rpd", "daily limit", "per-day")
 
-    # Frases com que o serviço sinaliza credencial inválida. Precisam ser
+    # Frases com que o serviço sinaliza credencial recusada. Precisam ser
     # testadas ANTES do código de fechamento pelo mesmo motivo das de cota: a
     # Live API entrega falha de autenticação fechando o WebSocket com 1008, que
     # significa apenas "violação de política". Classificando pelo número, quem
-    # colava uma chave do formato errado recebia "o serviço recusou a sessão por
+    # tinha problema de credencial recebia "o serviço recusou a sessão por
     # violação de política" — uma pista que manda a pessoa procurar no lugar
     # errado, e que é pior do que não dar pista nenhuma.
     _FRASES_AUTH = (
