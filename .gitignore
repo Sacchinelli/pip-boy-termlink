@@ -1,0 +1,101 @@
+# =====================================================================
+# SEGREDOS — nada aqui pode chegar ao repositório.
+# =====================================================================
+# O .env guarda a GEMINI_API_KEY. A regra sem barra vale em QUALQUER
+# profundidade, então uma cópia esquecida em dist/ (que o executável leria,
+# porque procura o .env ao lado de si mesmo) também está coberta.
+.env
+.env.*
+# A única exceção é o modelo sem segredo nenhum, que precisa ser distribuído.
+!.env.example
+
+# Variações que aparecem sozinhas quando alguém está depurando: um backup
+# antes de trocar a chave, uma cópia "só para testar a outra conta".
+*.env.bak
+*.env.old
+*.env.local
+env.txt
+chave.txt
+segredo*
+secret*
+credential*
+*.pem
+*.key
+*.pfx
+
+# =====================================================================
+# DADOS DO USUÁRIO — privados por natureza, mesmo sendo do próprio autor.
+# =====================================================================
+# Em uso normal tudo isto vive em %LOCALAPPDATA%\PipBoyTermLink e nunca
+# encosta no repositório. As regras existem para o dia em que alguém copiar
+# um banco para cá a fim de reproduzir um defeito: o caderno tem o que a
+# pessoa estuda, e o histórico tem as conversas inteiras, palavra por palavra.
+*.sqlite3
+*.sqlite
+*.db
+vocabulario*
+historico*.sqlite3
+preferencias.json
+backups/
+pipboy.log
+*.log
+
+# Cache de blips sintetizados (gerado na primeira execução).
+sons/
+*.wav
+
+# =====================================================================
+# ARTEFATOS DE BUILD
+# =====================================================================
+# Além do peso (200 MB), o build do PyInstaller grava caminhos ABSOLUTOS da
+# máquina que compilou dentro dos .toc e do xref — nome de usuário, estrutura
+# do OneDrive, versão do Python instalada. É vazamento de dado pessoal
+# disfarçado de arquivo intermediário.
+build/
+dist/
+*.spec.bak
+*.exe
+*.ico
+*.manifest
+*.pyz
+*.toc
+
+# =====================================================================
+# PYTHON
+# =====================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+ENV/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# =====================================================================
+# FERRAMENTAS
+# =====================================================================
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Configuração local de editor e de agente — específica desta máquina.
+.claude/
+.vscode/
+.idea/
+*.code-workspace
+
+# =====================================================================
+# SISTEMA
+# =====================================================================
+Thumbs.db
+desktop.ini
+ehthumbs.db
+$RECYCLE.BIN/
+.DS_Store
+._*

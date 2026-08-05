@@ -1,0 +1,88 @@
+[project]
+name = "pip-boy-termlink"
+# Igual a pipboy.__version__. Estavam em 1.0.0 e 3.0.0, e nada apontava qual
+# das duas era a do programa.
+version = "3.0.0"
+description = "Tutor de inglês por voz, em tempo real, para quem joga em inglês."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Sacchinelli" }]
+dependencies = [
+    "google-genai>=1.20.0",
+    "PySide6>=6.6",
+    "PyAudioWPatch>=0.2.12.6 ; sys_platform == 'win32'",
+    "pyaudio>=0.2.14 ; sys_platform != 'win32'",
+    "python-dotenv>=1.0.0",
+    "numpy>=1.24",
+    "keyboard>=0.13.5",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.16",
+    "mypy>=1.14",
+    "pyinstaller>=6.11",
+]
+
+# ------------------------------------------------------------------ Ruff
+# Lint e formatação. `py -m ruff check .` e `py -m ruff format --check .`
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["__pycache__"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle: erros
+    "W",    # pycodestyle: avisos
+    "F",    # pyflakes: variáveis mortas, imports não usados
+    "I",    # isort: ordem dos imports
+    "UP",   # pyupgrade: sintaxe moderna (3.10+)
+    "B",    # bugbear: armadilhas reais (mutável como default, etc.)
+    "SIM",  # simplify: código que diz o mesmo com menos
+    "RUF",  # regras próprias do ruff
+]
+ignore = [
+    "E501",   # linha longa: o formatador cuida do que é automatizável
+    "SIM108", # if/else ternário nem sempre é mais legível
+    "RUF001", # travessões e pontuação tipográfica são legítimos em português
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["pipboy"]
+
+[tool.ruff.lint.per-file-ignores]
+# O teste ajusta sys.path e o encoding do console ANTES de importar o pacote —
+# imports no topo quebrariam justamente o que essas linhas preparam.
+"tests/test_nucleo.py" = ["E402"]
+
+# ------------------------------------------------------------------ Mypy
+# Tipagem verificada. `py -m mypy pipboy pip_boy.py diagnostico.py`
+[tool.mypy]
+# Sem python_version fixa: as stubs do NumPy atual usam sintaxe 3.12+, e fixar
+# 3.10 faria o mypy tropeçar nelas. A compatibilidade 3.10 fica com o ruff.
+strict = true
+# O Qt devolve Any em quase toda API; exigir tipagem completa das chamadas
+# geraria centenas de casts sem ganho. O rigor vale para o NOSSO código.
+disallow_any_generics = false
+warn_return_any = false
+disallow_subclassing_any = false
+
+[[tool.mypy.overrides]]
+module = [
+    "pyaudiowpatch.*",
+    "pyaudio.*",
+    "keyboard.*",
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# O PySide6 aceita qualquer propriedade Qt como argumento nomeado no
+# construtor (objectName=, activated=…) — comportamento oficial, mas as stubs
+# não o declaram. Só a camada de interface usa esse padrão; o resto do
+# programa continua com os dois códigos ativos.
+module = ["pipboy.interface.*"]
+disable_error_code = ["call-arg", "call-overload"]

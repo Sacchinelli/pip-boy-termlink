@@ -1,0 +1,46 @@
+# Fiscalização automática: cada push e pull request passa pelos mesmos três
+# verificadores que o desenvolvimento local usa — ruff, mypy e a suíte.
+# O runner é Windows porque o programa é Windows-primeiro (WASAPI, tasklist,
+# DWM); um verde em Linux não provaria o que importa.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verificar:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Antes de qualquer outra coisa: um segredo comitado por engano já é
+      # público no instante do push, e nenhum teste verde desfaz isso. Este
+      # passo é barato e não depende das dependências estarem instaladas.
+      - name: Segredos e dados pessoais
+        run: python ferramentas/verificar_segredos.py
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalar dependências
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install ruff mypy
+
+      - name: Lint (ruff)
+        run: python -m ruff check .
+
+      - name: Tipos (mypy estrito)
+        run: python -m mypy pipboy pip_boy.py diagnostico.py ferramentas
+
+      - name: Testes do núcleo
+        run: python tests/test_nucleo.py
+
+      - name: Testes da interface (offscreen)
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests/test_interface.py

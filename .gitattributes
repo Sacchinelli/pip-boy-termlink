@@ -1,0 +1,23 @@
+# Fim de linha normalizado no repositório (LF), restaurado como o sistema local
+# preferir na cópia de trabalho. Sem isto, um projeto Windows-primeiro publicado
+# no GitHub mostra o arquivo inteiro como alterado assim que alguém em Linux o
+# abre, e o primeiro pull request vira 4.000 linhas de nada.
+* text=auto eol=lf
+
+# Arquivos que o Windows precisa ver com CRLF para funcionar.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binários: nunca converter, nunca tentar juntar.
+*.png binary
+*.ico binary
+*.exe binary
+*.wav binary
+*.sqlite3 binary
+*.pyz binary
+
+# O GitHub classifica a linguagem do repositório pelo volume de código. Sem
+# isto, os testes (48 KB num arquivo só) e o README distorcem a barra.
+tests/** linguist-language=Python
+*.spec linguist-language=Python
