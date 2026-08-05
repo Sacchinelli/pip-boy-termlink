@@ -165,9 +165,12 @@ class JanelaRevisao(QDialog):
             return  # Responder sem ver a resposta não é revisão, é chute.
         self._rodada.responder(acertou)
         # Revisar offline também conta como dia de estudo na sequência.
-        marcar = getattr(self._janela, "marcar_estudo", None)
-        if marcar is not None:
-            marcar()
+        #
+        # Chamada direta, sem getattr defensivo: `marcar_estudo` faz parte do
+        # contrato da janela. O getattr que havia aqui transformaria uma
+        # renomeação em silêncio — a sequência de estudo simplesmente pararia
+        # de contar, e ninguém descobriria por meses.
+        self._janela.marcar_estudo()
         self._mostrar_cartao()
 
     def _mostrar_resumo(self) -> None:

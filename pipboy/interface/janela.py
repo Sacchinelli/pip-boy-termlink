@@ -309,6 +309,16 @@ class Janela(QWidget):
         """0.0 (desligada) a 1.0 (completa). Vale para o olho e para o ouvido."""
         return self._intensidade_atmosfera
 
+    @property
+    def encerrando(self) -> bool:
+        """O programa está saindo?
+
+        A cápsula precisa saber: fechá-la normalmente devolve a janela
+        principal, mas durante o encerramento quem a está fechando é a própria
+        janela — e reabrir ali desfaria a saída.
+        """
+        return self._encerrando
+
     def paleta(self) -> dict[str, str]:
         """Cores do tema num dicionário simples, para os componentes pintados."""
         return paleta_de(self._tema)

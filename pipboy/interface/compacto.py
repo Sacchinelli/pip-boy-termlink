@@ -177,8 +177,7 @@ class JanelaCompacta(QWidget):
         """
         self._espelho.stop()
         super().closeEvent(evento)
-        encerrando = getattr(self._janela, "_encerrando", False)
-        if not encerrando and not self._janela.isVisible():
+        if not self._janela.encerrando and not self._janela.isVisible():
             self._janela.sair_modo_compacto()
 
     # ------------------------------------------------------------- Espelho

@@ -257,7 +257,9 @@ class JanelaProgresso(QDialog):
         partes = [f"{estatisticas.total} termos no caderno"]
         if estatisticas.acertos or estatisticas.erros:
             partes.append(f"{estatisticas.aproveitamento:.0%} de acerto nas revisões")
-        sequencia = getattr(janela, "sequencia_de_estudo", lambda: 0)()
+        # Direto, sem getattr: faz parte do contrato da janela, e o padrão
+        # silencioso escondia uma renomeação como "sequência de zero dias".
+        sequencia = janela.sequencia_de_estudo()
         if sequencia > 1:
             partes.append(f"◆ sequência de {sequencia} dias de estudo")
         elif sequencia == 1:
