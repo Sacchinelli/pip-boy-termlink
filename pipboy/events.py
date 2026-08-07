@@ -25,6 +25,9 @@ class UiEventKind(str, Enum):
     # A sonda de processos roda numa thread própria e publica aqui o jogo
     # reconhecido (text = nome do tema; vazio = nenhum jogo conhecido).
     GAME_DETECTED = "game_detected"
+    # A sessão desistiu da busca na web para conseguir conectar. O chip
+    # precisa saber: marcado enquanto a sessão roda sem busca, ele mente.
+    WEB_SEARCH_DISABLED = "web_search_disabled"
 
 
 class Tag(str, Enum):

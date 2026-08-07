@@ -165,6 +165,10 @@ class LiveSessionWorker:
         self._trafego_na_conexao = False
         self._renovacao_pedida = False
         self._conexoes = 0
+        # Cópia mutável da preferência: ``SessionSettings`` é congelado, e a
+        # busca precisa poder ser DESLIGADA no meio do caminho quando o serviço
+        # recusa a sessão por causa dela. Ver ``_connection_loop``.
+        self._web_search = settings.web_search
 
         self._thread = threading.Thread(
             target=self._thread_main, name=f"live-session-{session_id}", daemon=True
@@ -259,7 +263,9 @@ class LiveSessionWorker:
                 LOGGER.info("Sessão %s interrompida durante o encerramento: %s", self.session_id, error)
             else:
                 LOGGER.exception("Falha inesperada na sessão %s", self.session_id)
-                self._log(f"ERRO: {self._friendly_error(error)}", Tag.ERRO)
+                self._log(
+                    f"ERRO: {self._friendly_error(error, busca_web=self._web_search)}", Tag.ERRO
+                )
         finally:
             self._loop = None
             self._stop_event = None
@@ -304,20 +310,43 @@ class LiveSessionWorker:
     )
     _FRASES_DIARIO = ("per day", "perday", "rpd", "daily limit", "per-day")
 
-    @staticmethod
-    def _dica(codigo: int | None, status: str, mensagem: str) -> str:
-        baixo = mensagem.lower()
-        cls = LiveSessionWorker
+    @classmethod
+    def _e_cota(cls, codigo: int | None, status: str, mensagem: str) -> bool:
+        """O serviço recusou por esgotamento de cota?
 
-        # O CONTEÚDO tem prioridade sobre o número. A Live API entrega erros de
-        # cota fechando o WebSocket com o código 1011, que significa apenas
-        # "erro interno" e não é status HTTP — classificar pelo código faria
-        # este caso cair no genérico, exatamente como aconteceu antes.
-        if (
+        O CONTEÚDO tem prioridade sobre o número. A Live API entrega erros de
+        cota fechando o WebSocket com o código 1011, que significa apenas
+        "erro interno" e não é status HTTP — classificar pelo código faria
+        este caso cair no genérico, exatamente como aconteceu antes.
+        """
+        baixo = mensagem.lower()
+        return (
             any(f in baixo for f in cls._FRASES_COTA)
             or codigo == 429
             or status == "RESOURCE_EXHAUSTED"
-        ):
+        )
+
+    @staticmethod
+    def _dica(
+        codigo: int | None, status: str, mensagem: str, *, busca_web: bool = False
+    ) -> str:
+        baixo = mensagem.lower()
+        cls = LiveSessionWorker
+
+        if cls._e_cota(codigo, status, mensagem):
+            # A ferramenta de busca (Google Search grounding) tem cota PRÓPRIA,
+            # contada à parte da cota do modelo, e a Live API a cobra no aperto
+            # de mão: com ela esgotada, a sessão INTEIRA é recusada com esta
+            # mesma frase genérica. Culpar o modelo aqui mandava o jogador
+            # esperar a renovação de uma cota que nunca fora tocada — o erro
+            # some na hora ao desmarcar um chip.
+            if busca_web:
+                return (
+                    "A BUSCA NA WEB é a causa mais provável: essa ferramenta tem cota "
+                    "própria, separada da cota do modelo, e a Live API recusa a sessão "
+                    "inteira quando ela acaba. Desmarque 'Busca na web' e conecte de "
+                    "novo — se funcionar, era isso, e a cota do modelo está intacta."
+                )
             if any(f in baixo for f in cls._FRASES_DIARIO):
                 return (
                     "Limite DIÁRIO de requisições atingido. Reinicia à meia-noite no "
@@ -366,16 +395,20 @@ class LiveSessionWorker:
         return ""
 
     @classmethod
-    def _friendly_error(cls, error: Exception) -> str:
+    def _friendly_error(cls, error: Exception, *, busca_web: bool = False) -> str:
         """Traduz o erro SEM descartar a mensagem original.
 
         A versão anterior substituía o texto da API por um palpite. Quando o
         palpite errava, a informação real desaparecia e o diagnóstico ficava
         impossível. Agora a dica vem acompanhada do que o serviço realmente
         respondeu.
+
+        ``busca_web`` diz se a conexão que falhou pedia a ferramenta de busca —
+        informação que o texto do erro não carrega e sem a qual a dica de cota
+        acusa o culpado errado.
         """
         codigo, status, mensagem = cls._detalhes_erro(error)
-        dica = cls._dica(codigo, status, mensagem)
+        dica = cls._dica(codigo, status, mensagem, busca_web=busca_web)
 
         if not dica:
             base = mensagem or f"{type(error).__name__}"
@@ -460,6 +493,26 @@ class LiveSessionWorker:
                 if self._stop_event.is_set():
                     return
                 LOGGER.warning("Conexão da sessão %s caiu: %s", self.session_id, error)
+
+                # Cota + busca ligada: antes de desistir, tente sem a busca. A
+                # ferramenta de grounding tem cota própria e é cobrada no aperto
+                # de mão, então ela derruba a sessão inteira sozinha — inclusive
+                # na PRIMEIRA conexão, onde o ramo abaixo encerraria tudo. Uma
+                # sessão sem busca é imensamente melhor que nenhuma sessão, e
+                # não há risco de laço: a flag só desce, nunca sobe.
+                if self._web_search and self._e_cota(*self._detalhes_erro(error)):
+                    self._web_search = False
+                    self._publish(
+                        UiEvent(UiEventKind.WEB_SEARCH_DISABLED, session_id=self.session_id)
+                    )
+                    self._log(
+                        "A busca na web esgotou a cota PRÓPRIA dela e derrubou a conexão. "
+                        "Reconectando sem busca — a cota do modelo está intacta.",
+                        Tag.SISTEMA,
+                    )
+                    tentativa = 0
+                    continue
+
                 if self._first_connection:
                     # Falha já na primeira conexão costuma ser configuração
                     # errada, não instabilidade de rede. Não insista.
@@ -470,7 +523,11 @@ class LiveSessionWorker:
                     # falha: o handle de retomada preserva a conversa.
                     self._log("Renovando a conexão com o serviço…", Tag.SISTEMA)
                 else:
-                    self._log(f"Conexão perdida: {self._friendly_error(error)}", Tag.ERRO)
+                    self._log(
+                        "Conexão perdida: "
+                        f"{self._friendly_error(error, busca_web=self._web_search)}",
+                        Tag.ERRO,
+                    )
 
             if self._stop_event.is_set():
                 return
@@ -508,7 +565,7 @@ class LiveSessionWorker:
             ),
             # Permite retomar a conversa quando o servidor derruba o WebSocket.
             session_resumption=types.SessionResumptionConfig(handle=self._resumption_handle),
-            tools=build_tools(web_search=self._settings.web_search),
+            tools=build_tools(web_search=self._web_search),
         )
 
     async def _one_connection(self, client: Any, audio: AudioSession) -> None:

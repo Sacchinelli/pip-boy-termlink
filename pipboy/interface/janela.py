@@ -1118,6 +1118,12 @@ class Janela(QWidget):
             self._sessao_encerrada(evento.session_id)
         elif tipo is UiEventKind.GAME_DETECTED:
             self._jogo_detectado_mudou(evento.text)
+        # A sessão seguiu sem busca; o chip marcado passaria a mentir. Ele é
+        # desmarcado de verdade — e não só visualmente — para que a próxima
+        # sessão não repita a recusa. A explicação já chegou ao registro pelo
+        # LOG que a sessão publicou junto.
+        elif tipo is UiEventKind.WEB_SEARCH_DISABLED and self._da_sessao_atual(evento):
+            self.chip_busca.setChecked(False)
 
     def _jogo_detectado_mudou(self, nome: str) -> None:
         """Reage à sonda de processos — trocando o ambiente no máximo UMA vez.
