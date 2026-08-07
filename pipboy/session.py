@@ -31,7 +31,7 @@ from typing import Any
 from google import genai
 from google.genai import types
 
-from .audio import AudioError, AudioSession
+from .audio import INICIO_DE_FALA, AudioError, AudioSession, MarcaDeFala
 from .config import AppConfiguration
 from .constants import (
     HEALTHY_CONNECTION_SECONDS,
@@ -169,6 +169,9 @@ class LiveSessionWorker:
         # busca precisa poder ser DESLIGADA no meio do caminho quando o serviço
         # recusa a sessão por causa dela. Ver ``_connection_loop``.
         self._web_search = settings.web_search
+        # Há um turno de fala declarado ao serviço neste exato momento? Por
+        # conexão, não por sessão: ver ``_one_connection``.
+        self._fala_aberta = False
 
         self._thread = threading.Thread(
             target=self._thread_main, name=f"live-session-{session_id}", daemon=True
@@ -566,6 +569,15 @@ class LiveSessionWorker:
             # Permite retomar a conversa quando o servidor derruba o WebSocket.
             session_resumption=types.SessionResumptionConfig(handle=self._resumption_handle),
             tools=build_tools(web_search=self._web_search),
+            # Quem decide onde a fala termina é o portão de voz daqui, não o
+            # VAD do serviço. O portão já mede o microfone bloco a bloco para
+            # decidir o que transmitir; o serviço, sem esse aviso, refazia a
+            # detecção do zero sobre o áudio recebido e levava cerca de 700 ms
+            # para concluir o que já era sabido — a cada pergunta. Medido: 717 ms
+            # com detecção automática contra 136 ms avisando.
+            realtime_input_config=types.RealtimeInputConfig(
+                automatic_activity_detection=types.AutomaticActivityDetection(disabled=True),
+            ),
         )
 
     async def _one_connection(self, client: Any, audio: AudioSession) -> None:
@@ -573,6 +585,10 @@ class LiveSessionWorker:
         config = self._build_config()
         self._conexoes += 1
         self._tokens.nova_conexao()
+        # Socket novo não herda turno aberto: o estado precisa nascer fechado,
+        # senão a primeira fala após uma reconexão seria enviada sem início
+        # declarado e o serviço a descartaria inteira, em silêncio.
+        self._fala_aberta = False
 
         async with client.aio.live.connect(
             model=self._configuration.model, config=config
@@ -646,6 +662,32 @@ class LiveSessionWorker:
                 )
             if self._stop_event.is_set():
                 return
+
+            # As bordas de fala viajam na mesma fila do áudio justamente para
+            # chegarem na ordem certa em relação a ele. O ``fala_aberta`` não é
+            # zelo excessivo: um início repetido, ou um fim sem início, quebra o
+            # contrato de atividade manual, e é exatamente o que aconteceria se
+            # a conexão caísse no meio de uma frase — o socket novo não herda o
+            # turno que o antigo tinha aberto.
+            if isinstance(bloco, MarcaDeFala):
+                abrindo = bloco is INICIO_DE_FALA
+                if abrindo != self._fala_aberta:
+                    self._fala_aberta = abrindo
+                    await session.send_realtime_input(
+                        **(
+                            {"activity_start": types.ActivityStart()}
+                            if abrindo
+                            else {"activity_end": types.ActivityEnd()}
+                        )
+                    )
+                continue
+
+            if not self._fala_aberta:
+                # Áudio sem início declarado seria descartado em silêncio pelo
+                # serviço. Acontece na primeira conexão de uma fala que já
+                # estava em curso; abrir aqui custa nada e salva a pergunta.
+                self._fala_aberta = True
+                await session.send_realtime_input(activity_start=types.ActivityStart())
             await session.send_realtime_input(
                 audio=types.Blob(data=bloco, mime_type=f"audio/pcm;rate={INPUT_SAMPLE_RATE}")
             )

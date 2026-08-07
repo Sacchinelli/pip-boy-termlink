@@ -272,6 +272,26 @@ def teste_portao_de_voz() -> None:
     saida = g.avaliar(b"\x22\x22", 0.4, 5 * BLOCO)
     checar(saida == [b"\x22\x22"], "esquecer() descarta o pré-rolo retido")
 
+    # O estado de abertura é o que avisa o serviço onde a fala começa e termina.
+    # Sem esse aviso o servidor refaz a detecção sozinho e gasta ~580 ms a mais
+    # por pergunta (medido: 717 ms contra 136 ms).
+    g = PortaoDeVoz(pre_roll=2, cauda=0.0)
+    checar(not g.aberto, "portão nasce fechado")
+    g.avaliar(b"\x00\x00", 0.001, 0.0)
+    checar(not g.aberto, "silêncio não abre")
+    g.avaliar(b"\x33\x33", 0.4, BLOCO)
+    checar(g.aberto, "fala abre")
+    g.avaliar(b"\x00\x00", 0.001, 2 * BLOCO)
+    checar(not g.aberto, "silêncio depois da cauda fecha")
+
+    # fechar() existe para o contrato de atividade manual: todo início precisa
+    # de um fim, inclusive quando quem interrompe é o mudo ou o assistente.
+    g = PortaoDeVoz(pre_roll=0, cauda=0.0)
+    g.avaliar(b"\x33\x33", 0.4, 0.0)
+    checar(g.fechar(), "fechar() devolve True quando havia fala em curso")
+    checar(not g.aberto, "e o portão fica fechado")
+    checar(not g.fechar(), "fechar() de novo não inventa um segundo fim de fala")
+
 
 def teste_economia_com_jogo() -> None:
     """A conta que justifica a janela retroativa do áudio do jogo.
@@ -1072,6 +1092,76 @@ def teste_regressoes() -> None:
     teste_desligar_busca_ao_estourar_cota()
 
 
+def teste_sinal_de_atividade() -> None:
+    """As bordas de fala viram avisos de atividade, em alternância estrita.
+
+    O serviço descarta áudio que chega sem início declarado e fica esperando o
+    resto de um turno cujo fim nunca foi anunciado. Os dois erros emudecem a
+    sessão inteira, e nenhum dos dois aparece como exceção — por isso a
+    alternância é verificada aqui, e não deixada para o serviço reclamar.
+    """
+    print("sinal de atividade (fim de fala)")
+    import asyncio
+    import queue as _queue
+    from types import SimpleNamespace
+
+    from pipboy.audio import FIM_DE_FALA, INICIO_DE_FALA
+    from pipboy.session import LiveSessionWorker
+
+    class SessaoFalsa:
+        def __init__(self) -> None:
+            self.eventos: list[str] = []
+
+        async def send_realtime_input(self, **kw):
+            if "activity_start" in kw:
+                self.eventos.append("inicio")
+            elif "activity_end" in kw:
+                self.eventos.append("fim")
+            else:
+                self.eventos.append("audio")
+
+    def correr(itens: list) -> list[str]:
+        w = LiveSessionWorker.__new__(LiveSessionWorker)
+        w._stop_event = asyncio.Event()
+        w._fala_aberta = False
+        capture = SimpleNamespace(frames=_queue.Queue())
+        for i in itens:
+            capture.frames.put(i)
+        sessao = SessaoFalsa()
+
+        async def main():
+            audio = SimpleNamespace(capture=capture)
+            tarefa = asyncio.create_task(w._send_audio(sessao, audio))
+            while not capture.frames.empty():
+                await asyncio.sleep(0.01)
+            await asyncio.sleep(0.05)
+            w._stop_event.set()
+            await asyncio.wait_for(tarefa, timeout=2)
+
+        asyncio.run(main())
+        return sessao.eventos
+
+    som = b"\x33\x33"
+
+    # O caso normal: uma pergunta inteira, cercada pelas duas bordas.
+    ev = correr([INICIO_DE_FALA, som, som, FIM_DE_FALA])
+    checar(ev == ["inicio", "audio", "audio", "fim"], f"turno completo em ordem ({ev})")
+
+    # Início repetido quebraria o contrato; o segundo é engolido.
+    ev = correr([INICIO_DE_FALA, som, INICIO_DE_FALA, som, FIM_DE_FALA])
+    checar(ev.count("inicio") == 1, f"início repetido não é reenviado ({ev})")
+
+    # Fim sem início pendente é ruído — o serviço não deve recebê-lo.
+    ev = correr([FIM_DE_FALA, FIM_DE_FALA])
+    checar(ev == [], f"fim sem fala aberta não vira aviso ({ev})")
+
+    # Áudio órfão (reconexão no meio de uma frase) precisa abrir o turno, senão
+    # o serviço o descarta em silêncio e a pergunta se perde.
+    ev = correr([som, som, FIM_DE_FALA])
+    checar(ev[0] == "inicio", f"áudio sem início declarado abre o turno ({ev})")
+    checar(ev == ["inicio", "audio", "audio", "fim"], f"e segue em ordem ({ev})")
+
+
 def teste_desligar_busca_ao_estourar_cota() -> None:
     """O laço de conexão sacrifica a busca antes de sacrificar a sessão."""
     import asyncio
@@ -1350,6 +1440,7 @@ def main() -> int:
         teste_vocabulario,
         teste_portao_de_eco,
         teste_portao_de_voz,
+        teste_sinal_de_atividade,
         teste_economia_com_jogo,
         teste_caderno_navegavel,
         teste_profiles,
