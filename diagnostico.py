@@ -151,10 +151,16 @@ def checar_estrutura() -> None:
         if not IGNORADAS.intersection(c.relative_to(RAIZ).parts)
     ]
     if caches:
+        # O conselho sai da MESMA lista que a contagem, e não de um comando
+        # escrito à mão. O anterior era um -Recurse na raiz: depois do filtro
+        # acima ele apagava 262 pastas enquanto o aviso falava de 4, incluindo
+        # as do .venv que a contagem ignora de propósito. Repetir as exclusões
+        # em PowerShell resolveria o número e criaria uma segunda lista para
+        # manter — que envelheceria na primeira pasta nova.
+        alvos = " ".join(f'"{c.relative_to(RAIZ)}"' for c in sorted(caches))
         avisar(
             f"{len(caches)} pasta(s) __pycache__ com bytecode antigo.",
-            "Apague-as se você reorganizou arquivos: "
-            'Get-ChildItem -Recurse -Directory __pycache__ | Remove-Item -Recurse -Force',
+            f"Apague-as se você reorganizou arquivos: Remove-Item -Recurse -Force {alvos}",
         )
 
     perdido = pacote / "test_nucleo.py"
