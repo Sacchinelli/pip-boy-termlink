@@ -17,6 +17,7 @@ tudo fica em ``%LOCALAPPDATA%``, nada sai da máquina.
 from __future__ import annotations
 
 import threading
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -82,6 +83,40 @@ class Fala:
     autor: str
     tag: str
     texto: str
+
+
+def sessao_em(periodos: Iterable[tuple[int, str, str]], quando: str) -> int | None:
+    """Qual sessão estava acontecendo no instante ``quando``. Sem banco.
+
+    Recebe ``(id, início, fim)`` de cada sessão — o fim sendo a última fala
+    dela — e devolve o id da que contém o instante, ou ``None``.
+
+    É o fio entre os dois bancos, que não têm chave estrangeira um para o
+    outro de propósito. O que torna isto uma RESPOSTA em vez de um palpite é
+    exigir o instante dentro do período fechado, e não apenas depois do
+    começo: uma palavra cuja conversa já saiu do histórico — apagada à mão,
+    ou podada pela retenção — cairia, com a regra frouxa, na sessão anterior
+    que por acaso sobrou, e o jogador abriria uma conversa que nada tem a ver
+    com a palavra que ele clicou. Aqui ela devolve ``None``, e quem chamou
+    diz que não há o que abrir.
+
+    A última fala serve de fim porque é o único carimbo de fechamento que
+    existe: a tabela guarda quando a sessão começou, não quando acabou. Para
+    esta pergunta basta — a anotação de vocabulário é ELA MESMA uma fala, e
+    entra no histórico no mesmo instante em que a palavra entra no caderno.
+
+    O desempate é por ``(início, id)``, e não só pelo início, porque os
+    carimbos têm resolução de UM SEGUNDO: encerrar e recomeçar uma sessão na
+    mesma batida do relógio produz dois períodos idênticos. Desempatando só
+    pelo início, a resposta passava a depender da ordem em que o banco
+    devolveu as linhas — que nenhuma cláusula garante. O id maior é a sessão
+    mais nova, que é a resposta certa quando as duas cabem.
+    """
+    achado: tuple[str, int] | None = None
+    for identificador, inicio, fim in periodos:
+        if inicio <= quando <= fim and (achado is None or (inicio, identificador) > achado):
+            achado = (inicio, identificador)
+    return achado[1] if achado is not None else None
 
 
 class HistoricoStore:
@@ -230,6 +265,48 @@ class HistoricoStore:
             )
             for r in rows
         ]
+
+    def sessao(self, sessao_id: int) -> ResumoDeSessao | None:
+        """Uma sessão pelo id, ou ``None``.
+
+        Existe à parte de ``listar_sessoes`` porque aquela é uma LISTA, com
+        teto: quem chega pelo caderno pede uma sessão específica, que pode ser
+        de meses atrás e estar muito além das sessenta mais recentes. Buscá-la
+        na lista faria o salto funcionar só para o vocabulário novo — e falhar
+        calado justamente no vocabulário antigo, que é o que mais precisa do
+        contexto de volta.
+        """
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT s.id, s.iniciada_em, s.jogo, s.modo, s.nivel, "
+                "COUNT(f.id) AS falas "
+                "FROM sessoes s LEFT JOIN falas f ON f.sessao_id = s.id "
+                "WHERE s.id = ? GROUP BY s.id",
+                (sessao_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return ResumoDeSessao(
+            int(row["id"]), str(row["iniciada_em"]), str(row["jogo"]),
+            str(row["modo"]), str(row["nivel"]), int(row["falas"]),
+        )
+
+    def periodos(self) -> list[tuple[int, str, str]]:
+        """``(id, início, fim)`` de cada sessão, para ``sessao_em``.
+
+        Uma consulta só, e não uma por palavra: o caderno resolve o destino de
+        até 250 cartões de uma vez, e 250 idas ao banco por tecla digitada na
+        busca travariam a janela que a existência desses cartões deveria
+        tornar agradável.
+        """
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT s.id, s.iniciada_em, "
+                "COALESCE(MAX(f.quando), s.iniciada_em) AS fim "
+                "FROM sessoes s LEFT JOIN falas f ON f.sessao_id = s.id "
+                "GROUP BY s.id"
+            ).fetchall()
+        return [(int(r["id"]), str(r["iniciada_em"]), str(r["fim"])) for r in rows]
 
     def falas_de(self, sessao_id: int) -> list[Fala]:
         with self._lock:

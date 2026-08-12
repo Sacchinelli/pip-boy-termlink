@@ -1566,6 +1566,30 @@ class Janela(QWidget):
         self._visor_historico.raise_()
         self._visor_historico.activateWindow()
 
+    def periodos_de_conversa(self) -> list[tuple[int, str, str]]:
+        """``(id, início, fim)`` das sessões gravadas, para casar com uma palavra.
+
+        O caderno usa isto para decidir, de uma vez para todos os cartões
+        visíveis, quais deles têm uma conversa para onde voltar.
+        """
+        try:
+            return self._historico.periodos()
+        except Exception:
+            LOGGER.exception("Períodos do histórico indisponíveis.")
+            return []
+
+    def abrir_conversa(self, sessao_id: int, termo: str = "") -> None:
+        """Abre o histórico na sessão dada, marcando onde ``termo`` foi ensinado."""
+        self.abrir_historico()
+        visor = self._visor_historico
+        if visor is not None and not visor.abrir_por_id(sessao_id, destaque=termo):
+            avisar(
+                self,
+                "Conversa indisponível",
+                "A conversa em que esta palavra foi ensinada não está mais no "
+                "histórico. A palavra continua no caderno.",
+            )
+
     def caderno_mudou(self, aviso: str = "") -> None:
         """Ponto único de reação a uma escrita no caderno, venha de onde vier.
 

@@ -150,6 +150,59 @@ def main() -> int:
     visor._busca.clear()
     aplicacao.processEvents()
     checar("de 2 falas" not in visor._cabecalho.text(), "limpar a busca devolve tudo")
+
+    # -- Do caderno de volta para a conversa em que a palavra nasceu.
+    # A ordem aqui é a de produção: a palavra entra no caderno e SÓ ENTÃO a
+    # anotação vira fala. É o que garante que o fim do período da sessão
+    # nunca fique atrás do instante em que a palavra nasceu.
+    from pipboy.historico import sessao_em
+
+    ghoul, _ = store.registrar("ghoul", "carniçal", "A ghoul.", "Fallout")
+    historico.registrar_fala(sessao, autor="", tag="vocab", texto="＋ ghoul — carniçal")
+
+    destino = sessao_em(janela.periodos_de_conversa(), ghoul.criado_em)
+    checar(destino == sessao, f"a palavra encontra a conversa em que nasceu ({destino})")
+
+    janela.abrir_conversa(sessao, "ghoul")
+    aplicacao.processEvents()
+    visor = janela._visor_historico
+    checar(visor._sessao_aberta == sessao, "o salto abre a conversa certa")
+    checar(visor._destaque == "ghoul", "e leva junto a palavra que trouxe até aqui")
+    checar(not visor.grab().isNull(), "a conversa com a linha destacada desenha")
+    # Trocar de sessão à mão apaga o destaque: ele pertence ao salto, não à
+    # janela — senão a próxima conversa aberta viria marcada sem motivo.
+    visor._abrir_sessao(historico.listar_sessoes()[0])
+    checar(visor._destaque == "", "abrir outra sessão à mão limpa o destaque")
+
+    # O botão do cartão só existe quando há para onde ir. 'wasteland' faz o
+    # papel do vocabulário herdado de versões sem histórico, e ele não pode
+    # virar um botão que não faz nada.
+    #
+    # A data é recuada à força: tudo neste teste acontece no mesmo segundo, e
+    # os carimbos têm essa resolução — sem recuar, 'wasteland' nasceria dentro
+    # da sessão criada logo acima e o caso deixaria de ser o que se quer medir.
+    with store._lock:
+        store._connection.execute(
+            "UPDATE vocabulario SET criado_em = ? WHERE termo = ?",
+            ("2020-01-01T10:00:00-03:00", "wasteland"),
+        )
+        store._connection.commit()
+
+    janela._caderno.atualizar()
+    aplicacao.processEvents()
+    cartoes = {c._entrada.termo: c for c in janela._caderno._cartoes}
+    checar(
+        cartoes["ghoul"].botao_conversa.isEnabled(),
+        "palavra com conversa tem o botão vivo",
+    )
+    checar(
+        not cartoes["wasteland"].botao_conversa.isEnabled(),
+        "palavra sem conversa tem o botão desabilitado, não ausente",
+    )
+    checar(
+        "não está no histórico" in cartoes["wasteland"].botao_conversa.toolTip(),
+        "e o botão desabilitado diz por quê",
+    )
     visor.close()
 
     print("atalhos diretos")

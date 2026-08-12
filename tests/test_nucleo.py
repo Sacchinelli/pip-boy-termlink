@@ -1563,6 +1563,117 @@ def teste_historico() -> None:
     checar(int(dias_marcados) == 1, "o dia de estudo de 400 dias atrás sobrevive à poda")
 
 
+def teste_palavra_ate_a_conversa() -> None:
+    """O fio entre os dois bancos: de uma palavra do caderno até a conversa.
+
+    Não há chave estrangeira entre eles — são separados de propósito —, então
+    o elo é o INSTANTE. O que separa uma resposta de um palpite é exigir o
+    instante dentro do período fechado da sessão: com a regra frouxa ("a
+    última sessão que começou antes"), uma palavra cuja conversa saiu do
+    histórico cairia numa sessão anterior qualquer, e o jogador abriria uma
+    conversa que nada tem a ver com a palavra que clicou.
+    """
+    print("da palavra até a conversa")
+    from datetime import datetime, timedelta
+
+    from pipboy.historico import HistoricoStore, sessao_em
+
+    periodos = [
+        (1, "2026-01-10T20:00:00-03:00", "2026-01-10T20:40:00-03:00"),
+        (2, "2026-01-12T21:00:00-03:00", "2026-01-12T21:30:00-03:00"),
+    ]
+    checar(sessao_em(periodos, "2026-01-10T20:15:00-03:00") == 1, "instante dentro da 1ª sessão")
+    checar(sessao_em(periodos, "2026-01-12T21:29:59-03:00") == 2, "instante dentro da 2ª sessão")
+    checar(sessao_em(periodos, "2026-01-10T20:00:00-03:00") == 1, "o começo conta como dentro")
+    checar(sessao_em(periodos, "2026-01-10T20:40:00-03:00") == 1, "o fim também conta")
+    checar(sessao_em(periodos, "2026-01-11T12:00:00-03:00") is None, "entre sessões, nenhuma")
+    checar(sessao_em(periodos, "2026-01-09T12:00:00-03:00") is None, "antes de tudo, nenhuma")
+    checar(sessao_em(periodos, "2026-01-20T12:00:00-03:00") is None, "depois de tudo, nenhuma")
+    checar(sessao_em([], "2026-01-10T20:15:00-03:00") is None, "sem sessões, nenhuma")
+    # A regra frouxa que este teste existe para impedir: a palavra de uma
+    # conversa apagada NÃO pode cair na conversa anterior que sobrou.
+    checar(
+        sessao_em(periodos[:1], "2026-01-12T21:15:00-03:00") is None,
+        "conversa apagada não empurra a palavra para a sessão anterior",
+    )
+    # Sessões sobrepostas não deveriam existir, mas se existirem a mais
+    # recente é a resposta — não a primeira que a varredura encontrar.
+    sobrepostas = [
+        (1, "2026-02-01T10:00:00-03:00", "2026-02-01T12:00:00-03:00"),
+        (2, "2026-02-01T11:00:00-03:00", "2026-02-01T13:00:00-03:00"),
+    ]
+    checar(sessao_em(sobrepostas, "2026-02-01T11:30:00-03:00") == 2, "empate resolve pela mais recente")
+    # Carimbo tem resolução de UM SEGUNDO: encerrar e recomeçar na mesma
+    # batida produz períodos idênticos. A resposta não pode depender da ordem
+    # em que o banco devolveu as linhas — nenhuma cláusula a garante.
+    identicos = [
+        (7, "2026-03-01T09:00:00-03:00", "2026-03-01T09:00:00-03:00"),
+        (8, "2026-03-01T09:00:00-03:00", "2026-03-01T09:00:00-03:00"),
+    ]
+    checar(
+        sessao_em(identicos, "2026-03-01T09:00:00-03:00") == 8
+        and sessao_em(list(reversed(identicos)), "2026-03-01T09:00:00-03:00") == 8,
+        "períodos idênticos resolvem pela sessão mais nova, em qualquer ordem",
+    )
+
+    # E o caminho de verdade, ponta a ponta, com os dois bancos reais.
+    store = VocabularyStore(Path(tempfile.mkdtemp()) / "fio.sqlite3")
+    hist = HistoricoStore(Path(tempfile.mkdtemp()) / "fio-h.sqlite3")
+
+    sessao = hist.iniciar_sessao(jogo="Fallout", modo="Tutor Conversacional")
+    hist.registrar_fala(sessao, autor="VOCÊ", tag="usuario", texto="o que é wasteland?")
+    entrada, _ = store.registrar("wasteland", "terra devastada", "Welcome.", "Fallout")
+    hist.registrar_fala(
+        sessao, autor="", tag="vocab", texto="＋ wasteland — terra devastada"
+    )
+    checar(entrada.criado_em != "", "a entrada carrega o instante em que nasceu")
+
+    achada = sessao_em(hist.periodos(), entrada.criado_em)
+    checar(achada == sessao, f"a palavra aponta para a sessão em que foi ensinada ({achada})")
+    checar(hist.sessao(sessao) is not None, "a sessão é recuperável pelo id")
+    checar(hist.sessao(9999) is None, "id inexistente devolve None")
+
+    # Reencontrar a palavra numa sessão POSTERIOR não muda o nascimento dela:
+    # o botão do caderno leva à conversa que a ensinou, não à última em que
+    # ela passou.
+    #
+    # A segunda sessão é empurrada uma hora para a frente à força. Sem isso,
+    # tudo neste teste cai no MESMO SEGUNDO — os carimbos têm essa resolução —
+    # e as duas sessões ficariam com períodos idênticos, o que não é o cenário
+    # que se quer medir aqui (esse já está coberto acima, com `identicos`).
+    outra = hist.iniciar_sessao(jogo="Elden Ring")
+    hist.registrar_fala(outra, autor="VOCÊ", tag="usuario", texto="wasteland de novo")
+    with hist._lock:
+        depois = (
+            datetime.fromisoformat(entrada.criado_em) + timedelta(hours=1)
+        ).isoformat(timespec="seconds")
+        hist._connection.execute(
+            "UPDATE sessoes SET iniciada_em = ? WHERE id = ?", (depois, outra)
+        )
+        hist._connection.execute(
+            "UPDATE falas SET quando = ? WHERE sessao_id = ?", (depois, outra)
+        )
+        hist._connection.commit()
+
+    de_novo, nova = store.registrar("wasteland", "ermo", jogo="Elden Ring")
+    checar(not nova and de_novo.criado_em == entrada.criado_em, "o reencontro não move o nascimento")
+    checar(
+        sessao_em(hist.periodos(), de_novo.criado_em) == sessao,
+        "e o fio continua apontando para a primeira conversa",
+    )
+
+    # Sessão apagada: a palavra fica, o destino some — e some sem apontar
+    # para o lugar errado.
+    hist.remover_sessao(sessao)
+    checar(
+        sessao_em(hist.periodos(), entrada.criado_em) is None,
+        "apagada a conversa, a palavra não tem mais para onde voltar",
+    )
+    checar(store.total() == 1, "e a palavra continua no caderno")
+    store.close()
+    hist.close()
+
+
 def teste_banco() -> None:
     """Modo de diário das conexões.
 
@@ -1718,6 +1829,7 @@ def main() -> int:
         teste_sons,
         teste_banco,
         teste_historico,
+        teste_palavra_ate_a_conversa,
         teste_deteccao,
         teste_crash,
     ):

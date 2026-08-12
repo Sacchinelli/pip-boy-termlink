@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
     QDialog,
@@ -51,6 +51,8 @@ class JanelaHistorico(QDialog):
         self._sessao_aberta: int | None = None
         self._falas_abertas: list[Fala] = []
         self._titulo_sessao = ""
+        # Palavra que trouxe o jogador até aqui, quando ele veio pelo caderno.
+        self._destaque = ""
 
         self.setWindowTitle("Histórico de sessões")
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
@@ -228,8 +230,22 @@ class JanelaHistorico(QDialog):
             if widget is not None:
                 widget.deleteLater()
 
-    def _abrir_sessao(self, resumo: ResumoDeSessao) -> None:
+    def abrir_por_id(self, sessao_id: int, *, destaque: str = "") -> bool:
+        """Abre uma sessão pelo id. Devolve se ela existia.
+
+        É a porta pela qual o caderno entra: clicar numa palavra abre a
+        conversa em que ela foi ensinada, com ``destaque`` marcando a linha em
+        que aquilo aconteceu.
+        """
+        resumo = self._historico.sessao(sessao_id)
+        if resumo is None:
+            return False
+        self._abrir_sessao(resumo, destaque=destaque)
+        return True
+
+    def _abrir_sessao(self, resumo: ResumoDeSessao, *, destaque: str = "") -> None:
         self._sessao_aberta = resumo.id
+        self._destaque = destaque
         self._botao_apagar.setEnabled(True)
         partes = [p for p in (resumo.jogo, resumo.modo, resumo.nivel) if p]
         self._titulo_sessao = (
@@ -261,6 +277,8 @@ class JanelaHistorico(QDialog):
             self._cabecalho.setText(self._titulo_sessao)
 
         cores = {"usuario": t.info, "assistente": t.primary, "vocab": t.accent}
+        marcado: QWidget | None = None
+        alvo_destaque = self._destaque.lower()
         for fala in visiveis:
             bloco = QLabel(
                 f"{fala.autor or fala.tag.upper()} — {fala.texto}"
@@ -271,10 +289,28 @@ class JanelaHistorico(QDialog):
             bloco.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             bloco.setFont(janela.fonte("corpo"))
             cor = cores.get(fala.tag, t.secondary)
-            bloco.setStyleSheet(
-                f"color: {design.garantir_contraste(cor, t.screen)};"
-                " background: transparent;"
+
+            # A linha que trouxe o jogador até aqui: a anotação de vocabulário
+            # daquela palavra. Só a PRIMEIRA — uma palavra reencontrada tem
+            # várias, e a que interessa é a que a ensinou.
+            e_o_destaque = (
+                marcado is None
+                and alvo_destaque != ""
+                and fala.tag == "vocab"
+                and alvo_destaque in fala.texto.lower()
             )
+            if e_o_destaque:
+                marcado = bloco
+                fundo = design.misturar(t.screen, t.accent, 0.20)
+                bloco.setStyleSheet(
+                    f"color: {design.garantir_contraste(cor, fundo)};"
+                    f" background: {fundo}; border-radius: 4px; padding: 6px 9px;"
+                )
+            else:
+                bloco.setStyleSheet(
+                    f"color: {design.garantir_contraste(cor, t.screen)};"
+                    " background: transparent;"
+                )
             self._pilha_falas.insertWidget(self._pilha_falas.count() - 1, bloco)
 
         if alvo and not visiveis:
@@ -286,7 +322,16 @@ class JanelaHistorico(QDialog):
                 " background: transparent;"
             )
             self._pilha_falas.insertWidget(self._pilha_falas.count() - 1, vazio)
+
         self._rolagem_falas.verticalScrollBar().setValue(0)
+        if marcado is not None:
+            # Depois que o layout existir: antes disso o widget não tem
+            # posição, e rolar até ele não faz nada. A margem generosa deixa a
+            # linha marcada com conversa em volta — que é o motivo INTEIRO de
+            # abrir a conversa em vez de só mostrar a palavra.
+            QTimer.singleShot(
+                0, lambda w=marcado: self._rolagem_falas.ensureWidgetVisible(w, 0, 140)
+            )
 
     def _apagar_sessao(self) -> None:
         if self._sessao_aberta is None:

@@ -87,6 +87,10 @@ class Entrada:
     erros: int = 0
     intervalo_dias: int = 0
     proxima_revisao: str = ""
+    # Quando a palavra foi ensinada pela PRIMEIRA vez. É o que permite achar a
+    # conversa em que ela nasceu: os dois bancos são separados de propósito e
+    # não há chave estrangeira entre eles, então o instante é o único fio.
+    criado_em: str = ""
 
     @property
     def dias_ate_revisao(self) -> int:
@@ -216,7 +220,7 @@ class VocabularyStore:
                     (termo, traducao, exemplo, jogo, agora, agora),
                 )
                 self._connection.commit()
-                return Entrada(termo, traducao, exemplo, jogo, 1, agora), True
+                return Entrada(termo, traducao, exemplo, jogo, 1, agora, criado_em=agora), True
 
             encontros = int(existente["encontros"]) + 1
             # Só sobrescreve exemplo/tradução quando o novo dado tem conteúdo.
@@ -246,6 +250,10 @@ class VocabularyStore:
                     jogo or existente["jogo"],
                     encontros,
                     agora,
+                    # O nascimento é o da PRIMEIRA vez, e o reencontro não o
+                    # move: é ele que aponta para a conversa em que a palavra
+                    # foi ensinada.
+                    criado_em=str(existente["criado_em"]),
                 ),
                 False,
             )
@@ -282,6 +290,7 @@ class VocabularyStore:
             r["termo"], r["traducao"], r["exemplo"], r["jogo"], r["encontros"],
             r["visto_em"], int(r["acertos"]), int(r["erros"]),
             int(r["intervalo_dias"]), str(r["proxima_revisao"]),
+            str(r["criado_em"]),
         )
 
     # ------------------------------------------------- Repetição espaçada

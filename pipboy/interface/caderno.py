@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import design
+from ..historico import sessao_em
 from ..vocabulary import (
     FILTRO_DIFICEIS,
     FILTRO_DOMINADAS,
@@ -99,6 +100,7 @@ class CartaoTermo(QFrame):
         *,
         janela: Any,
         ao_remover: Callable[[Entrada], None],
+        sessao: int | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -135,6 +137,32 @@ class CartaoTermo(QFrame):
             " background: transparent;"
         )
         topo.addWidget(selo)
+
+        # De volta à conversa em que a palavra nasceu. O caderno guarda o QUE
+        # foi ensinado; o histórico guarda o EM QUE MOMENTO — e a palavra sem
+        # o contexto em que ela apareceu é metade da memória. Os dois bancos
+        # já tinham tudo para fechar esse arco e não havia porta entre eles.
+        #
+        # O botão só existe quando há conversa: desabilitado, ele diz por quê,
+        # em vez de simplesmente não reagir ao clique.
+        self.botao_conversa = conversa = Botao(
+            "◷", variante="sutil", paleta=janela.paleta, forma=self._forma
+        )
+        conversa.setFont(janela.fonte("corpo_forte"))
+        conversa.setFixedSize(28, 28)
+        conversa.setEnabled(sessao is not None)
+        if sessao is None:
+            conversa.setToolTip(
+                "A conversa em que esta palavra apareceu não está no histórico."
+            )
+            conversa.setAccessibleName(f"Conversa de {entrada.termo} indisponível")
+        else:
+            conversa.setToolTip(f"Abrir a conversa em que “{entrada.termo}” foi ensinada")
+            conversa.setAccessibleName(f"Abrir a conversa de {entrada.termo}")
+            conversa.clicked.connect(
+                lambda _=False, s=sessao: janela.abrir_conversa(s, entrada.termo)
+            )
+        topo.addWidget(conversa)
 
         # "×" (U+00D7, Latin-1) e não "✕" (U+2715, Dingbats): o segundo não
         # existe em Consolas nem em Georgia — as fontes de metade dos temas —
@@ -535,8 +563,16 @@ class JanelaCaderno(QDialog):
             cartao.setParent(None)
             cartao.deleteLater()
         self._cartoes.clear()
+        # Os períodos vêm UMA vez para a lista inteira. Perguntar por cartão
+        # seriam 250 consultas a cada tecla digitada na busca.
+        periodos = self._janela.periodos_de_conversa()
         for entrada in entradas:
-            cartao = CartaoTermo(entrada, janela=self._janela, ao_remover=self._remover)
+            cartao = CartaoTermo(
+                entrada,
+                janela=self._janela,
+                ao_remover=self._remover,
+                sessao=sessao_em(periodos, entrada.criado_em) if entrada.criado_em else None,
+            )
             self._fluxo.insertWidget(self._fluxo.count() - 1, cartao)
             self._cartoes.append(cartao)
         self.rolagem.verticalScrollBar().setValue(0)
