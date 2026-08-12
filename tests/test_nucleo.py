@@ -293,6 +293,112 @@ def teste_portao_de_voz() -> None:
     checar(not g.fechar(), "fechar() de novo não inventa um segundo fim de fala")
 
 
+def teste_piso_de_ruido() -> None:
+    """O limiar mede a sala em vez de presumi-la.
+
+    Um limiar fixo aposta que toda sala se parece com a sala em que ele foi
+    escolhido. As duas formas de perder essa aposta são caras e SILENCIOSAS —
+    tudo continua funcionando, só que sem economia nenhuma de um lado, ou
+    comendo a pergunta do outro. Os dois cenários abaixo são exatamente essas
+    duas apostas perdidas, medidas com e sem calibração.
+    """
+    print("piso de ruído")
+    from pipboy.audio import PisoDeRuido, PortaoDeVoz
+    from pipboy.constants import (
+        VOICE_GATE_THRESHOLD,
+        VOICE_GATE_THRESHOLD_MAX,
+        VOICE_GATE_THRESHOLD_MIN,
+    )
+
+    # --- O estimador, isolado ---
+    piso = PisoDeRuido(janela=100)
+    checar(not piso.maduro and piso.piso == -1.0, "sem amostra, o piso não se pronuncia")
+    checar(piso.limiar == VOICE_GATE_THRESHOLD, "e o limiar é o valor de partida")
+
+    for _ in range(24):
+        piso.observar(0.004)
+    checar(not piso.maduro, "24 blocos (1,5 s) ainda não bastam para calibrar")
+    piso.observar(0.004)
+    checar(piso.maduro, "um quarto da janela amadurece a estimativa")
+
+    # Sala tratada: o piso desce, mas o batente impede que ele chegue ao ruído
+    # do próprio microfone, onde qualquer estalo abriria o portão.
+    silenciosa = PisoDeRuido(janela=100)
+    for _ in range(100):
+        silenciosa.observar(0.002)
+    checar(abs(silenciosa.piso - 0.002) < 1e-9, "sala silenciosa: piso em 0.002")
+    checar(silenciosa.limiar == VOICE_GATE_THRESHOLD_MIN, "o batente de baixo segura o limiar")
+
+    # Sala barulhenta: o limiar sobe, mas nunca acima da fala normal.
+    barulhenta = PisoDeRuido(janela=100)
+    for _ in range(100):
+        barulhenta.observar(0.30)
+    checar(barulhenta.limiar == VOICE_GATE_THRESHOLD_MAX, "o batente de cima protege a fala")
+
+    # A faixa útil, onde nenhum batente manda: o fator multiplica o fundo.
+    media = PisoDeRuido(janela=100, fator=2.0, minimo=0.0, maximo=1.0)
+    for _ in range(100):
+        media.observar(0.02)
+    checar(abs(media.limiar - 0.04) < 1e-9, "no meio da faixa, limiar = fundo × fator")
+
+    # O ponto que sustenta a ideia toda: fala tem buraco. Uma janela com 80%
+    # de fala ainda estima o FUNDO, porque o percentil baixo cai nas pausas.
+    falante = PisoDeRuido(janela=100)
+    for i in range(100):
+        falante.observar(0.005 if i % 5 == 0 else 0.40)
+    checar(
+        abs(falante.piso - 0.005) < 1e-9,
+        f"com 80% de fala na janela, o piso ainda acha o fundo ({falante.piso:.3f})",
+    )
+
+    # --- Aposta perdida nº 1: sala barulhenta, portão travado aberto ---
+    def correr(fundo: float, fala: float, *, adaptativo: bool) -> tuple[float, int]:
+        g = PortaoDeVoz(pre_roll=0, cauda=0.0, adaptativo=adaptativo)
+        transmitidos = 0
+        for i in range(1000):
+            falando = 400 <= i < 440 or 700 <= i < 740
+            transmitidos += len(g.avaliar(b"\x00\x00", fala if falando else fundo, i * 0.064))
+        return g.economia, transmitidos
+
+    # Ventilador, teclado mecânico, ganho de microfone alto: o fundo passa dos
+    # 0.035 sozinho. O portão fixo nunca fecha e economiza ZERO.
+    economia_fixa, _ = correr(0.05, 0.30, adaptativo=False)
+    economia_viva, _ = correr(0.05, 0.30, adaptativo=True)
+    checar(economia_fixa == 0.0, f"sala barulhenta: o limiar fixo não economiza nada ({economia_fixa:.0%})")
+    checar(
+        economia_viva > 0.80,
+        f"calibrado, o mesmo material economiza {economia_viva:.0%} dos blocos",
+    )
+
+    # --- Aposta perdida nº 2: sala silenciosa, microfone de ganho baixo ---
+    # A fala inteira acontece ABAIXO do limiar fixo. É a falha cara: o portão
+    # não gasta token nenhum porque comeu a pergunta.
+    _, transmitidos_fixo = correr(0.002, 0.030, adaptativo=False)
+    _, transmitidos_vivo = correr(0.002, 0.030, adaptativo=True)
+    checar(
+        transmitidos_fixo == 0,
+        f"microfone fraco: o limiar fixo come a pergunta inteira ({transmitidos_fixo} blocos)",
+    )
+    checar(
+        transmitidos_vivo >= 80,
+        f"calibrado, as duas perguntas passam ({transmitidos_vivo} blocos de 80)",
+    )
+
+    # E a garantia que vale acima de tudo: por mais alta que a sala esteja, o
+    # limiar nunca sobe até onde a fala normal (>0.1) deixaria de passar.
+    ensurdecedora = PortaoDeVoz(pre_roll=0, cauda=0.0)
+    for i in range(400):
+        ensurdecedora.avaliar(b"\x00\x00", 0.35, i * 0.064)
+    checar(
+        ensurdecedora.limiar <= VOICE_GATE_THRESHOLD_MAX < 0.1,
+        f"o limiar calibrado nunca passa do teto ({ensurdecedora.limiar:.3f})",
+    )
+    checar(
+        ensurdecedora.avaliar(b"\x11\x11", 0.12, 400 * 0.064) == [b"\x11\x11"],
+        "e fala normal continua passando na sala mais barulhenta possível",
+    )
+
+
 def teste_economia_com_jogo() -> None:
     """A conta que justifica a janela retroativa do áudio do jogo.
 
@@ -1549,6 +1655,7 @@ def main() -> int:
         teste_vocabulario,
         teste_portao_de_eco,
         teste_portao_de_voz,
+        teste_piso_de_ruido,
         teste_sinal_de_atividade,
         teste_economia_com_jogo,
         teste_caderno_navegavel,

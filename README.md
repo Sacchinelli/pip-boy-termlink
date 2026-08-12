@@ -67,7 +67,7 @@ O código passa limpo por três verificadores, e a suíte de testes cobre o núc
 ```powershell
 py -m ruff check .                                # lint (zero apontamentos)
 py -m mypy pipboy pip_boy.py diagnostico.py       # tipos, modo estrito
-py tests/test_nucleo.py                           # ~290 testes sem hardware
+py tests/test_nucleo.py                           # ~305 testes sem hardware
 py tests/test_interface.py                        # a interface inteira, sem tela
 ```
 
@@ -209,7 +209,7 @@ pip-boy-termlink/
 │   ├── profiles.py       # Personas, níveis, modos e o prompt
 │   ├── events.py         # Mensagens entre threads
 │   ├── dsp.py            # Reamostragem, mixagem, medição (NumPy)
-│   ├── audio.py          # Dispositivos, captura, reprodução, loopback
+│   ├── audio.py          # Dispositivos, captura, portão de voz, loopback
 │   ├── vocabulary.py     # Banco SQLite e exportação
 │   ├── tools.py          # Function calling
 │   ├── session.py        # Sessão Live, reconexão, transcrição
@@ -250,6 +250,15 @@ pip-boy-termlink/
 Áudio consome cerca de 25 tokens por segundo em cada direção. Uma sessão de uma hora com conversa constante fica na casa das dezenas de milhares de tokens. O rodapé da janela mostra o total acumulado em tempo real.
 
 **O microfone só é transmitido quando há som.** Um portão de voz local mede o nível de cada bloco e retém o que estiver abaixo do limiar, com pré-rolo (para não cortar a primeira sílaba) e cauda (para não confundir pausa entre palavras com fim de fala). Antes disso, uma sessão aberta numa sala silenciosa gastava cerca de 90 mil tokens por hora sem ninguém perguntar nada. Numa conversa esparsa a economia fica em torno de 60%.
+
+**E o limiar mede a sua sala, em vez de presumi-la.** Um número fixo aposta que toda sala se parece com a sala em que ele foi escolhido, e as duas formas de perder essa aposta são caras — e mudas, porque nos dois casos tudo continua *funcionando*:
+
+| Sua sala | Com limiar fixo | Calibrado |
+| --- | --- | --- |
+| Ventilador, teclado mecânico, ganho de microfone alto | O fundo passa do limiar sozinho, o portão nunca fecha: **0% de economia** | **88%** |
+| Silenciosa, microfone de ganho baixo | A fala inteira fica abaixo do limiar: **a pergunta é comida** | as perguntas passam inteiras |
+
+Os dois números saem de `py tests/test_nucleo.py`, no mesmo material. O piso de ruído é estimado por estatística de mínimos — a janela dos últimos dez segundos, ordenada, e um percentil baixo dela. Funciona porque fala humana tem buraco: entre palavras, entre sílabas, entre frases, muito mais de 10% dos blocos de uma janela de dez segundos são fundo, mesmo com alguém falando sem parar. O limiar resultante tem dois batentes, e o de cima é o que importa: ele fica **abaixo do nível da fala normal**, de modo que uma sala barulhenta demais faz o portão desistir de economizar em vez de cortar a pergunta. Perder tokens se recupera; perder a pergunta, não.
 
 **Com "Ouvir o jogo" ligado, o som do jogo é contexto retroativo, não transmissão contínua.** O portão media o sinal já misturado — e jogo em silêncio não existe, então ele ficava escancarado a sessão inteira e devolvia exatamente os 90 mil tokens por hora que existe para evitar. Só que ninguém liga essa opção para o modelo *escutar* o jogo o tempo todo: liga para poder perguntar "o que ele acabou de dizer?". Agora o portão volta a decidir pelo **microfone**, e os últimos dez segundos de jogo ficam guardados localmente, de graça, seguindo junto com a pergunta quando ela vier. A medição está em `py tests/test_nucleo.py`: num trecho de três minutos com o jogo tocando sem parar e três perguntas curtas, **564 blocos transmitidos contra 3.000 — 81% de economia**, sem perder uma pergunta sequer.
 
