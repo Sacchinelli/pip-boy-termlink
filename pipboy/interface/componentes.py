@@ -401,6 +401,82 @@ class CampoSelecao(QComboBox):
         pintor.end()
 
 
+def css_campo_selecao(tema: Any, raio: int, rgba: Callable[[str, float], str]) -> str:
+    """Folha de estilo do ``CampoSelecao``, para quem hospedar um.
+
+    Mora ao lado do widget porque a pele é dele, não da janela. Ela nasceu
+    dentro da folha da janela principal, e quando o caderno passou a ter um
+    seletor a alternativa era copiar quarenta linhas de CSS — com os
+    comentários que explicam cada armadilha — para uma segunda folha, onde
+    envelheceriam separadas.
+
+    ``rgba`` é injetado porque a translucidez das superfícies serve à
+    atmosfera pintada atrás delas, e quem sabe se há atmosfera atrás é o
+    hospedeiro: a janela principal tem cenário vivo, um diálogo pode não ter.
+    """
+    return f"""
+        QComboBox {{
+            background: {rgba(tema.surface_alta, 0.92)}; color: {tema.primary};
+            border: 1px solid transparent; border-radius: {raio}px;
+            padding: 6px 30px 6px 12px;
+        }}
+        QComboBox:hover, QComboBox:focus {{ border-color: {tema.border_forte}; }}
+        /* Travado, não apagado: o texto continua legível (é o que diz o que
+           está valendo na sessão) e quem comunica o travamento é a superfície,
+           que perde o preenchimento e passa a mostrar só o contorno. Meia dúzia
+           de contornos tracejados empilhados numa coluna lê como formulário
+           quebrado; o traço contínuo diz a mesma coisa sem o ruído. */
+        QComboBox:disabled {{
+            color: {tema.text_disabled};
+            background: {rgba(tema.surface_alta, 0.30)};
+            border: 1px solid {tema.border};
+        }}
+        QComboBox::drop-down {{ border: none; width: 28px; }}
+        QComboBox QAbstractItemView {{
+            background: {tema.surface_alta}; color: {tema.primary};
+            border: 1px solid {tema.border}; border-radius: {raio}px;
+            outline: none; padding: 4px;
+        }}
+        /* O item precisa ser estilizado NOMINALMENTE. Declarar apenas
+           'selection-background-color' na lista não basta: o popup não detém o
+           foco de teclado enquanto é desenhado, e nesse estado o Qt resolve o
+           destaque pelo grupo de paleta *Inactive* — que no Windows é um cinza
+           do sistema. A linha escolhida saía lavada, com o cinza por baixo de
+           um texto pensado para o realce do tema. Com a regra ::item o estado
+           é nosso, ativo ou não. */
+        /* ESCOLHIDO e SOB O CURSOR são coisas diferentes e precisam parecer
+           diferentes. Estavam com o mesmo preenchimento cheio de acento, então
+           a lista mostrava dois blocos amarelos idênticos e não dizia qual era
+           o valor atual. Além disso, uma faixa sólida de ponta a ponta é o
+           tratamento de lista do Windows 95.
+
+           Agora: o cursor apenas ELEVA a linha, em cinza, sem cor nenhuma —
+           passar o mouse não é uma decisão. O valor escolhido ganha uma barra
+           de acento na margem e o texto na cor do acento, com só um véu de
+           fundo. A barra transparente em TODOS os itens reserva o espaço, para
+           que a linha escolhida não pule 3 px para o lado. */
+        QComboBox QAbstractItemView::item {{
+            padding: 7px 10px; border-radius: {max(2, raio - 2)}px;
+            color: {tema.primary}; background: transparent;
+            border-left: 3px solid transparent;
+        }}
+        QComboBox QAbstractItemView::item:hover {{
+            background: {design.elevar(tema.screen, 0.18, tema.primary)};
+        }}
+        QComboBox QAbstractItemView::item:selected {{
+            background: {design.misturar(tema.surface_alta, tema.accent, 0.13)};
+            color: {design.garantir_contraste(
+                tema.accent, design.misturar(tema.surface_alta, tema.accent, 0.13))};
+            border-left: 3px solid {tema.accent};
+        }}
+        QComboBox QAbstractItemView::item:selected:hover {{
+            background: {design.misturar(tema.surface_alta, tema.accent, 0.22)};
+            color: {design.garantir_contraste(
+                tema.accent, design.misturar(tema.surface_alta, tema.accent, 0.22))};
+        }}
+    """
+
+
 # ------------------------------------------------------------------- Medidor
 class Medidor(QWidget):
     """Medidor de nível com balística de VU e brilho aditivo nas barras vivas."""
@@ -415,10 +491,11 @@ class Medidor(QWidget):
         self._pico = 0.0
         self._pico_em = 0.0
         self._nivel_alvo = 0.0
+        self._limiar = 0.0
         self._ativo = False
         self._cores = {
             "primary": "#4dff7a", "accent": "#ffb000",
-            "alert": "#ff5c5c", "apagada": "#1c4a2c",
+            "alert": "#ff5c5c", "apagada": "#1c4a2c", "limiar": "#7f8c8d",
         }
         self.setFixedSize(
             design.MEDIDOR_BARRAS * (design.MEDIDOR_LARGURA_BARRA + design.MEDIDOR_ESPACO_BARRA),
@@ -434,7 +511,24 @@ class Medidor(QWidget):
         self.update()
 
     def definir_nivel(self, nivel: float) -> None:
-        self._nivel_alvo = nivel
+        # A conversão para a régua acontece na ENTRADA, e não na pintura, para
+        # que a balística (queda e retenção de pico) integre em unidades de
+        # tela. Convertida só na hora de desenhar, a queda constante de
+        # ``QUEDA`` viraria um tombo acelerado no alto da régua e uma lesma no
+        # pé — a mesma velocidade de sinal parecendo três velocidades de tinta.
+        self._nivel_alvo = design.escala_do_medidor(nivel)
+
+    def definir_limiar(self, limiar: float) -> None:
+        """Onde o portão de voz abre, na mesma régua do nível. 0.0 esconde.
+
+        É o que transforma o medidor de enfeite em diagnóstico: enquanto o
+        limiar era invisível, "estou falando e ele não me ouve" não tinha como
+        ser respondido olhando a tela.
+        """
+        novo = design.escala_do_medidor(limiar) if limiar > 0.0 else 0.0
+        if abs(novo - self._limiar) > 0.005:
+            self._limiar = novo
+            self.update()
 
     def definir_ativo(self, ativo: bool) -> None:
         """Liga ou apaga o medidor conforme exista sessão.
@@ -490,6 +584,17 @@ class Medidor(QWidget):
                 )
             pintor.end()
             return
+
+        # O risco do limiar vai ANTES das barras e cai numa FOLGA entre elas:
+        # atravessado por cima do desenho ele leria como defeito de pintura, e
+        # a folga é o único lugar da régua onde uma linha vertical não disputa
+        # espaço com nada. À esquerda dele o portão retém; à direita, transmite.
+        if self._limiar > 0.0:
+            barra_limiar = round(self._limiar * design.MEDIDOR_BARRAS)
+            if 0 < barra_limiar < design.MEDIDOR_BARRAS:
+                x = barra_limiar * passo - design.MEDIDOR_ESPACO_BARRA / 2.0
+                pintor.setBrush(QColor(self._cores["limiar"]))
+                pintor.drawRect(QRectF(x - 0.5, 0.0, 1.0, base + 2.0))
 
         for i in range(design.MEDIDOR_BARRAS):
             fracao = i / (design.MEDIDOR_BARRAS - 1)

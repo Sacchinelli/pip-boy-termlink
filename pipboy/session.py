@@ -222,6 +222,17 @@ class LiveSessionWorker:
         capture = self._audio.capture if self._audio else None
         return capture.last_level if capture else 0.0
 
+    @property
+    def input_threshold(self) -> float:
+        """Limiar que o portão de voz está exigindo agora; 0.0 sem captura.
+
+        Sobe até a interface pelo mesmo caminho do nível porque é com ele que
+        faz sentido: os dois desenham no mesmo medidor, e é a distância entre
+        eles que responde "por que a minha pergunta não está sendo enviada?".
+        """
+        capture = self._audio.capture if self._audio else None
+        return capture.portao_de_voz.limiar if capture else 0.0
+
     # -------------------------------------------------------------- Eventos
 
     def _log(self, text: str, tag: Tag = Tag.ASSISTENTE, autor: str = "") -> None:
@@ -247,7 +258,12 @@ class LiveSessionWorker:
         )
 
     def _on_vocab(self, termo: str, traducao: str, nova: bool) -> None:
-        prefixo = "＋" if nova else "↻"
+        # "⊕" (U+2295) e não "＋" (U+FF0B, o mais largo): o segundo é da forma
+        # FULLWIDTH, feita para tipografia CJK, e não existe em NENHUMA das
+        # doze fontes que os dez temas usam — a anotação de palavra nova saía
+        # com uma caixinha na frente em todos eles. É a mesma armadilha do "✕",
+        # e agora `py ferramentas/verificar_glifos.py` a pega sozinho.
+        prefixo = "⊕" if nova else "↻"
         self._log(f"{prefixo} {termo} — {traducao}", Tag.VOCAB)
         self._publish(
             UiEvent(UiEventKind.VOCAB_ADDED, session_id=self.session_id, payload=self._store.total())

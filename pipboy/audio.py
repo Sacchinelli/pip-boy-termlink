@@ -42,8 +42,13 @@ from .constants import (
     OUTPUT_SAMPLE_RATE,
     VOICE_GATE_GAME_CONTEXT_BLOCKS,
     VOICE_GATE_HANGOVER_SECONDS,
+    VOICE_GATE_NOISE_FACTOR,
+    VOICE_GATE_NOISE_PERCENTILE,
+    VOICE_GATE_NOISE_WINDOW_BLOCKS,
     VOICE_GATE_PREROLL_BLOCKS,
     VOICE_GATE_THRESHOLD,
+    VOICE_GATE_THRESHOLD_MAX,
+    VOICE_GATE_THRESHOLD_MIN,
 )
 
 LOGGER = logging.getLogger("pip_boy.audio")
@@ -204,6 +209,75 @@ class Playback:
             self._stream.close()
 
 
+class PisoDeRuido:
+    """Quanto barulho esta sala faz quando ninguém está falando.
+
+    Estatística de mínimos: a janela dos últimos segundos, ordenada, e o
+    percentil baixo dela. O truque todo está em por que isso funciona —
+    fala humana tem buraco. Entre palavras, entre sílabas, entre frases: numa
+    janela de dez segundos, muito mais de 10% dos blocos são fundo mesmo com
+    alguém falando sem parar. O percentil baixo cai justamente nesses buracos,
+    e um pico de fala não move a estimativa porque ele mora no topo da ordem.
+
+    Por isso a janela recebe TODOS os blocos, inclusive os que o portão está
+    transmitindo. Aprender apenas do que o portão recusou parece mais
+    disciplinado e produz um impasse: a sala fica barulhenta, o portão trava
+    aberto, nada mais é recusado, nada mais é aprendido, e o portão fica
+    aberto para sempre — exatamente o defeito que este objeto veio corrigir.
+
+    Enquanto a janela não junta amostra bastante, ``limiar`` devolve o valor
+    de partida. Um portão que se calibra com meio segundo de sala é um portão
+    que se calibra com o pigarro de quem sentou.
+    """
+
+    def __init__(
+        self,
+        *,
+        inicial: float = VOICE_GATE_THRESHOLD,
+        janela: int = VOICE_GATE_NOISE_WINDOW_BLOCKS,
+        percentil: float = VOICE_GATE_NOISE_PERCENTILE,
+        fator: float = VOICE_GATE_NOISE_FACTOR,
+        minimo: float = VOICE_GATE_THRESHOLD_MIN,
+        maximo: float = VOICE_GATE_THRESHOLD_MAX,
+    ) -> None:
+        self._inicial = inicial
+        self._percentil = min(1.0, max(0.0, percentil))
+        self._fator = fator
+        self._minimo = minimo
+        self._maximo = maximo
+        self._janela: deque[float] = deque(maxlen=max(1, janela))
+        # Um quarto da janela ≈ 2,5 s: tempo de a sala se apresentar, curto o
+        # bastante para a calibração valer já na primeira pergunta.
+        self._amostras_minimas = max(1, max(1, janela) // 4)
+
+    def observar(self, nivel: float) -> None:
+        self._janela.append(max(0.0, nivel))
+
+    @property
+    def maduro(self) -> bool:
+        """Já há amostra suficiente para o piso valer mais que o palpite?"""
+        return len(self._janela) >= self._amostras_minimas
+
+    @property
+    def piso(self) -> float:
+        """Nível de fundo estimado. ``-1.0`` enquanto a janela não amadurece."""
+        if not self.maduro:
+            return -1.0
+        ordenados = sorted(self._janela)
+        # Índice truncado e preso ao fim: com o percentil em 1.0, ou com a
+        # janela pequena, ele apontaria uma casa além do último elemento.
+        indice = min(len(ordenados) - 1, int(len(ordenados) * self._percentil))
+        return ordenados[indice]
+
+    @property
+    def limiar(self) -> float:
+        """O limiar que o portão deve usar agora, já entre os dois batentes."""
+        piso = self.piso
+        if piso < 0.0:
+            return self._inicial
+        return min(self._maximo, max(self._minimo, piso * self._fator))
+
+
 class PortaoDeVoz:
     """Decide se um bloco de áudio merece ser transmitido.
 
@@ -226,6 +300,10 @@ class PortaoDeVoz:
     O nível avaliado é o do sinal FINAL, já com o áudio do jogo misturado: com
     'Ouvir o jogo' ligado, o jogo é entrada legítima e deve manter o portão
     aberto mesmo com o jogador calado.
+
+    O limiar não é fixo: ele acompanha o ``PisoDeRuido``, que mede a sala em
+    vez de presumi-la. ``adaptativo=False`` congela o limiar no valor dado —
+    serve para exercitar a decisão do portão sem a calibração no meio.
     """
 
     def __init__(
@@ -234,8 +312,10 @@ class PortaoDeVoz:
         limiar: float = VOICE_GATE_THRESHOLD,
         pre_roll: int = VOICE_GATE_PREROLL_BLOCKS,
         cauda: float = VOICE_GATE_HANGOVER_SECONDS,
+        adaptativo: bool = True,
     ) -> None:
-        self._limiar = limiar
+        self._limiar_inicial = limiar
+        self._piso = PisoDeRuido(inicial=limiar) if adaptativo else None
         self._cauda = cauda
         self._buffer: deque[bytes] = deque(maxlen=max(0, pre_roll))
         self._aberto_ate = 0.0
@@ -254,13 +334,28 @@ class PortaoDeVoz:
         """
         return self._aberto
 
+    @property
+    def limiar(self) -> float:
+        """O limiar em vigor neste instante — calibrado, se houver calibração.
+
+        Público porque é a única forma de responder "por que o portão não está
+        economizando nada?" sem instrumentar a thread de captura por dentro.
+        """
+        return self._piso.limiar if self._piso is not None else self._limiar_inicial
+
     def avaliar(self, bloco: bytes, nivel: float, agora: float) -> list[bytes]:
         """Devolve os blocos a transmitir agora — nenhum, este, ou o pré-rolo."""
+        # A janela do piso recebe este bloco ANTES da decisão. Um bloco não
+        # muda um percentil sobre dez segundos, e observar primeiro mantém a
+        # regra simples: tudo o que o portão vê, o piso vê.
+        if self._piso is not None:
+            self._piso.observar(nivel)
+
         # O bloco passa por MÉRITO PRÓPRIO quando está acima do limiar, e não
         # apenas por estar dentro da cauda. Decidir só pela cauda deixava o
         # portão fechado para sempre com ``cauda=0``: ``agora >= agora`` é
         # verdadeiro no exato instante em que a fala começa.
-        ativo = nivel >= self._limiar
+        ativo = nivel >= self.limiar
         if ativo:
             self._aberto_ate = agora + self._cauda
 
@@ -311,6 +406,11 @@ class PortaoDeVoz:
         self._aberto = False
         self._aberto_ate = 0.0
         return estava
+
+    @property
+    def piso_de_ruido(self) -> float:
+        """Nível de fundo medido, ou ``-1.0`` sem calibração ou sem amostra."""
+        return self._piso.piso if self._piso is not None else -1.0
 
     @property
     def economia(self) -> float:
@@ -540,7 +640,31 @@ class Capture:
             if self._stop.is_set():
                 break
 
-            self.last_level = dsp.rms_level(bruto)
+            # O sinal é decodificado e reamostrado ANTES de qualquer decisão,
+            # para que o medidor da tela e o portão julguem exatamente o mesmo
+            # número. Eram dois: a tela recebia o RMS do bloco cru, na taxa
+            # nativa do dispositivo, e o portão media o vetor já reamostrado
+            # para 16 kHz — a interpolação suaviza o sinal e derruba um pouco o
+            # RMS, então os dois discordavam justamente em quem abre o portão.
+            # Enquanto o limiar era invisível, a discordância era acadêmica;
+            # agora que o medidor DESENHA o limiar, ela viraria uma mentira
+            # desenhada na tela.
+            #
+            # O custo de reamostrar também no caminho que não envia (mudo, ou
+            # assistente falando) é uma interpolação de mil amostras dezesseis
+            # vezes por segundo — e, na maioria das máquinas, nem isso: em
+            # 16 kHz nativo ``resample`` devolve o próprio vetor.
+            amostras = dsp.pcm_to_array(bruto).astype(np.int32)
+            if self._native_rate != INPUT_SAMPLE_RATE:
+                amostras = dsp.resample(amostras, self._native_rate, INPUT_SAMPLE_RATE)
+
+            # O nível que abre o portão é o do MICROFONE, medido antes da
+            # mistura. Medi-lo depois — como se fazia — entregava a decisão ao
+            # jogo, que nunca está em silêncio: o portão ficava escancarado a
+            # sessão inteira e a economia que ele existe para dar virava zero
+            # justamente para quem liga 'Ouvir o jogo'.
+            nivel_microfone = dsp.nivel_de(amostras)
+            self.last_level = nivel_microfone
 
             silenciado = self.muted.is_set()
             # A nossa própria voz saindo pela placa de som, neste instante.
@@ -595,17 +719,6 @@ class Capture:
                 if self.portao_de_voz.fechar():
                     self._enfileirar(FIM_DE_FALA)
                 continue
-
-            amostras = dsp.pcm_to_array(bruto).astype(np.int32)
-            if self._native_rate != INPUT_SAMPLE_RATE:
-                amostras = dsp.resample(amostras, self._native_rate, INPUT_SAMPLE_RATE)
-
-            # O nível que abre o portão é o do MICROFONE, medido antes da
-            # mistura. Medi-lo depois — como se fazia — entregava a decisão ao
-            # jogo, que nunca está em silêncio: o portão ficava escancarado a
-            # sessão inteira e a economia que ele existe para dar virava zero
-            # justamente para quem liga 'Ouvir o jogo'.
-            nivel_microfone = dsp.nivel_de(amostras)
 
             if jogo_ligado:
                 # Com o buffer limpo durante a fala, isto devolve silêncio — o
@@ -666,6 +779,18 @@ class Capture:
 
     def close(self) -> None:
         self._stop.set()
+        portao = self.portao_de_voz
+        if portao.blocos_enviados or portao.blocos_retidos:
+            # Sem esta linha, "o portão não está economizando nada" é uma
+            # queixa sem como ser investigada depois do fato: a sala que ele
+            # mediu e o limiar a que chegou não sobrevivem ao processo.
+            LOGGER.info(
+                "Portão de voz: %.0f%% dos blocos retidos, limiar final %.3f "
+                "(piso de ruído %.3f).",
+                portao.economia * 100,
+                portao.limiar,
+                portao.piso_de_ruido,
+            )
         if self.blocos_descartados:
             # Se isto aparecer, a fila ficou pequena para a rajada do pré-rolo:
             # é o sintoma que CAPTURE_QUEUE_BLOCKS existe para não produzir.

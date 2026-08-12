@@ -37,7 +37,53 @@ ECHO_GATE_TAIL_SECONDS: Final = 0.35
 # tokens; errar para o lado de cortar demais custa a pergunta do jogador, que é
 # o produto. Sala silenciosa fica por volta de 0.005–0.02; fala normal passa
 # de 0.1.
+#
+# Este número é o ponto de PARTIDA, não a regra: ele vale nos primeiros
+# segundos de captura, enquanto o piso de ruído ainda não tem amostra
+# suficiente para se pronunciar. Ver VOICE_GATE_NOISE_* logo abaixo.
 VOICE_GATE_THRESHOLD: Final = 0.035
+
+# --- Piso de ruído (calibração automática do limiar) ---------------------
+# Um limiar fixo aposta que toda sala se parece com a sala em que ele foi
+# escolhido, e as duas maneiras de perder essa aposta são caras:
+#
+# * **Sala barulhenta** (ventilador, teclado mecânico, ganho de microfone
+#   alto). O fundo passa dos 0.035 sozinho, o portão nunca fecha e a economia
+#   que ele existe para dar é ZERO — sem nenhum sintoma visível, porque tudo
+#   continua funcionando.
+# * **Sala silenciosa com microfone de ganho baixo.** A fala inteira acontece
+#   abaixo do limiar e o portão come a pergunta.
+#
+# A saída é o portão medir a sala em vez de presumi-la. O piso é estimado por
+# ESTATÍSTICA DE MÍNIMOS: guarda-se a janela dos últimos segundos e toma-se um
+# percentil baixo dela. A justificativa é que fala humana tem buracos — entre
+# palavras, entre sílabas, entre frases —, então numa janela de dez segundos
+# muito mais de 10% dos blocos são fundo, mesmo com alguém falando sem parar.
+# Por isso a janela é alimentada com TODOS os blocos, e não só com os que o
+# portão recusou: aprender apenas do silêncio criaria o impasse óbvio — sala
+# fica barulhenta, portão trava aberto, nada mais é recusado, nada mais é
+# aprendido, portão trava aberto para sempre.
+VOICE_GATE_NOISE_WINDOW_SECONDS: Final = 10.0
+VOICE_GATE_NOISE_WINDOW_BLOCKS: Final = round(
+    VOICE_GATE_NOISE_WINDOW_SECONDS * INPUT_SAMPLE_RATE / FRAMES_PER_BUFFER
+)
+VOICE_GATE_NOISE_PERCENTILE: Final = 0.10
+# Quanto o sinal precisa superar o fundo para contar como fala. Dobrar a
+# amplitude são ~6 dB, que é a distância mínima confortável entre uma voz
+# dirigida ao microfone e a sala em volta dela.
+VOICE_GATE_NOISE_FACTOR: Final = 2.2
+# Os dois batentes do limiar adaptativo, e nenhum dos dois é gosto:
+#
+# O PISO impede que uma sala tratada acusticamente derrube o limiar até o ruído
+# do próprio microfone, onde qualquer estalo abriria o portão.
+#
+# O TETO é o que garante que a calibração nunca coma a fala. Fala normal passa
+# de 0.1 (é o que a nota do limiar acima afirma, e continua valendo): um limiar
+# acima disso cortaria a pergunta em vez de economizar. Numa sala barulhenta
+# demais o portão desiste de economizar e deixa passar — perder tokens é uma
+# perda recuperável, perder a pergunta não é.
+VOICE_GATE_THRESHOLD_MIN: Final = 0.012
+VOICE_GATE_THRESHOLD_MAX: Final = 0.09
 # Blocos guardados antes da fala começar (1 bloco ≈ 64 ms a 16 kHz). Sem eles,
 # o gatilho corta o ataque da primeira sílaba — "wasteland" virava "asteland".
 VOICE_GATE_PREROLL_BLOCKS: Final = 5

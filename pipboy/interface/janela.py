@@ -50,7 +50,12 @@ from PySide6.QtWidgets import (
 
 from .. import design
 from ..audio import HAS_LOOPBACK_SUPPORT, Device, list_devices
-from ..config import AppConfiguration, Preferences, data_directory
+from ..config import (
+    AppConfiguration,
+    Preferences,
+    data_directory,
+    movimento_reduzido,
+)
 from ..constants import (
     DEFAULT_GAME_AUDIO_GAIN,
     SHUTDOWN_TIMEOUT_SECONDS,
@@ -82,6 +87,7 @@ from .componentes import (
     Pilula,
     RotuloElidido,
     TransicaoDeTema,
+    css_campo_selecao,
 )
 from .conversa import Conversa
 from .dialogo import avisar
@@ -113,6 +119,12 @@ GLIFO_CADERNO = "◫"
 FONTES_MONO: tuple[str, ...] = ("Cascadia Mono", "Consolas", "Courier New", "Courier")
 
 NIVEIS_ATMOSFERA: dict[str, float] = {"Completa": 1.0, "Discreta": 0.45, "Desligada": 0.0}
+
+# Fator aplicado à rampa tipográfica inteira e às medidas que confinam texto.
+# Os saltos são de 15%: menos que isso não se percebe, e mais que isso pula o
+# tamanho que resolveria o problema de alguém.
+ESCALAS_TEXTO: dict[str, float] = {"Padrão": 1.0, "Grande": 1.15, "Maior": 1.30}
+ESCALA_TEXTO_PADRAO = "Padrão"
 
 # Quanto do som do jogo entra na mistura enviada ao modelo. A preferência
 # ``ganho_jogo`` existia, era lida na abertura da sessão e validada por teste —
@@ -172,6 +184,12 @@ class Janela(QWidget):
         except Exception:
             LOGGER.exception("Backup do caderno falhou — o programa segue sem ele.")
         self._historico = HistoricoStore(data_directory() / "historico.sqlite3")
+        try:
+            podadas = self._historico.podar_antigas()
+            if podadas:
+                LOGGER.info("Histórico: %s sessão(ões) além da retenção removidas.", podadas)
+        except Exception:
+            LOGGER.exception("Poda do histórico falhou — o programa segue sem ela.")
         self._sessao_historico: int | None = None
 
         self._eventos: queue.Queue[UiEvent] = queue.Queue()
@@ -194,6 +212,12 @@ class Janela(QWidget):
         # meia dúzia de leitores usavam getattr com padrão para contornar a
         # janela em que ela não existia.
         self._intensidade_atmosfera = 1.0
+        # Nasce antes de qualquer widget: `fonte()` é chamada durante a
+        # montagem, e ela lê este fator.
+        self._escala_texto = 1.0
+        # A atmosfera nasceu desligada por causa do Windows, e não por escolha?
+        # Só para poder dizer isso ao jogador uma vez, no registro.
+        self._atmosfera_veio_do_sistema = False
 
         self._tema: GameTheme = theme_for(self._prefs.jogo)
         self._atmosfera = atmosfera_de(self._tema.name)
@@ -242,6 +266,16 @@ class Janela(QWidget):
             f"{self._store.total()} termos no caderno",
             Tag.SISTEMA,
         )
+        if self._atmosfera_veio_do_sistema:
+            # Sem este aviso, a primeira execução numa máquina com animação
+            # desligada parece um programa sem a aparência que ele anuncia —
+            # e o jogador não teria como ligar o que não sabe que existe.
+            self._registrar(
+                "O Windows está configurado para reduzir animações, então a atmosfera "
+                "começou DESLIGADA. Para ver o ambiente completo, mude 'Atmosfera do "
+                "jogo' na coluna ao lado — a escolha fica gravada.",
+                Tag.SISTEMA,
+            )
         if keyboard is not None and configuration.global_hotkeys_enabled:
             self._registrar(
                 f"Atalhos globais: {configuration.hotkey_toggle} iniciar/parar · "
@@ -305,6 +339,11 @@ class Janela(QWidget):
         return self._worker.input_level if self._worker is not None else 0.0
 
     @property
+    def limiar_entrada(self) -> float:
+        """Limiar do portão de voz, para o medidor desenhar. 0.0 sem sessão."""
+        return self._worker.input_threshold if self._worker is not None else 0.0
+
+    @property
     def intensidade_atmosfera(self) -> float:
         """0.0 (desligada) a 1.0 (completa). Vale para o olho e para o ouvido."""
         return self._intensidade_atmosfera
@@ -334,27 +373,38 @@ class Janela(QWidget):
 
         ``ui=True`` usa a família neutra dos controles; ``ui=False`` usa a
         fonte do tema, reservada à marca e à fala do assistente.
+
+        Ponto de estrangulamento de TODA a tipografia do programa — inclusive
+        das janelas satélites, que recebem a janela como provedor. É por isso
+        que o tamanho do texto é um fator aplicado aqui, e não uma rampa
+        alternativa a manter em paralelo.
         """
         tipo = design.TIPO[papel]
         familia = self._primeira_instalada(
             self._tema.ui_font_candidates if ui else self._tema.font_candidates
         )
-        fonte = QFont(familia, tipo.tamanho)
+        fonte = QFont(familia, design.escalar(tipo.tamanho, self._escala_texto))
         fonte.setBold(tipo.peso == "bold")
         fonte.setItalic(tipo.estilo == "italic")
         return fonte
 
     def _fonte_mono(self, papel: str) -> QFont:
         tipo = design.TIPO[papel]
-        return QFont(self._mono, tipo.tamanho)
+        return QFont(self._mono, design.escalar(tipo.tamanho, self._escala_texto))
+
+    @property
+    def largura_lateral(self) -> int:
+        """A coluna de ajustes é uma coluna de TEXTO, e acompanha o tamanho dele."""
+        return design.escalar(design.LARGURA_LATERAL, self._escala_texto)
 
     def _ajustar_marca(self, texto: str) -> QFont:
         """Encolhe o nome do ambiente até ele caber na largura da coluna."""
         fonte = self.fonte("display", ui=False)
-        maximo = design.TIPO["display"].tamanho
+        maximo = fonte.pointSize()
+        limite = design.escalar(design.CABECALHO_LARGURA_MAX, self._escala_texto)
         for tamanho in range(maximo, maximo - 10, -1):
             fonte.setPointSize(tamanho)
-            if QFontMetrics(fonte).horizontalAdvance(texto) <= design.CABECALHO_LARGURA_MAX:
+            if QFontMetrics(fonte).horizontalAdvance(texto) <= limite:
                 break
         return fonte
 
@@ -411,7 +461,7 @@ class Janela(QWidget):
         # não parece rolável. Um destino permanente não é um ajuste; ancorá-lo
         # no rodapé o torna independente da altura da janela.
         self.coluna_lateral = QWidget(objectName="colunaLateral")
-        self.coluna_lateral.setFixedWidth(design.LARGURA_LATERAL)
+        self.coluna_lateral.setFixedWidth(self.largura_lateral)
         pilha = QVBoxLayout(self.coluna_lateral)
         pilha.setContentsMargins(0, 0, 0, 0)
         pilha.setSpacing(0)
@@ -455,6 +505,12 @@ class Janela(QWidget):
         coluna.addSpacing(16)
 
         self.campos: dict[str, CampoSelecao] = {}
+        # Estes dois recebiam fonte uma vez só, dentro das funções locais
+        # abaixo, e ficavam fora do alcance de qualquer repintura. Enquanto a
+        # rampa era fixa isso nunca apareceu; com o tamanho do texto ajustável,
+        # seriam os únicos rótulos da coluna a não crescer.
+        self._rotulos_secao: list[QLabel] = []
+        self._rotulos_campo: list[QLabel] = []
 
         def secao(titulo: str) -> None:
             # Título e fio na MESMA linha, o fio começando onde o texto acaba.
@@ -467,6 +523,7 @@ class Janela(QWidget):
             linha.setSpacing(10)
             rotulo = QLabel(titulo.upper(), objectName="secao")
             rotulo.setFont(self.fonte("secao"))
+            self._rotulos_secao.append(rotulo)
             linha.addWidget(rotulo)
             regua = QFrame(objectName="regua")
             regua.setFixedHeight(1)
@@ -478,6 +535,7 @@ class Janela(QWidget):
         def campo(nome: str, rotulo: str, valores: list[str], dica: str = "") -> CampoSelecao:
             etiqueta = QLabel(rotulo, objectName="rotuloCampo")
             etiqueta.setFont(self.fonte("rotulo"))
+            self._rotulos_campo.append(etiqueta)
             coluna.addWidget(etiqueta)
             coluna.addSpacing(4)
             seletor = CampoSelecao()
@@ -595,6 +653,12 @@ class Janela(QWidget):
             "se o efeito atrapalhar a leitura.",
         )
         self.campo_atmosfera.currentTextChanged.connect(self._ajustar_atmosfera)
+        self.campo_tamanho_texto = campo(
+            "tamanho_texto", "Tamanho do texto", list(ESCALAS_TEXTO),
+            "Aumenta a letra na janela inteira, inclusive no caderno e no histórico. "
+            "Este programa costuma ficar ao lado do jogo, às vezes numa TV.",
+        )
+        self.campo_tamanho_texto.currentTextChanged.connect(self._ajustar_tamanho_texto)
 
         coluna.addStretch(1)
 
@@ -644,7 +708,10 @@ class Janela(QWidget):
         self.pilula.setFont(self.fonte("micro"))
         barra.addWidget(self.pilula)
         self.medidor = Medidor()
-        self.medidor.setToolTip("Nível do seu microfone. Parado = microfone errado ou bloqueado.")
+        self.medidor.setToolTip(
+            "Nível do seu microfone. O risco marca onde o portão de voz abre: "
+            "à esquerda dele nada é transmitido. Parado = microfone errado ou bloqueado."
+        )
         barra.addWidget(self.medidor)
         # Numa barra apertada é ESTE texto que cede — os botões ao lado não
         # têm como se abreviar.
@@ -730,10 +797,11 @@ class Janela(QWidget):
         t = self._tema
         self.setWindowTitle(t.window_title)
         self.barra_titulo.aplicar_tema()
+        # Só os TEXTOS aqui; as fontes de todos eles saem de _aplicar_fontes,
+        # chamada logo abaixo — duplicar as duas coisas fazia a marca ser
+        # medida duas vezes por repintura, e a segunda apagava a primeira.
         self.marca.setText(t.header_title)
-        self.marca.setFont(self._ajustar_marca(t.header_title))
         self.submarca.setText(t.header_subtitle)
-        self.submarca.setFont(self.fonte("micro"))
 
         ativa = self._worker is not None
         self.botao_acao.setText(t.stop_label if ativa else t.start_label)
@@ -748,11 +816,14 @@ class Janela(QWidget):
             botao.forma = self._atmosfera.forma
             botao.update()
 
+        self._aplicar_fontes()
         self.medidor.definir_cores(
             primary=t.primary, accent=t.accent, alert=t.alert,
             apagada=design.elevar(t.screen, 0.16, t.primary),
+            # Neutro de propósito: o risco é uma marca de régua, não um estado.
+            # Na cor do tema competiria com as barras vivas, que são o dado.
+            limiar=t.text_muted,
         )
-        self.pilula.setFont(self.fonte("micro"))
         self.setStyleSheet(self._folha())
         self._posicionar_veu()
         for campo in self.campos.values():
@@ -764,6 +835,55 @@ class Janela(QWidget):
         if hasattr(self, "_sobreposicao"):
             self._sobreposicao.raise_()
         self.update()
+
+    def _aplicar_fontes(self) -> None:
+        """Reaplica a rampa inteira aos widgets da janela principal.
+
+        As janelas satélites já refaziam suas fontes em ``aplicar_tema``; a
+        principal montava as dela uma vez e nunca mais, porque a família dos
+        controles é a mesma em todos os temas e a rampa era fixa. Com o
+        tamanho do texto ajustável, "uma vez e nunca mais" vira "metade da
+        janela ignora a escolha".
+        """
+        self.coluna_lateral.setFixedWidth(self.largura_lateral)
+        self.marca.setFont(self._ajustar_marca(self._tema.header_title))
+        self.submarca.setFont(self.fonte("micro"))
+        for rotulo in self._rotulos_secao:
+            rotulo.setFont(self.fonte("secao"))
+        for etiqueta in self._rotulos_campo:
+            etiqueta.setFont(self.fonte("rotulo"))
+        for campo in self.campos.values():
+            campo.setFont(self.fonte("aux"))
+        for chip in (self.chip_alto_falante, self.chip_jogo, self.chip_busca):
+            chip.setFont(self.fonte("legenda"))
+        self.rotulo_caderno.setFont(self.fonte("micro"))
+        self.pilula.setFont(self.fonte("micro"))
+        self.rotulo_meta.setFont(self._fonte_mono("micro"))
+        self.entrada_texto.setFont(self.fonte("corpo"))
+        for botao in (
+            self.botao_caderno, self.botao_historico,
+            self.botao_acao, self.botao_mudo, self.botao_enviar,
+        ):
+            botao.setFont(self.fonte("corpo_forte"))
+
+    def _ajustar_tamanho_texto(self, escolha: str) -> None:
+        """Aplica o tamanho do texto na janela e em tudo que ela hospeda.
+
+        Como a atmosfera, isto é acessibilidade e não gosto — então vale em
+        toda superfície do programa, e não só onde o controle está. As janelas
+        satélites pegam a rampa nova pelo ``aplicar_tema`` delas, que é o
+        mesmo caminho por onde já pegam a paleta.
+        """
+        nova = ESCALAS_TEXTO.get(escolha, 1.0)
+        if nova == self._escala_texto:
+            return
+        self._escala_texto = nova
+        self._aplicar_tema()
+        # As bolhas guardam a fonte capturada na construção; só refazendo.
+        self.conversa.repintar()
+        for satelite in (self._caderno, self._visor_historico, self._capsula):
+            if satelite is not None:
+                satelite.aplicar_tema()
 
     def _folha(self) -> str:
         """Folha de estilo derivada do tema — o equivalente ao repintar."""
@@ -788,65 +908,7 @@ class Janela(QWidget):
         #regua    {{ background: {t.border}; }}
         #caderno  {{ color: {t.info_text}; }}
 
-        QComboBox {{
-            background: {_rgba(t.surface_alta, 0.92)}; color: {t.primary};
-            border: 1px solid transparent; border-radius: {raio}px;
-            padding: 6px 30px 6px 12px;
-        }}
-        QComboBox:hover, QComboBox:focus {{ border-color: {t.border_forte}; }}
-        /* Travado, não apagado: o texto continua legível (é o que diz o que
-           está valendo na sessão) e quem comunica o travamento é a superfície,
-           que perde o preenchimento e passa a mostrar só o contorno. Meia dúzia
-           de contornos tracejados empilhados numa coluna lê como formulário
-           quebrado; o traço contínuo diz a mesma coisa sem o ruído. */
-        QComboBox:disabled {{
-            color: {t.text_disabled};
-            background: {_rgba(t.surface_alta, 0.30)};
-            border: 1px solid {t.border};
-        }}
-        QComboBox::drop-down {{ border: none; width: 28px; }}
-        QComboBox QAbstractItemView {{
-            background: {t.surface_alta}; color: {t.primary};
-            border: 1px solid {t.border}; border-radius: {raio}px;
-            outline: none; padding: 4px;
-        }}
-        /* O item precisa ser estilizado NOMINALMENTE. Declarar apenas
-           'selection-background-color' na lista não basta: o popup não detém o
-           foco de teclado enquanto é desenhado, e nesse estado o Qt resolve o
-           destaque pelo grupo de paleta *Inactive* — que no Windows é um cinza
-           do sistema. A linha escolhida saía lavada, com o cinza por baixo de
-           um texto pensado para o realce do tema. Com a regra ::item o estado
-           é nosso, ativo ou não. */
-        /* ESCOLHIDO e SOB O CURSOR são coisas diferentes e precisam parecer
-           diferentes. Estavam com o mesmo preenchimento cheio de acento, então
-           a lista mostrava dois blocos amarelos idênticos e não dizia qual era
-           o valor atual. Além disso, uma faixa sólida de ponta a ponta é o
-           tratamento de lista do Windows 95.
-
-           Agora: o cursor apenas ELEVA a linha, em cinza, sem cor nenhuma —
-           passar o mouse não é uma decisão. O valor escolhido ganha uma barra
-           de acento na margem e o texto na cor do acento, com só um véu de
-           fundo. A barra transparente em TODOS os itens reserva o espaço, para
-           que a linha escolhida não pule 3 px para o lado. */
-        QComboBox QAbstractItemView::item {{
-            padding: 7px 10px; border-radius: {max(2, raio - 2)}px;
-            color: {t.primary}; background: transparent;
-            border-left: 3px solid transparent;
-        }}
-        QComboBox QAbstractItemView::item:hover {{
-            background: {design.elevar(t.screen, 0.18, t.primary)};
-        }}
-        QComboBox QAbstractItemView::item:selected {{
-            background: {design.misturar(t.surface_alta, t.accent, 0.13)};
-            color: {design.garantir_contraste(
-                t.accent, design.misturar(t.surface_alta, t.accent, 0.13))};
-            border-left: 3px solid {t.accent};
-        }}
-        QComboBox QAbstractItemView::item:selected:hover {{
-            background: {design.misturar(t.surface_alta, t.accent, 0.22)};
-            color: {design.garantir_contraste(
-                t.accent, design.misturar(t.surface_alta, t.accent, 0.22))};
-        }}
+        {css_campo_selecao(t, raio, _rgba)}
 
         /* Translúcido para a atmosfera atravessar a superfície da conversa —
            é o que dá profundidade sem competir com a leitura. O raio acompanha
@@ -1047,6 +1109,7 @@ class Janela(QWidget):
     def _atualizar_medidor(self) -> None:
         self.medidor.definir_ativo(self.sessao_ativa)
         self.medidor.definir_nivel(self.nivel_entrada)
+        self.medidor.definir_limiar(self.limiar_entrada)
 
     def _atualizar_meta(self) -> None:
         if self._worker is None:
@@ -1060,6 +1123,11 @@ class Janela(QWidget):
             partes.append("OUVINDO O JOGO")
         if self._tokens:
             partes.append(f"{self._tokens:,} tokens".replace(",", "."))
+            # Só aparece com PRECO_POR_MILHAO_TOKENS no .env: sem preço, o
+            # programa não tem como dizer nada sobre dinheiro — e não inventa.
+            custo = self._configuration.custo_de(self._tokens)
+            if custo:
+                partes.append(custo)
         self.rotulo_meta.definir_texto("   ·   ".join(partes))
 
     # ------------------------------------------------------------- Eventos
@@ -1211,8 +1279,15 @@ class Janela(QWidget):
         self.rotulo_caderno.setText(texto)
 
     def _definir_controles(self, ativa: bool, pode_parar: bool = True) -> None:
+        # Os dois controles de APRESENTAÇÃO seguem vivos durante a sessão. O
+        # travamento existe porque jogo, nível e microfone vão na abertura da
+        # conexão e trocá-los no meio mentiria sobre o que está valendo; letra
+        # e atmosfera não vão para lugar nenhum. E são justamente os dois
+        # ajustes de acessibilidade: quem precisa de letra maior para LER a
+        # conversa precisa disso durante a conversa, não depois dela.
+        livres = (self.campo_atmosfera, self.campo_tamanho_texto)
         for campo in self.campos.values():
-            if campo is not self.campo_atmosfera:
+            if campo not in livres:
                 campo.setEnabled(not ativa)
         for chip in (self.chip_alto_falante, self.chip_busca):
             chip.setEnabled(not ativa)
@@ -1258,9 +1333,28 @@ class Janela(QWidget):
             GANHO_JOGO_PADRAO,
         )
         selecionar(self.campo_ganho_jogo, rotulo_ganho, GANHO_JOGO_PADRAO)
-        atmosfera = str(p.extras.get("atmosfera", "Completa"))
-        selecionar(self.campo_atmosfera, atmosfera, "Completa")
+        # O sistema decide só o PADRÃO, e só enquanto não houver escolha
+        # gravada: a chave só falta no arquivo antes da primeira vez que o
+        # jogador mexeu nela. Depois disso a escolha é dele, mesmo que
+        # contrarie o Windows — o programa lê a preferência do sistema, não
+        # obedece a ela para sempre.
+        #
+        # E o padrão é DESLIGADA, não Discreta. O que o Windows pede é menos
+        # ANIMAÇÃO, e 'Discreta' continua animando: ela reduz a intensidade,
+        # mas só 'Desligada' para a partícula, a cintilação e as transições.
+        # Atender pela metade um pedido de acessibilidade é não atender.
+        pediu_calma = movimento_reduzido()
+        padrao_atmosfera = "Desligada" if pediu_calma else "Completa"
+        self._atmosfera_veio_do_sistema = pediu_calma and "atmosfera" not in p.extras
+        atmosfera = str(p.extras.get("atmosfera", padrao_atmosfera))
+        selecionar(self.campo_atmosfera, atmosfera, padrao_atmosfera)
         self._ajustar_atmosfera(self.campo_atmosfera.currentText())
+        tamanho = str(p.extras.get("tamanho_texto", ESCALA_TEXTO_PADRAO))
+        selecionar(self.campo_tamanho_texto, tamanho, ESCALA_TEXTO_PADRAO)
+        # Direto no campo, sem passar por _ajustar_tamanho_texto: aqui a janela
+        # ainda está sendo montada, o _aplicar_tema logo a seguir já refaz tudo,
+        # e as satélites que aquele método repinta ainda nem existem.
+        self._escala_texto = ESCALAS_TEXTO.get(self.campo_tamanho_texto.currentText(), 1.0)
         self._atualizar_caderno()
 
     def _salvar_preferencias(self) -> None:
@@ -1279,6 +1373,7 @@ class Janela(QWidget):
             self.campo_ganho_jogo.currentText(), DEFAULT_GAME_AUDIO_GAIN
         )
         p.extras["atmosfera"] = self.campo_atmosfera.currentText()
+        p.extras["tamanho_texto"] = self.campo_tamanho_texto.currentText()
         g = self.geometry()
         p.extras["geometria"] = f"{g.width()},{g.height()},{g.x()},{g.y()}"
         p.save()
@@ -1548,6 +1643,30 @@ class Janela(QWidget):
         self._visor_historico.raise_()
         self._visor_historico.activateWindow()
 
+    def periodos_de_conversa(self) -> list[tuple[int, str, str]]:
+        """``(id, início, fim)`` das sessões gravadas, para casar com uma palavra.
+
+        O caderno usa isto para decidir, de uma vez para todos os cartões
+        visíveis, quais deles têm uma conversa para onde voltar.
+        """
+        try:
+            return self._historico.periodos()
+        except Exception:
+            LOGGER.exception("Períodos do histórico indisponíveis.")
+            return []
+
+    def abrir_conversa(self, sessao_id: int, termo: str = "") -> None:
+        """Abre o histórico na sessão dada, marcando onde ``termo`` foi ensinado."""
+        self.abrir_historico()
+        visor = self._visor_historico
+        if visor is not None and not visor.abrir_por_id(sessao_id, destaque=termo):
+            avisar(
+                self,
+                "Conversa indisponível",
+                "A conversa em que esta palavra foi ensinada não está mais no "
+                "histórico. A palavra continua no caderno.",
+            )
+
     def caderno_mudou(self, aviso: str = "") -> None:
         """Ponto único de reação a uma escrita no caderno, venha de onde vier.
 
@@ -1583,6 +1702,33 @@ class Janela(QWidget):
             avisar(self, "Falha ao exportar", str(erro), erro=True)
             return
         self._registrar(f"{total} termos exportados para {caminho.name}.", Tag.SISTEMA)
+
+    def importar_vocabulario(self) -> None:
+        """Traz termos de um TSV para o caderno, sem tocar no que já existe."""
+        origem, _ = QFileDialog.getOpenFileName(
+            self, "Importar vocabulário", "", "Anki / TSV (*.txt *.tsv);;Todos (*)"
+        )
+        if not origem:
+            return
+        try:
+            resultado = self._store.importar_csv(Path(origem))
+        except OSError as erro:
+            avisar(self, "Falha ao importar", str(erro), erro=True)
+            return
+
+        partes = [f"{resultado.novos} termo(s) novo(s)"]
+        if resultado.existentes:
+            # Dito sempre que acontecer, e não escondido num total: quem
+            # importa de volta o próprio caderno vê "0 novos" e precisa saber
+            # que isso é o esperado, não uma falha silenciosa.
+            partes.append(f"{resultado.existentes} já estava(m) no caderno e ficou(ram) intacto(s)")
+        if resultado.ignorados:
+            partes.append(f"{resultado.ignorados} linha(s) sem termo ou tradução")
+        avisar(self, "Importação concluída", ".\n".join(partes) + ".")
+
+        self.caderno_mudou(f"{resultado.novos} termo(s) importado(s) de {Path(origem).name}.")
+        if self._caderno is not None:
+            self._caderno.atualizar()
 
     # ------------------------------------------------------------ Encerramento
 

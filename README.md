@@ -10,13 +10,16 @@ Tutor de inglês por voz, em tempo real, para quem joga em inglês. O programa o
 - **A interface veste o jogo.** Trocar o jogo no seletor muda a janela inteira — paleta, fonte, títulos, rótulos dos botões, a persona sugerida e a *atmosfera*: varredura de CRT no Fallout, partículas douradas no Elden Ring, chuva de dados no Cyberpunk. Nada disso usa recurso dos jogos; é tudo gerado por código.
 - **Ouve o jogo.** Com a captura de loopback ativada, os últimos dez segundos do áudio do jogo ficam guardados no seu computador e seguem junto com a sua pergunta — basta dizer "o que ele acabou de dizer?". Guardar em vez de transmitir sem parar corta 81% dos tokens dessa função (veja *Custos*). A voz do próprio assistente é retirada dessa captura enquanto ele fala — sem isso ele se transcreveria como se fosse você e entraria em laço.
 - **Caderno automático com revisão espaçada.** Toda palavra ensinada é salva em silêncio via *function calling*, com tradução, exemplo e o jogo em que apareceu. Cada palavra tem uma data de revisão agendada por um algoritmo tipo Anki (acertos afastam a revisão, erros a trazem de volta), e o modo Quiz cobra exatamente as vencidas.
-- **O caderno tem porta.** `Ctrl+B` abre o visualizador: a lista inteira, buscável por termo, tradução *ou exemplo* — porque ninguém lembra da palavra em inglês, lembra do contexto. Quatro filtros respondem às perguntas que o número na lateral não responde: **Todas**, **Para revisar** (a fila da repetição espaçada), **Dominadas** e **Difíceis**, ordenado pelo que você mais erra. Dá para apagar um termo e exportar tudo para Anki (TSV) ou Markdown.
+- **O caderno tem porta.** `Ctrl+B` abre o visualizador: a lista inteira, buscável por termo, tradução *ou exemplo* — porque ninguém lembra da palavra em inglês, lembra do contexto. Quatro filtros respondem às perguntas que o número na lateral não responde: **Todas**, **Para revisar** (a fila da repetição espaçada), **Dominadas** e **Difíceis**, ordenado pelo que você mais erra. Ao lado deles, um seletor recorta por **jogo** — dimensão separada, e não mais um filtro, porque "difíceis" e "do Cyberpunk" são perguntas independentes e quem acaba de trocar de jogo quer as duas ao mesmo tempo. O seletor lista só os jogos que realmente deram palavras, e some quando há um só. Dá para apagar um termo e exportar tudo para Anki (TSV) ou Markdown.
+- **E o caderno também sabe entrar.** O botão **Importar** soma ao caderno os termos de um TSV — para juntar os cadernos de duas máquinas usadas em paralelo (copiar o `.sqlite3` substitui, não funde) ou trazer uma lista pronta de um jogo. **Palavra que já existe é deixada em paz:** ela carrega facilidade, intervalo, próxima revisão, acertos e erros, e um arquivo de texto não tem como conhecer meses de repetição espaçada — um import que "atualizasse" levaria o agendamento junto, e você perderia o progresso justamente ao tentar somar a ele. Termos novos entram vencidos, para caírem no próximo quiz. O número de colunas decide o formato: duas são termo e tradução, **três** são o que a exportação daqui escreve (termo, verso, jogo — com o exemplo dentro do verso) e quatro ou mais são um campo cada (termo, tradução, exemplo, jogo). Linha sem termo ou sem tradução é contada e ignorada, nunca fatal.
 - **Revisão offline, sem custo.** Dentro do caderno, o botão **Revisar** abre cartões das palavras vencidas — frente com o termo, verso com tradução e exemplo, botões *acertei/errei* (ou as teclas `Espaço`, `A` e `E`). É a mesma repetição espaçada do Quiz por voz, mas sem sessão, sem rede e sem gastar um token.
 - **Painel de progresso.** O botão **Progresso** mostra o caderno em números: palavras novas por semana, a régua de domínio (novas → aprendendo → dominadas) e de que jogo o vocabulário está vindo — tudo desenhado no tema.
 - **O ambiente se ajusta sozinho.** A cada meio minuto o programa olha os processos do Windows; se um jogo conhecido está aberto e a sessão está parada, a janela se veste dele e avisa no registro. A troca automática acontece no máximo uma vez por detecção — escolher outro ambiente à mão depois disso é respeitado.
 - **Backup diário do caderno.** Ao abrir, o programa guarda uma cópia íntegra do banco em `backups/` (uma por dia, as sete últimas ficam). O vocabulário de meses é o único dado que não se recupera perdendo.
 - **Primeira execução acolhedora.** Sem chave configurada, em vez de um erro sobre variáveis de ambiente aparece um cartão no tema explicando onde a chave nasce e recebendo a colagem — ele grava o `.env` no lugar certo sozinho.
-- **Histórico de sessões.** Cada conversa fica gravada (só neste computador) e pode ser relida no botão **Histórico**: a lista de sessões à esquerda, a transcrição à direita, com direito a apagar o que não quiser guardar. A palavra sem o contexto em que apareceu é metade da memória.
+- **Histórico de sessões.** Cada conversa fica gravada (só neste computador) e pode ser relida no botão **Histórico**: a lista de sessões à esquerda, a transcrição à direita, com direito a apagar o que não quiser guardar. Conversas com mais de um ano são descartadas na abertura (`RETENCAO_DIAS`, em `pipboy/historico.py`): transcrição inteira que ninguém nunca poda é um arquivo que só cresce. A sequência de estudo não acompanha essa poda — ela é medida em anos.
+- **Busca em todas as conversas.** As duas caixas de busca do histórico respondem perguntas diferentes, e por isso moram em colunas diferentes: a da esquerda procura em **todas** as sessões e mostra quantas falas casam em cada uma — porque "onde foi mesmo que ele explicou isso?" é a pergunta que se faz, e ninguém sabe de antemão em qual conversa procurar; a da direita procura dentro da conversa já aberta. Clicar num resultado abre a conversa já rolada até a fala que casou.
+- **Da palavra de volta para a conversa.** A palavra sem o contexto em que apareceu é metade da memória, e o caderno guardava só metade. Cada palavra tem agora um botão **◷** que abre a conversa em que ela foi ensinada, rolada até a linha em que aquilo aconteceu, com o diálogo em volta. Os dois bancos não têm chave estrangeira um para o outro; o elo é o instante em que a palavra nasceu, e quando a conversa não existe mais (apagada, ou além da retenção) o botão fica desabilitado dizendo por quê, em vez de levar para o lugar errado.
 - **Modo compacto.** O botão de cápsula na barra de título encolhe o programa a uma barra mínima sempre-no-topo — estado, medidor do microfone e mudo — para deixar sobre o jogo em janela sem bordas. A sessão continua intacta; a cápsula é só outra vista dela.
 - **Bandeja do sistema.** Iniciar/encerrar, silenciar, mostrar e sair, sem caçar a janela atrás do jogo.
 - **O aparelho também se ouve.** Sessão iniciada, encerrada, palavra salva e erro têm um blip curto — sintetizado por código, com timbre próprio por jogo (o terminal 8-bit do Fallout, o sino do Elden Ring, o agudo netrunner do Cyberpunk). Nenhum arquivo de áudio no repositório, pelo mesmo princípio da atmosfera; o WAV nasce na primeira execução e fica em cache. Atmosfera **Desligada** silencia os blips também: a preferência por calma vale para o ouvido.
@@ -44,6 +47,10 @@ Cada jogo tem o seu ambiente. A troca é imediata, sem reiniciar o programa.
 
 Cada ambiente tem também uma **atmosfera** — varredura, grão, vinheta, partículas, interferência e a forma dos cantos — sintetizada com o QPainter. Não há textura, arte, logotipo ou fonte de terceiros no repositório: o que caracteriza um jogo na tela não é a cor, é o material, e material se desenha. A intensidade tem três níveis na coluna lateral (**Completa**, **Discreta**, **Desligada**), porque varredura e cintilação são obstáculo real para baixa visão.
 
+Na primeira execução, quem tem **"Efeitos de animação" desligado no Windows** recebe a atmosfera já em **Desligada**, com um aviso no registro dizendo de onde isso veio e como reverter. Quem desliga essa opção do sistema já disse uma vez, para o computador inteiro, que animação lhe faz mal; perguntar de novo na forma de uma janela que cintila é ignorar uma resposta já dada. É **Desligada**, e não Discreta, porque o que o sistema pede é menos *animação* e só esse nível para de fato a partícula, a cintilação e as transições — atender pela metade um pedido de acessibilidade é não atender. E o sistema decide apenas o **padrão**: assim que você escolher um nível, ele é seu, mesmo contrariando o Windows.
+
+Ao lado dela, **Tamanho do texto** (Padrão, Grande, Maior) multiplica a rampa tipográfica inteira — e junto com ela a coluna lateral, que é uma coluna de texto e só trocaria "pequeno demais" por "cortado" se ficasse parada. Vale na janela, no caderno, no histórico e na cápsula, porque toda a tipografia do programa passa por um ponto só. Os dois controles de apresentação são os **únicos que continuam livres durante a sessão**: o travamento existe para o que vai na abertura da conexão (jogo, nível, microfone), e letra e atmosfera não vão a lugar nenhum — quem precisa de letra maior para ler a conversa precisa disso durante a conversa, não depois dela.
+
 O jogo escolhido define quatro coisas de uma vez: a aparência, o contexto linguístico enviado ao modelo (que inglês esperar naquele título), o nome do assistente no registro e a primeira persona da lista — a persona temática. As personas gerais (Assistente Amigável, Instrutor Rígido, Professor Nativo) continuam disponíveis em qualquer jogo.
 
 ### Adicionar um jogo
@@ -67,11 +74,16 @@ O código passa limpo por três verificadores, e a suíte de testes cobre o núc
 ```powershell
 py -m ruff check .                                # lint (zero apontamentos)
 py -m mypy pipboy pip_boy.py diagnostico.py       # tipos, modo estrito
-py tests/test_nucleo.py                           # ~190 testes sem hardware
+py tests/test_nucleo.py                           # ~400 testes sem hardware
 py tests/test_interface.py                        # a interface inteira, sem tela
+py ferramentas/verificar_glifos.py                # todo símbolo tem glifo nas fontes
 ```
 
 A suíte de interface constrói a janela de verdade no backend *offscreen* do Qt: repinta os dez ambientes por completo, abre caderno, cartões de revisão, progresso, histórico, cápsula compacta e o cartão de boas-vindas, e exercita a busca. É ela que pega o que o núcleo nunca vê — a chave de paleta digitada errada, o import circular novo, o widget que explode ao trocar de tema. Roda sem monitor, sem microfone e sem rede, então o CI a executa igual.
+
+**E há um defeito que ela é estruturalmente incapaz de ver.** No backend *offscreen* o Qt enxerga **zero** famílias de fonte: a suíte desenha a janela inteira em caixinhas e passa feliz, então um símbolo sem glifo — a armadilha que este README já descreve duas vezes, e que já mordeu — escapa dela por construção. `verificar_glifos.py` é a resposta: roda na plataforma padrão, com a base de fontes real, lê com o `ast` **todo literal de texto** de `pipboy/` (docstrings de fora, que são texto para quem lê o código) e exige que cada caractere da categoria *Symbol* do Unicode exista em cada uma das doze fontes que os dez temas resolvem. Não é uma lista escrita à mão, que envelheceria no primeiro glifo novo — é o código sendo lido.
+
+Ele achou um na primeira execução: a anotação de palavra nova usava `＋` (U+FF0B, a forma *fullwidth*, feita para tipografia CJK), ausente de **todas** as fontes dos temas. Toda palavra salva aparecia com uma caixinha na frente, em todos os ambientes. Hoje é `⊕`. Se o runner não tiver base de fontes, o script diz que não mediu nada e sai limpo — não saber medir não é o mesmo que encontrar defeito.
 
 A configuração vive no `pyproject.toml`. Duas supressões são deliberadas e estão documentadas lá: o padrão `objectName=` no construtor (válido no PySide6, ausente das stubs) e os imports tardios do teste.
 
@@ -183,6 +195,8 @@ backups\                Cópias diárias do caderno (as sete últimas)
 sons\                   Blips sintetizados, em cache por tema
 ```
 
+Os dois bancos abrem em **WAL** (`pipboy/banco.py`). Não é ajuste fino: cada frase transcrita do assistente vira um commit na thread da interface, e no modo padrão do SQLite todo commit paga um `fsync` — uma ida ao disco por frase falada, no meio do laço de eventos do Qt. Junto do WAL vai `synchronous=NORMAL`, que abre mão de durabilidade contra queda de energia (os commits dos últimos instantes), não contra queda do programa. Você vai ver arquivos `-wal` e `-shm` ao lado dos bancos enquanto o programa estiver aberto; eles somem no fechamento. Um disco que recuse o WAL — pasta de rede, por exemplo — apenas continua no modo antigo.
+
 ## Estrutura do projeto
 
 ```text
@@ -191,10 +205,13 @@ pip-boy-termlink/
 ├── pip_boy.spec          # Receita do executável (PyInstaller)
 ├── pyproject.toml        # Metadados, ruff e mypy
 ├── ferramentas/
-│   └── gerar_icone.py    # Renderiza o .ico do build (nenhum binário no repo)
+│   ├── gerar_icone.py    # Renderiza o .ico do build (nenhum binário no repo)
+│   ├── verificar_glifos.py    # Todo símbolo do código existe nas fontes?
+│   └── verificar_segredos.py  # Nada de segredo entre os arquivos rastreados
 ├── pipboy/
 │   ├── __init__.py       # Logging, abertura e ponto de entrada
 │   ├── constants.py      # Taxas de amostragem e temporizações
+│   ├── banco.py          # Abertura das conexões SQLite (WAL)
 │   ├── crash.py          # Rede de segurança: exceção vira log + aviso
 │   ├── deteccao.py       # Reconhece o jogo aberto pela lista de processos
 │   ├── historico.py      # Banco de transcrições de sessões
@@ -206,7 +223,7 @@ pip-boy-termlink/
 │   ├── profiles.py       # Personas, níveis, modos e o prompt
 │   ├── events.py         # Mensagens entre threads
 │   ├── dsp.py            # Reamostragem, mixagem, medição (NumPy)
-│   ├── audio.py          # Dispositivos, captura, reprodução, loopback
+│   ├── audio.py          # Dispositivos, captura, portão de voz, loopback
 │   ├── vocabulary.py     # Banco SQLite e exportação
 │   ├── tools.py          # Function calling
 │   ├── session.py        # Sessão Live, reconexão, transcrição
@@ -246,7 +263,20 @@ pip-boy-termlink/
 
 Áudio consome cerca de 25 tokens por segundo em cada direção. Uma sessão de uma hora com conversa constante fica na casa das dezenas de milhares de tokens. O rodapé da janela mostra o total acumulado em tempo real.
 
+**E mostra quanto isso custa, se você disser o preço.** "48.291 tokens" não significa nada para quem precisa decidir se continua a sessão — e este é um programa construído inteiro em torno de gastar menos. Preencha `PRECO_POR_MILHAO_TOKENS` no `.env` (e `MOEDA`, se quiser outro rótulo) e o rodapé passa a mostrar `~US$ 0,14` ao lado da contagem. O preço vem do `.env`, e não de uma constante do código, **de propósito**: um número sobre dinheiro que envelheceu é pior que número nenhum, porque não parece errado e ninguém confere. Sem preço configurado, o programa não estima nada. E o `~` não é enfeite: o serviço reporta um total só, sem separar entrada de saída nem áudio de texto, que têm preços diferentes — o que dá para oferecer com honestidade é ordem de grandeza, não fatura.
+
 **O microfone só é transmitido quando há som.** Um portão de voz local mede o nível de cada bloco e retém o que estiver abaixo do limiar, com pré-rolo (para não cortar a primeira sílaba) e cauda (para não confundir pausa entre palavras com fim de fala). Antes disso, uma sessão aberta numa sala silenciosa gastava cerca de 90 mil tokens por hora sem ninguém perguntar nada. Numa conversa esparsa a economia fica em torno de 60%.
+
+**E o limiar mede a sua sala, em vez de presumi-la.** Um número fixo aposta que toda sala se parece com a sala em que ele foi escolhido, e as duas formas de perder essa aposta são caras — e mudas, porque nos dois casos tudo continua *funcionando*:
+
+| Sua sala | Com limiar fixo | Calibrado |
+| --- | --- | --- |
+| Ventilador, teclado mecânico, ganho de microfone alto | O fundo passa do limiar sozinho, o portão nunca fecha: **0% de economia** | **88%** |
+| Silenciosa, microfone de ganho baixo | A fala inteira fica abaixo do limiar: **a pergunta é comida** | as perguntas passam inteiras |
+
+**E o limiar é visível.** O medidor ao lado da cápsula de estado ganhou um risco vertical: à esquerda dele nada é transmitido, à direita o portão abre. É o que responde "estou falando e ele não me ouve" sem abrir log nenhum — se as barras não passam do risco, o problema é ganho de microfone, não o programa. Para o risco significar alguma coisa, a régua do medidor passou a ser **logarítmica**, como a de todo medidor de áudio: na régua linear que existia, fala normal acendia *duas* barras de dezoito e as dezesseis restantes esperavam um grito. E o número desenhado é o mesmo que o portão julga — antes a tela media o bloco cru, na taxa nativa do dispositivo, e o portão media o vetor já reamostrado, o que em ruído de sala dá 19% de diferença.
+
+Os dois números saem de `py tests/test_nucleo.py`, no mesmo material. O piso de ruído é estimado por estatística de mínimos — a janela dos últimos dez segundos, ordenada, e um percentil baixo dela. Funciona porque fala humana tem buraco: entre palavras, entre sílabas, entre frases, muito mais de 10% dos blocos de uma janela de dez segundos são fundo, mesmo com alguém falando sem parar. O limiar resultante tem dois batentes, e o de cima é o que importa: ele fica **abaixo do nível da fala normal**, de modo que uma sala barulhenta demais faz o portão desistir de economizar em vez de cortar a pergunta. Perder tokens se recupera; perder a pergunta, não.
 
 **Com "Ouvir o jogo" ligado, o som do jogo é contexto retroativo, não transmissão contínua.** O portão media o sinal já misturado — e jogo em silêncio não existe, então ele ficava escancarado a sessão inteira e devolvia exatamente os 90 mil tokens por hora que existe para evitar. Só que ninguém liga essa opção para o modelo *escutar* o jogo o tempo todo: liga para poder perguntar "o que ele acabou de dizer?". Agora o portão volta a decidir pelo **microfone**, e os últimos dez segundos de jogo ficam guardados localmente, de graça, seguindo junto com a pergunta quando ela vier. A medição está em `py tests/test_nucleo.py`: num trecho de três minutos com o jogo tocando sem parar e três perguntas curtas, **564 blocos transmitidos contra 3.000 — 81% de economia**, sem perder uma pergunta sequer.
 

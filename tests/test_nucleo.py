@@ -10,6 +10,7 @@ exige hardware não é executado, e teste não executado não protege nada.
 from __future__ import annotations
 
 import contextlib
+import itertools
 import os
 import sys
 import tempfile
@@ -73,6 +74,22 @@ def teste_dsp() -> None:
     saturado = dsp.pcm_to_array(dsp.array_to_pcm(dsp.mix(np.full(2, 30000), np.full(2, 30000), 1.0)))
     checar(saturado[0] == 32767, "satura em vez de estourar o int16")
     checar(dsp.rms_level(b"\x00\x00" * 50) == 0.0, "nível de silêncio é zero")
+
+    # O medidor da tela e o portão precisam julgar o MESMO número, agora que o
+    # medidor desenha o limiar. Eles não julgavam: a tela media o bloco cru, na
+    # taxa nativa do dispositivo, e o portão media o vetor já reamostrado para
+    # 16 kHz. A interpolação derruba o RMS, e o quanto depende do conteúdo —
+    # num tom de 3 kHz é 1%, mas em RUÍDO BRANCO, que é o que uma sala parada
+    # de fato produz e é justamente o que passou a calibrar o limiar, passa de
+    # 15%. Com o limiar desenhado, essa diferença viraria uma mentira na tela.
+    ruido = (np.random.default_rng(7).normal(0, 1, 9600) * 600).astype("<i2")
+    cru = dsp.rms_level(ruido.tobytes())
+    reamostrado = dsp.nivel_de(dsp.resample(ruido.astype(np.int32), 48000, 16000))
+    checar(
+        cru > 0 and (cru - reamostrado) / cru > 0.15,
+        f"em ruído de sala, medir antes de reamostrar infla o nível em "
+        f"{(cru - reamostrado) / cru:.0%} ({cru:.3f} contra {reamostrado:.3f})",
+    )
 
 
 def teste_vocabulario() -> None:
@@ -293,6 +310,112 @@ def teste_portao_de_voz() -> None:
     checar(not g.fechar(), "fechar() de novo não inventa um segundo fim de fala")
 
 
+def teste_piso_de_ruido() -> None:
+    """O limiar mede a sala em vez de presumi-la.
+
+    Um limiar fixo aposta que toda sala se parece com a sala em que ele foi
+    escolhido. As duas formas de perder essa aposta são caras e SILENCIOSAS —
+    tudo continua funcionando, só que sem economia nenhuma de um lado, ou
+    comendo a pergunta do outro. Os dois cenários abaixo são exatamente essas
+    duas apostas perdidas, medidas com e sem calibração.
+    """
+    print("piso de ruído")
+    from pipboy.audio import PisoDeRuido, PortaoDeVoz
+    from pipboy.constants import (
+        VOICE_GATE_THRESHOLD,
+        VOICE_GATE_THRESHOLD_MAX,
+        VOICE_GATE_THRESHOLD_MIN,
+    )
+
+    # --- O estimador, isolado ---
+    piso = PisoDeRuido(janela=100)
+    checar(not piso.maduro and piso.piso == -1.0, "sem amostra, o piso não se pronuncia")
+    checar(piso.limiar == VOICE_GATE_THRESHOLD, "e o limiar é o valor de partida")
+
+    for _ in range(24):
+        piso.observar(0.004)
+    checar(not piso.maduro, "24 blocos (1,5 s) ainda não bastam para calibrar")
+    piso.observar(0.004)
+    checar(piso.maduro, "um quarto da janela amadurece a estimativa")
+
+    # Sala tratada: o piso desce, mas o batente impede que ele chegue ao ruído
+    # do próprio microfone, onde qualquer estalo abriria o portão.
+    silenciosa = PisoDeRuido(janela=100)
+    for _ in range(100):
+        silenciosa.observar(0.002)
+    checar(abs(silenciosa.piso - 0.002) < 1e-9, "sala silenciosa: piso em 0.002")
+    checar(silenciosa.limiar == VOICE_GATE_THRESHOLD_MIN, "o batente de baixo segura o limiar")
+
+    # Sala barulhenta: o limiar sobe, mas nunca acima da fala normal.
+    barulhenta = PisoDeRuido(janela=100)
+    for _ in range(100):
+        barulhenta.observar(0.30)
+    checar(barulhenta.limiar == VOICE_GATE_THRESHOLD_MAX, "o batente de cima protege a fala")
+
+    # A faixa útil, onde nenhum batente manda: o fator multiplica o fundo.
+    media = PisoDeRuido(janela=100, fator=2.0, minimo=0.0, maximo=1.0)
+    for _ in range(100):
+        media.observar(0.02)
+    checar(abs(media.limiar - 0.04) < 1e-9, "no meio da faixa, limiar = fundo × fator")
+
+    # O ponto que sustenta a ideia toda: fala tem buraco. Uma janela com 80%
+    # de fala ainda estima o FUNDO, porque o percentil baixo cai nas pausas.
+    falante = PisoDeRuido(janela=100)
+    for i in range(100):
+        falante.observar(0.005 if i % 5 == 0 else 0.40)
+    checar(
+        abs(falante.piso - 0.005) < 1e-9,
+        f"com 80% de fala na janela, o piso ainda acha o fundo ({falante.piso:.3f})",
+    )
+
+    # --- Aposta perdida nº 1: sala barulhenta, portão travado aberto ---
+    def correr(fundo: float, fala: float, *, adaptativo: bool) -> tuple[float, int]:
+        g = PortaoDeVoz(pre_roll=0, cauda=0.0, adaptativo=adaptativo)
+        transmitidos = 0
+        for i in range(1000):
+            falando = 400 <= i < 440 or 700 <= i < 740
+            transmitidos += len(g.avaliar(b"\x00\x00", fala if falando else fundo, i * 0.064))
+        return g.economia, transmitidos
+
+    # Ventilador, teclado mecânico, ganho de microfone alto: o fundo passa dos
+    # 0.035 sozinho. O portão fixo nunca fecha e economiza ZERO.
+    economia_fixa, _ = correr(0.05, 0.30, adaptativo=False)
+    economia_viva, _ = correr(0.05, 0.30, adaptativo=True)
+    checar(economia_fixa == 0.0, f"sala barulhenta: o limiar fixo não economiza nada ({economia_fixa:.0%})")
+    checar(
+        economia_viva > 0.80,
+        f"calibrado, o mesmo material economiza {economia_viva:.0%} dos blocos",
+    )
+
+    # --- Aposta perdida nº 2: sala silenciosa, microfone de ganho baixo ---
+    # A fala inteira acontece ABAIXO do limiar fixo. É a falha cara: o portão
+    # não gasta token nenhum porque comeu a pergunta.
+    _, transmitidos_fixo = correr(0.002, 0.030, adaptativo=False)
+    _, transmitidos_vivo = correr(0.002, 0.030, adaptativo=True)
+    checar(
+        transmitidos_fixo == 0,
+        f"microfone fraco: o limiar fixo come a pergunta inteira ({transmitidos_fixo} blocos)",
+    )
+    checar(
+        transmitidos_vivo >= 80,
+        f"calibrado, as duas perguntas passam ({transmitidos_vivo} blocos de 80)",
+    )
+
+    # E a garantia que vale acima de tudo: por mais alta que a sala esteja, o
+    # limiar nunca sobe até onde a fala normal (>0.1) deixaria de passar.
+    ensurdecedora = PortaoDeVoz(pre_roll=0, cauda=0.0)
+    for i in range(400):
+        ensurdecedora.avaliar(b"\x00\x00", 0.35, i * 0.064)
+    checar(
+        ensurdecedora.limiar <= VOICE_GATE_THRESHOLD_MAX < 0.1,
+        f"o limiar calibrado nunca passa do teto ({ensurdecedora.limiar:.3f})",
+    )
+    checar(
+        ensurdecedora.avaliar(b"\x11\x11", 0.12, 400 * 0.064) == [b"\x11\x11"],
+        "e fala normal continua passando na sala mais barulhenta possível",
+    )
+
+
 def teste_economia_com_jogo() -> None:
     """A conta que justifica a janela retroativa do áudio do jogo.
 
@@ -411,6 +534,31 @@ def teste_caderno_navegavel() -> None:
     checar(termos(filtro=FILTRO_DIFICEIS) == ["ghoul"], "erros repetidos marcam como difícil")
     checar("thane" not in termos(filtro=FILTRO_DIFICEIS), "palavra nunca revisada não é difícil")
 
+    # --- Jogo: uma dimensão SEPARADA do estado de revisão ---
+    checar(store.jogos() == ["Fallout", "Skyrim"], "os jogos vêm do caderno, do maior para o menor")
+    checar(sorted(termos(jogo="Fallout")) == ["ghoul", "wasteland"], "filtra por jogo")
+    checar(termos(jogo="Skyrim") == ["thane"], "e por outro jogo")
+    checar(termos(jogo="Cyberpunk 2077") == [], "jogo sem palavras devolve vazio")
+    # O ponto do recorte ser em dois eixos: as duas perguntas ao mesmo tempo.
+    checar(
+        termos(filtro=FILTRO_DIFICEIS, jogo="Fallout") == ["ghoul"],
+        "'difíceis' E 'do Fallout' se combinam",
+    )
+    checar(
+        termos(filtro=FILTRO_DIFICEIS, jogo="Skyrim") == [],
+        "e a combinação exclui de verdade",
+    )
+    checar(termos(busca="ghoul", jogo="Skyrim") == [], "o jogo também recorta a busca")
+    checar(termos(busca="ghoul", jogo="Fallout") == ["ghoul"], "e a deixa passar no jogo certo")
+
+    store.registrar("perk", "vantagem")  # sem jogo
+    checar(
+        "" not in store.jogos() and len(store.jogos()) == 2,
+        "palavra sem jogo não vira uma opção de seletor",
+    )
+    checar("perk" in termos(), "mas continua alcançável por 'todas'")
+    store.remover("perk")
+
     entrada = store.listar(busca="wasteland")[0]
     checar(entrada.dias_ate_revisao > 1 and not entrada.vencida, "palavra agendada não está vencida")
     checar(entrada.dominada, "intervalo longo conta como dominada")
@@ -478,6 +626,39 @@ def teste_config() -> None:
     except ConfigurationError:
         checar(True, "rejeita a chave de exemplo")
 
+    # --- Estimativa de custo. Sem preço no .env não há palpite: um número
+    #     sobre dinheiro que envelheceu é pior que número nenhum, porque não
+    #     parece errado e ninguém confere.
+    os.environ["GEMINI_API_KEY"] = "AIzaTESTE1234567890"
+    for lixo in ("PRECO_POR_MILHAO_TOKENS", "MOEDA"):
+        os.environ.pop(lixo, None)
+    mudo = AppConfiguration.load(base)
+    checar(mudo.preco_por_milhao == 0.0, "sem preço configurado, o preço é zero")
+    checar(mudo.custo_de(1_000_000) == "", "e sem preço não se diz nada sobre dinheiro")
+
+    os.environ["PRECO_POR_MILHAO_TOKENS"] = "3,00"  # vírgula: é assim que se escreve
+    cotado = AppConfiguration.load(base)
+    checar(cotado.preco_por_milhao == 3.0, "a vírgula decimal é aceita")
+    checar(cotado.custo_de(1_000_000) == "~US$ 3,00", "um milhão de tokens custa o preço cheio")
+    checar(cotado.custo_de(500_000) == "~US$ 1,50", "meio milhão custa metade")
+    checar(cotado.custo_de(0) == "" and cotado.custo_de(-5) == "", "sem tokens, sem custo")
+    # Abaixo de meio centavo só se pode dizer "0,00", que ocupa espaço no
+    # rodapé sem informar nada.
+    checar(cotado.custo_de(100) == "", "valor que arredonda para zero não é exibido")
+    checar(cotado.custo_de(2_000) == "~US$ 0,01", "e a partir de um centavo aparece")
+    # Milhar com ponto e decimal com vírgula, como se escreve em português.
+    checar(cotado.custo_de(1_000_000_000) == "~US$ 3.000,00", "milhar em português")
+
+    os.environ["MOEDA"] = "R$"
+    checar(AppConfiguration.load(base).custo_de(1_000_000) == "~R$ 3,00", "a moeda é um rótulo")
+
+    os.environ["PRECO_POR_MILHAO_TOKENS"] = "de graça"
+    checar(AppConfiguration.load(base).custo_de(1_000_000) == "", "preço ilegível desliga, não quebra")
+    os.environ["PRECO_POR_MILHAO_TOKENS"] = "-2"
+    checar(AppConfiguration.load(base).custo_de(1_000_000) == "", "preço negativo também desliga")
+    for lixo in ("PRECO_POR_MILHAO_TOKENS", "MOEDA"):
+        os.environ.pop(lixo, None)
+
     prefs = Preferences(persona="Instrutor Rígido")
     prefs.save()
     checar(Preferences.load().persona == "Instrutor Rígido", "preferências persistem")
@@ -534,6 +715,139 @@ def teste_config() -> None:
     env.unlink(missing_ok=True)
 
 
+def teste_importacao() -> None:
+    """Trazer termos de fora sem destruir o que já está dentro.
+
+    A regra que este teste protege é uma só: palavra que já existe é deixada
+    EM PAZ. Ela carrega facilidade, intervalo, próxima revisão, acertos e
+    erros — meses de repetição espaçada que um arquivo de texto não tem como
+    conhecer. Um import que "atualizasse" levaria o agendamento junto, e o
+    jogador perderia o progresso justamente ao tentar somar a ele.
+    """
+    print("importação")
+    from pipboy.vocabulary import interpretar_linha
+
+    # --- A leitura de uma linha, isolada. É o número de COLUNAS que decide o
+    #     formato: adivinhar pelo conteúdo quebraria na palavra exportada sem
+    #     exemplo, cujo jogo na terceira coluna viraria exemplo.
+    checar(interpretar_linha([]) is None, "linha vazia não vira palavra")
+    checar(interpretar_linha(["  "]) is None, "termo em branco não vira palavra")
+    checar(interpretar_linha(["ghoul"]) is None, "termo sem tradução não vira palavra")
+    checar(interpretar_linha(["ghoul", "  "]) is None, "tradução em branco também não")
+    checar(
+        interpretar_linha(["ghoul", "carniçal"]) == ("ghoul", "carniçal", "", ""),
+        "duas colunas são termo e tradução",
+    )
+    checar(
+        interpretar_linha(["ghoul", "carniçal<br><i>A ghoul.</i>", "Fallout"])
+        == ("ghoul", "carniçal", "A ghoul.", "Fallout"),
+        "três colunas são o formato desta casa, com o exemplo dentro do verso",
+    )
+    checar(
+        interpretar_linha(["ghoul", "carniçal", "Fallout"])
+        == ("ghoul", "carniçal", "", "Fallout"),
+        "e sem exemplo a terceira coluna continua sendo o JOGO, não o exemplo",
+    )
+    checar(
+        interpretar_linha(["ghoul", "carniçal", "A ghoul.", "Fallout", "sobra"])
+        == ("ghoul", "carniçal", "A ghoul.", "Fallout"),
+        "quatro colunas são um campo cada, e o excedente é descartado",
+    )
+    checar(
+        interpretar_linha(["ghoul", "carniçal<br/><i>A ghoul.</i>", ""])[2] == "A ghoul.",  # type: ignore[index]
+        "a quebra também é reconhecida na forma <br/>",
+    )
+    checar(
+        interpretar_linha(["  ghoul  crawls ", "carniçal"])[0] == "ghoul crawls",  # type: ignore[index]
+        "espaço de sobra é normalizado",
+    )
+
+    # --- Ida e volta com a própria exportação, que é o caso principal.
+    origem = VocabularyStore(Path(tempfile.mkdtemp()) / "origem.sqlite3")
+    origem.registrar("wasteland", "terra devastada", "Welcome to the wasteland.", "Fallout")
+    origem.registrar("ghoul", "carniçal", "", "Fallout")  # sem exemplo: o caso frágil
+    origem.registrar("bonfire", "fogueira", "Rest here.", "Elden Ring")
+    arquivo = Path(tempfile.mkdtemp()) / "vocabulario.txt"
+    origem.exportar_csv(arquivo)
+
+    destino = VocabularyStore(Path(tempfile.mkdtemp()) / "destino.sqlite3")
+    resultado = destino.importar_csv(arquivo)
+    checar(resultado.novos == 3 and resultado.total == 3, f"os três termos entram ({resultado})")
+    trazidas = {e.termo: e for e in destino.listar()}
+    checar(trazidas["wasteland"].exemplo == "Welcome to the wasteland.", "o exemplo sobrevive")
+    checar(trazidas["wasteland"].jogo == "Fallout", "o jogo sobrevive")
+    checar(trazidas["ghoul"].exemplo == "", "palavra sem exemplo não ganha um do nada")
+    checar(trazidas["ghoul"].jogo == "Fallout", "e o jogo dela não vira exemplo")
+    checar(trazidas["bonfire"].vencida, "termo importado entra vencido, para o próximo quiz")
+
+    # --- A regra central: reimportar não mexe em quem já está lá.
+    for _ in range(6):
+        destino.avaliar("wasteland", True)
+    antes = destino.listar(busca="wasteland")[0]
+    de_novo = destino.importar_csv(arquivo)
+    checar(
+        de_novo.novos == 0 and de_novo.existentes == 3,
+        f"reimportar não duplica nem cria nada ({de_novo})",
+    )
+    depois = destino.listar(busca="wasteland")[0]
+    checar(
+        (depois.intervalo_dias, depois.acertos, depois.proxima_revisao)
+        == (antes.intervalo_dias, antes.acertos, antes.proxima_revisao),
+        "o agendamento de quem já estava lá fica intacto",
+    )
+    checar(depois.encontros == antes.encontros, "e importar não conta como reencontro")
+    checar(destino.total() == 3, "o total não cresce")
+
+    # --- Lixo no arquivo não pode custar as linhas boas.
+    sujo = Path(tempfile.mkdtemp()) / "sujo.txt"
+    sujo.write_text(
+        "\n".join([
+            "perk\tvantagem\tYou gained a perk.\tFallout",
+            "",                      # linha vazia
+            "\tsó tradução",         # sem termo
+            "só termo",              # sem tradução
+            "stimpak\testimulante",  # mínimo válido
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    misto = destino.importar_csv(sujo)
+    checar(misto.novos == 2, f"as duas linhas boas entram ({misto.novos})")
+    checar(misto.ignorados == 3, f"e as três ruins são contadas, não fatais ({misto.ignorados})")
+    checar(destino.listar(busca="perk")[0].jogo == "Fallout", "a linha de quatro colunas é lida")
+
+    # Arquivo que não é um TSV nenhum — um log trocado por engano — não estoura.
+    lixo = Path(tempfile.mkdtemp()) / "lixo.txt"
+    lixo.write_text("isto não é um caderno\noutra linha qualquer\n", encoding="utf-8")
+    nada = destino.importar_csv(lixo)
+    checar(nada.novos == 0 and nada.ignorados == 2, "arquivo sem colunas não importa nada")
+
+    # Maiúsculas: o índice único é NOCASE, então 'GHOUL' não vira uma segunda
+    # entrada de 'ghoul'.
+    caixa = Path(tempfile.mkdtemp()) / "caixa.txt"
+    caixa.write_text("GHOUL\tcarniçal\n", encoding="utf-8")
+    checar(destino.importar_csv(caixa).existentes == 1, "maiúsculas não duplicam a palavra")
+    origem.close()
+    destino.close()
+
+
+def teste_movimento_reduzido() -> None:
+    """A preferência de animação do sistema, lida sem derrubar nada.
+
+    O valor depende da máquina e não pode ser afirmado; o que PODE ser
+    exigido é que a leitura sempre responda, e responda um booleano. Uma
+    chamada de ctypes com assinatura errada estoura, e este é o único lugar
+    do projeto onde ela acontece.
+    """
+    print("preferência de animação do sistema")
+    from pipboy.config import movimento_reduzido
+
+    resposta = movimento_reduzido()
+    checar(isinstance(resposta, bool), f"a leitura devolve um booleano ({resposta!r})")
+    checar(movimento_reduzido() == resposta, "e a mesma resposta duas vezes seguidas")
+    if sys.platform != "win32":
+        checar(resposta is False, "fora do Windows não há o que perguntar")
+
+
 def teste_design() -> None:
     """Contraste e coerência das dez paletas.
 
@@ -549,6 +863,54 @@ def teste_design() -> None:
     print("design")
     from pipboy import design
     from pipboy.themes import TEMAS
+
+    # --- Régua do medidor de nível ---
+    # A régua linear que existia gastava as dezoito barras numa faixa que o
+    # sinal nunca visita: sala silenciosa em 0.005–0.02, fala normal a partir
+    # de 0.1. Alguém falando em bom volume acendia DUAS barras de dezoito e
+    # concluía, com razão, que o microfone estava quebrado.
+    escala = design.escala_do_medidor
+    checar(escala(0.0) == 0.0 and escala(design.MEDIDOR_PISO) == 0.0, "abaixo do piso, chão")
+    checar(escala(1.0) == 1.0 and escala(2.0) == 1.0, "o topo satura em 1.0")
+    pontos = [0.004, 0.01, 0.035, 0.09, 0.2, 0.6, 1.0]
+    checar(
+        all(escala(a) < escala(b) for a, b in itertools.pairwise(pontos)),
+        "a régua é monotônica em toda a faixa útil",
+    )
+    checar(
+        escala(0.1) > 0.55,
+        f"fala normal (0.1) passa da metade da régua, e não de 10% ({escala(0.1):.0%})",
+    )
+    checar(
+        escala(0.02) < 0.35,
+        f"sala silenciosa fica no primeiro terço ({escala(0.02):.0%})",
+    )
+    # É esta distância que torna o risco do limiar legível: no linear, 0.035 e
+    # 0.1 distam 6,5% da régua — menos de uma barra e meia de dezoito.
+    checar(
+        escala(0.1) - escala(0.035) > 0.15,
+        f"entre o limiar típico e a fala normal cabem barras ({escala(0.1) - escala(0.035):.0%})",
+    )
+
+    # --- Tamanho do texto ---
+    # A rampa é o produto: se dois degraus colidem numa escala, a hierarquia
+    # tipográfica desaparece justamente para quem pediu letra maior.
+    checar(design.escalar(11, 1.0) == 11, "escala 1.0 não mexe em nada")
+    checar(design.escalar(8, 1.3) == 10 and design.escalar(19, 1.3) == 25, "escala arredonda")
+    checar(design.escalar(2, 0.5) == 6, "o piso protege do arredondamento a zero")
+    degraus = [t.tamanho for t in design.TIPO.values()]
+    for fator in (1.0, 1.15, 1.30):
+        escalados = [design.escalar(d, fator) for d in degraus]
+        ordem_igual = all(
+            (a < b) == (design.escalar(a, fator) < design.escalar(b, fator))
+            or design.escalar(a, fator) == design.escalar(b, fator)
+            for a in degraus
+            for b in degraus
+        )
+        checar(
+            min(escalados) >= 6 and ordem_igual,
+            f"a rampa sobrevive à escala {fator} sem inverter degraus",
+        )
 
     checar(design.contraste("#000000", "#ffffff") > 20.9, "contraste preto/branco é 21:1")
     checar(design.garantir_contraste("#0a1208", "#0a1208") != "#0a1208", "corrige cor sobre si mesma")
@@ -996,6 +1358,34 @@ def teste_progresso() -> None:
     novas, aprendendo, dominadas = store.dominio()
     checar((novas, aprendendo) == (3, 1), "um acerto move a palavra para aprendendo")
 
+    # A semana é ISO. Com %Y-%W, a semana que atravessa o Ano-Novo era partida
+    # em dois baldes ('2026-52' e '2027-00'), e uma vez por ano o painel
+    # mostrava a barra da virada pela metade mais uma barra fantasma.
+    from datetime import datetime as _dt
+    from datetime import timedelta, timezone
+
+    from pipboy.vocabulary import _semana_de
+
+    virada = [_dt(2026, 12, 28), _dt(2026, 12, 31), _dt(2027, 1, 1), _dt(2027, 1, 3)]
+    checar(
+        len({_semana_de(d) for d in virada}) == 1,
+        "a semana que atravessa o Ano-Novo é um balde só",
+    )
+    checar(
+        _semana_de(_dt(2027, 1, 4)) != _semana_de(_dt(2027, 1, 3)),
+        "a segunda-feira seguinte abre um balde novo",
+    )
+    checar(
+        all(len(r.split("/")) == 2 for r, _ in store.novas_por_semana(8)),
+        "todo balde recebe um rótulo de data",
+    )
+    hoje = _dt.now(timezone.utc).astimezone()
+    segunda = (hoje - timedelta(days=hoje.weekday())).strftime("%d/%m")
+    checar(
+        store.novas_por_semana(8)[-1][0] == segunda,
+        "o rótulo do balde é a segunda-feira dele, não o dia de hoje",
+    )
+
 
 def teste_regressoes() -> None:
     """Defeitos que já existiram uma vez. Cada linha aqui é uma cicatriz.
@@ -1375,6 +1765,246 @@ def teste_historico() -> None:
     morta.marcar_atividade((hoje - timedelta(days=2)).isoformat())
     checar(morta.sequencia_atual() == 0, "dois dias parado zera a sequência")
 
+    # Retenção: o histórico é o único banco que crescia sem teto.
+    from datetime import datetime, timezone
+
+    velho = HistoricoStore(Path(tempfile.mkdtemp()) / "poda.sqlite3")
+    antiga = velho.iniciar_sessao(jogo="Fallout")
+    recente = velho.iniciar_sessao(jogo="GTA")
+    velho.registrar_fala(antiga, autor="VOCÊ", tag="usuario", texto="fala velha")
+    velho.registrar_fala(recente, autor="VOCÊ", tag="usuario", texto="fala nova")
+    velho.marcar_atividade((hoje - timedelta(days=400)).isoformat())
+    # Envelhece a primeira à força: o relógio não anda dentro de um teste.
+    with velho._lock:
+        velho._connection.execute(
+            "UPDATE sessoes SET iniciada_em = ? WHERE id = ?",
+            (
+                (datetime.now(timezone.utc).astimezone() - timedelta(days=400)).isoformat(
+                    timespec="seconds"
+                ),
+                antiga,
+            ),
+        )
+        velho._connection.commit()
+
+    checar(velho.podar_antigas(dias=0) == 0, "retenção desligada não apaga nada")
+    checar(velho.podar_antigas() == 1, "a sessão de 400 dias atrás é podada")
+    checar(velho.total_sessoes() == 1, "a sessão recente fica")
+    checar(velho.falas_de(antiga) == [], "as falas da podada vão junto (CASCADE)")
+    checar(velho.falas_de(recente) != [], "as falas da recente ficam")
+    checar(
+        velho.sequencia_atual() >= 0 and velho.podar_antigas() == 0,
+        "podar duas vezes não apaga o que já respeita a retenção",
+    )
+    # A sequência de estudo é medida em anos e NÃO acompanha a poda das
+    # conversas: apagá-la junto tiraria a única constância que o programa mede.
+    with velho._lock:
+        dias_marcados = velho._connection.execute("SELECT COUNT(*) FROM atividade").fetchone()[0]
+    checar(int(dias_marcados) == 1, "o dia de estudo de 400 dias atrás sobrevive à poda")
+
+
+def teste_palavra_ate_a_conversa() -> None:
+    """O fio entre os dois bancos: de uma palavra do caderno até a conversa.
+
+    Não há chave estrangeira entre eles — são separados de propósito —, então
+    o elo é o INSTANTE. O que separa uma resposta de um palpite é exigir o
+    instante dentro do período fechado da sessão: com a regra frouxa ("a
+    última sessão que começou antes"), uma palavra cuja conversa saiu do
+    histórico cairia numa sessão anterior qualquer, e o jogador abriria uma
+    conversa que nada tem a ver com a palavra que clicou.
+    """
+    print("da palavra até a conversa")
+    from datetime import datetime, timedelta
+
+    from pipboy.historico import HistoricoStore, sessao_em
+
+    periodos = [
+        (1, "2026-01-10T20:00:00-03:00", "2026-01-10T20:40:00-03:00"),
+        (2, "2026-01-12T21:00:00-03:00", "2026-01-12T21:30:00-03:00"),
+    ]
+    checar(sessao_em(periodos, "2026-01-10T20:15:00-03:00") == 1, "instante dentro da 1ª sessão")
+    checar(sessao_em(periodos, "2026-01-12T21:29:59-03:00") == 2, "instante dentro da 2ª sessão")
+    checar(sessao_em(periodos, "2026-01-10T20:00:00-03:00") == 1, "o começo conta como dentro")
+    checar(sessao_em(periodos, "2026-01-10T20:40:00-03:00") == 1, "o fim também conta")
+    checar(sessao_em(periodos, "2026-01-11T12:00:00-03:00") is None, "entre sessões, nenhuma")
+    checar(sessao_em(periodos, "2026-01-09T12:00:00-03:00") is None, "antes de tudo, nenhuma")
+    checar(sessao_em(periodos, "2026-01-20T12:00:00-03:00") is None, "depois de tudo, nenhuma")
+    checar(sessao_em([], "2026-01-10T20:15:00-03:00") is None, "sem sessões, nenhuma")
+    # A regra frouxa que este teste existe para impedir: a palavra de uma
+    # conversa apagada NÃO pode cair na conversa anterior que sobrou.
+    checar(
+        sessao_em(periodos[:1], "2026-01-12T21:15:00-03:00") is None,
+        "conversa apagada não empurra a palavra para a sessão anterior",
+    )
+    # Sessões sobrepostas não deveriam existir, mas se existirem a mais
+    # recente é a resposta — não a primeira que a varredura encontrar.
+    sobrepostas = [
+        (1, "2026-02-01T10:00:00-03:00", "2026-02-01T12:00:00-03:00"),
+        (2, "2026-02-01T11:00:00-03:00", "2026-02-01T13:00:00-03:00"),
+    ]
+    checar(sessao_em(sobrepostas, "2026-02-01T11:30:00-03:00") == 2, "empate resolve pela mais recente")
+    # Carimbo tem resolução de UM SEGUNDO: encerrar e recomeçar na mesma
+    # batida produz períodos idênticos. A resposta não pode depender da ordem
+    # em que o banco devolveu as linhas — nenhuma cláusula a garante.
+    identicos = [
+        (7, "2026-03-01T09:00:00-03:00", "2026-03-01T09:00:00-03:00"),
+        (8, "2026-03-01T09:00:00-03:00", "2026-03-01T09:00:00-03:00"),
+    ]
+    checar(
+        sessao_em(identicos, "2026-03-01T09:00:00-03:00") == 8
+        and sessao_em(list(reversed(identicos)), "2026-03-01T09:00:00-03:00") == 8,
+        "períodos idênticos resolvem pela sessão mais nova, em qualquer ordem",
+    )
+
+    # E o caminho de verdade, ponta a ponta, com os dois bancos reais.
+    store = VocabularyStore(Path(tempfile.mkdtemp()) / "fio.sqlite3")
+    hist = HistoricoStore(Path(tempfile.mkdtemp()) / "fio-h.sqlite3")
+
+    sessao = hist.iniciar_sessao(jogo="Fallout", modo="Tutor Conversacional")
+    hist.registrar_fala(sessao, autor="VOCÊ", tag="usuario", texto="o que é wasteland?")
+    entrada, _ = store.registrar("wasteland", "terra devastada", "Welcome.", "Fallout")
+    hist.registrar_fala(
+        sessao, autor="", tag="vocab", texto="⊕ wasteland — terra devastada"
+    )
+    checar(entrada.criado_em != "", "a entrada carrega o instante em que nasceu")
+
+    achada = sessao_em(hist.periodos(), entrada.criado_em)
+    checar(achada == sessao, f"a palavra aponta para a sessão em que foi ensinada ({achada})")
+    checar(hist.sessao(sessao) is not None, "a sessão é recuperável pelo id")
+    checar(hist.sessao(9999) is None, "id inexistente devolve None")
+
+    # Reencontrar a palavra numa sessão POSTERIOR não muda o nascimento dela:
+    # o botão do caderno leva à conversa que a ensinou, não à última em que
+    # ela passou.
+    #
+    # A segunda sessão é empurrada uma hora para a frente à força. Sem isso,
+    # tudo neste teste cai no MESMO SEGUNDO — os carimbos têm essa resolução —
+    # e as duas sessões ficariam com períodos idênticos, o que não é o cenário
+    # que se quer medir aqui (esse já está coberto acima, com `identicos`).
+    outra = hist.iniciar_sessao(jogo="Elden Ring")
+    hist.registrar_fala(outra, autor="VOCÊ", tag="usuario", texto="wasteland de novo")
+    with hist._lock:
+        depois = (
+            datetime.fromisoformat(entrada.criado_em) + timedelta(hours=1)
+        ).isoformat(timespec="seconds")
+        hist._connection.execute(
+            "UPDATE sessoes SET iniciada_em = ? WHERE id = ?", (depois, outra)
+        )
+        hist._connection.execute(
+            "UPDATE falas SET quando = ? WHERE sessao_id = ?", (depois, outra)
+        )
+        hist._connection.commit()
+
+    de_novo, nova = store.registrar("wasteland", "ermo", jogo="Elden Ring")
+    checar(not nova and de_novo.criado_em == entrada.criado_em, "o reencontro não move o nascimento")
+    checar(
+        sessao_em(hist.periodos(), de_novo.criado_em) == sessao,
+        "e o fio continua apontando para a primeira conversa",
+    )
+
+    # Sessão apagada: a palavra fica, o destino some — e some sem apontar
+    # para o lugar errado.
+    hist.remover_sessao(sessao)
+    checar(
+        sessao_em(hist.periodos(), entrada.criado_em) is None,
+        "apagada a conversa, a palavra não tem mais para onde voltar",
+    )
+    checar(store.total() == 1, "e a palavra continua no caderno")
+    store.close()
+    hist.close()
+
+
+def teste_busca_entre_conversas() -> None:
+    """Achar a conversa quando não se sabe qual é.
+
+    A busca que existia era DENTRO da transcrição aberta, o que só serve a
+    quem já sabe em qual conversa procurar — e ninguém sabe. A contagem por
+    sessão é parte da resposta: quatro conversas com uma menção e uma com
+    dezessete não são a mesma coisa, e sem o número o jogador abre as cinco
+    para descobrir isso.
+    """
+    print("busca entre conversas")
+    from pipboy.historico import HistoricoStore
+
+    hist = HistoricoStore(Path(tempfile.mkdtemp()) / "busca.sqlite3")
+    a = hist.iniciar_sessao(jogo="Fallout")
+    hist.registrar_fala(a, autor="VOCÊ", tag="usuario", texto="o que é wasteland?")
+    hist.registrar_fala(a, autor="PIP-BOY", tag="assistente", texto="Wasteland é terra devastada.")
+    hist.registrar_fala(a, autor="", tag="vocab", texto="⊕ wasteland — terra devastada")
+    b = hist.iniciar_sessao(jogo="Elden Ring")
+    hist.registrar_fala(b, autor="VOCÊ", tag="usuario", texto="e bonfire?")
+    hist.registrar_fala(b, autor="MENSAGEIRO", tag="assistente", texto="Fogueira, para descansar.")
+
+    achados = hist.buscar_sessoes("wasteland")
+    checar(len(achados) == 1 and achados[0][0].id == a, "só a conversa que menciona aparece")
+    checar(achados[0][1] == 3, f"conta as falas que casam, não as da sessão ({achados[0][1]})")
+    checar(achados[0][0].falas == 3, "e o total da sessão continua ali, para comparar")
+
+    checar(hist.buscar_sessoes("WASTELAND")[0][0].id == a, "a busca ignora maiúsculas")
+    checar(len(hist.buscar_sessoes("fogueira")) == 1, "acha pelo texto do assistente")
+    checar(len(hist.buscar_sessoes("MENSAGEIRO")) == 1, "e também pelo autor")
+    checar(hist.buscar_sessoes("nada disso") == [], "termo ausente não devolve conversa")
+    checar(hist.buscar_sessoes("") == [] and hist.buscar_sessoes("   ") == [], "busca vazia é vazia")
+
+    # Curinga digitado não pode escancarar o histórico: '%' é o LIKE do
+    # SQLite, e sem ESCAPE ele casaria com absolutamente tudo.
+    checar(hist.buscar_sessoes("%") == [], "'%' é procurado ao pé da letra, não como curinga")
+    checar(hist.buscar_sessoes("_") == [], "'_' também")
+    hist.registrar_fala(a, autor="VOCÊ", tag="usuario", texto="isto tem 100% de certeza")
+    checar(len(hist.buscar_sessoes("100%")) == 1, "e um '%' literal continua sendo encontrado")
+
+    # Uma conversa mencionada em duas sessões aparece nas duas, ordenada da
+    # mais recente para a mais antiga.
+    hist.registrar_fala(b, autor="VOCÊ", tag="usuario", texto="lembra do wasteland?")
+    ordenados = hist.buscar_sessoes("wasteland")
+    checar(len(ordenados) == 2, "as duas conversas que mencionam aparecem")
+    checar(ordenados[0][0].id >= ordenados[1][0].id, "a mais recente vem primeiro")
+    hist.close()
+
+
+def teste_banco() -> None:
+    """Modo de diário das conexões.
+
+    O WAL não é ajuste fino: cada frase transcrita vira um commit na thread da
+    interface, e no modo padrão cada commit é um fsync no meio do laço de
+    eventos do Qt.
+    """
+    print("banco")
+    from pipboy.banco import conectar
+    from pipboy.historico import HistoricoStore
+
+    conexao = conectar(Path(tempfile.mkdtemp()) / "b.sqlite3")
+    modo = str(conexao.execute("PRAGMA journal_mode").fetchone()[0]).lower()
+    checar(modo == "wal", f"conexão nova abre em WAL ({modo})")
+    checar(
+        int(conexao.execute("PRAGMA synchronous").fetchone()[0]) == 1,
+        "synchronous=NORMAL acompanha o WAL",
+    )
+    conexao.execute("CREATE TABLE t (v TEXT)")
+    conexao.execute("INSERT INTO t VALUES ('ok')")
+    conexao.commit()
+    checar(conexao.execute("SELECT v FROM t").fetchone()["v"] == "ok", "row_factory é Row")
+    conexao.close()
+
+    # Os dois stores passam por ele; o caderno tem teste de backup próprio, e
+    # a cópia precisa continuar íntegra com o banco de origem em WAL.
+    vocab = VocabularyStore(Path(tempfile.mkdtemp()) / "wal.sqlite3")
+    vocab.registrar("wasteland", "terra devastada", jogo="Fallout")
+    pasta = Path(tempfile.mkdtemp()) / "backups"
+    copia = vocab.criar_backup(pasta)
+    checar(copia is not None and copia.exists(), "backup sai com o banco em WAL")
+    if copia is not None:
+        lida = VocabularyStore(copia)
+        checar(lida.total() == 1, "a cópia feita a partir de um banco WAL é legível")
+        lida.close()
+    vocab.close()
+
+    hist = HistoricoStore(Path(tempfile.mkdtemp()) / "hwal.sqlite3")
+    with hist._lock:
+        chaves = int(hist._connection.execute("PRAGMA foreign_keys").fetchone()[0])
+    checar(chaves == 1, "o WAL não atropelou o PRAGMA foreign_keys do histórico")
+    hist.close()
+
 
 def teste_deteccao() -> None:
     """Reconhecimento do jogo pela lista de processos.
@@ -1469,11 +2099,14 @@ def main() -> int:
         teste_vocabulario,
         teste_portao_de_eco,
         teste_portao_de_voz,
+        teste_piso_de_ruido,
         teste_sinal_de_atividade,
         teste_economia_com_jogo,
         teste_caderno_navegavel,
         teste_profiles,
         teste_config,
+        teste_importacao,
+        teste_movimento_reduzido,
         teste_design,
         teste_contagem_tokens,
         teste_classificacao_de_erro,
@@ -1484,7 +2117,10 @@ def main() -> int:
         teste_backup,
         teste_regressoes,
         teste_sons,
+        teste_banco,
         teste_historico,
+        teste_palavra_ate_a_conversa,
+        teste_busca_entre_conversas,
         teste_deteccao,
         teste_crash,
     ):

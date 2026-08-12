@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import design
+from ..historico import sessao_em
 from ..vocabulary import (
     FILTRO_DIFICEIS,
     FILTRO_DOMINADAS,
@@ -51,7 +52,13 @@ from ..vocabulary import (
     VocabularyStore,
 )
 from .atmosfera import Cenario
-from .componentes import Botao, Desvanecer, caminho_forma
+from .componentes import (
+    Botao,
+    CampoSelecao,
+    Desvanecer,
+    caminho_forma,
+    css_campo_selecao,
+)
 from .dialogo import confirmar_remocao
 from .moldura import (
     BarraDeTitulo,
@@ -76,6 +83,9 @@ LIMITE_CARTOES = 250
 # "wasteland" dispara nove consultas e nove reconstruções da lista.
 ESPERA_BUSCA_MS = 180
 
+# Primeira opção do seletor de jogo — a que não filtra nada.
+TODOS_OS_JOGOS = "Todos os jogos"
+
 
 def _plural(quantidade: int, singular: str, plural: str) -> str:
     return f"{quantidade} {singular if quantidade == 1 else plural}"
@@ -99,6 +109,7 @@ class CartaoTermo(QFrame):
         *,
         janela: Any,
         ao_remover: Callable[[Entrada], None],
+        sessao: int | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -135,6 +146,32 @@ class CartaoTermo(QFrame):
             " background: transparent;"
         )
         topo.addWidget(selo)
+
+        # De volta à conversa em que a palavra nasceu. O caderno guarda o QUE
+        # foi ensinado; o histórico guarda o EM QUE MOMENTO — e a palavra sem
+        # o contexto em que ela apareceu é metade da memória. Os dois bancos
+        # já tinham tudo para fechar esse arco e não havia porta entre eles.
+        #
+        # O botão só existe quando há conversa: desabilitado, ele diz por quê,
+        # em vez de simplesmente não reagir ao clique.
+        self.botao_conversa = conversa = Botao(
+            "◷", variante="sutil", paleta=janela.paleta, forma=self._forma
+        )
+        conversa.setFont(janela.fonte("corpo_forte"))
+        conversa.setFixedSize(28, 28)
+        conversa.setEnabled(sessao is not None)
+        if sessao is None:
+            conversa.setToolTip(
+                "A conversa em que esta palavra apareceu não está no histórico."
+            )
+            conversa.setAccessibleName(f"Conversa de {entrada.termo} indisponível")
+        else:
+            conversa.setToolTip(f"Abrir a conversa em que “{entrada.termo}” foi ensinada")
+            conversa.setAccessibleName(f"Abrir a conversa de {entrada.termo}")
+            conversa.clicked.connect(
+                lambda _=False, s=sessao: janela.abrir_conversa(s, entrada.termo)
+            )
+        topo.addWidget(conversa)
 
         # "×" (U+00D7, Latin-1) e não "✕" (U+2715, Dingbats): o segundo não
         # existe em Consolas nem em Georgia — as fontes de metade dos temas —
@@ -211,6 +248,7 @@ class JanelaCaderno(QDialog):
         self._janela = janela
         self._store = store
         self._filtro = FILTRO_TODAS
+        self._jogo = ""
         self._cartoes: list[QWidget] = []
 
         # Só a camada estática do cenário: o mesmo material da janela
@@ -292,6 +330,22 @@ class JanelaCaderno(QDialog):
             filtros.addWidget(chip)
             self.chips[valor] = chip
         filtros.addStretch(1)
+
+        # O jogo é uma dimensão SEPARADA do estado de revisão, e por isso não é
+        # mais um chip: "difíceis" e "do Cyberpunk" são perguntas independentes,
+        # e quem quer as duas ao mesmo tempo — o pedido natural de quem acabou
+        # de trocar de jogo — não conseguiria se elas disputassem o mesmo
+        # controle. Na mesma linha dos chips, à direita, porque é o mesmo
+        # assunto: recortar a lista.
+        self.campo_jogo = CampoSelecao()
+        self.campo_jogo.setSizeAdjustPolicy(
+            CampoSelecao.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.campo_jogo.setMinimumContentsLength(14)
+        self.campo_jogo.setAccessibleName("Filtrar por jogo")
+        self.campo_jogo.setToolTip("Mostrar só o vocabulário de um jogo")
+        self.campo_jogo.currentIndexChanged.connect(lambda _: self.atualizar())
+        filtros.addWidget(self.campo_jogo)
         coluna.addLayout(filtros)
 
         self.rolagem = QScrollArea(objectName="cadernoRolagem")
@@ -341,6 +395,13 @@ class JanelaCaderno(QDialog):
         self.botao_exportar.setToolTip("Salvar o caderno como TSV para o Anki ou como Markdown")
         self.botao_exportar.clicked.connect(self._janela.exportar_vocabulario)
         rodape.addWidget(self.botao_exportar)
+        self.botao_importar = Botao("↑   Importar", variante="sutil", paleta=self._janela.paleta)
+        self.botao_importar.setToolTip(
+            "Somar ao caderno os termos de um arquivo TSV. Palavras que já existem "
+            "ficam como estão — o histórico de revisão delas não é tocado."
+        )
+        self.botao_importar.clicked.connect(self._janela.importar_vocabulario)
+        rodape.addWidget(self.botao_importar)
         self.botao_fechar = Botao("Fechar", variante="acento", paleta=self._janela.paleta)
         self.botao_fechar.clicked.connect(self.close)
         rodape.addWidget(self.botao_fechar)
@@ -370,8 +431,11 @@ class JanelaCaderno(QDialog):
         for chip in self.chips.values():
             chip.setFont(janela.fonte("legenda"))
             chip.forma = forma
+        self.campo_jogo.setFont(janela.fonte("legenda"))
+        self.campo_jogo.definir_cor_seta(t.text_muted)
         for botao in (
-            self.botao_progresso, self.botao_revisar, self.botao_exportar, self.botao_fechar
+            self.botao_progresso, self.botao_revisar, self.botao_exportar,
+            self.botao_importar, self.botao_fechar,
         ):
             botao.setFont(janela.fonte("corpo_forte"))
             botao.forma = forma
@@ -396,6 +460,7 @@ class JanelaCaderno(QDialog):
         QScrollBar::handle:vertical:hover {{ background: {t.border_forte}; }}
         QScrollBar::add-line, QScrollBar::sub-line {{ height: 0px; }}
         QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
+        {css_campo_selecao(t, raio, lambda cor, _alfa: cor)}
         """)
         self.atualizar()
 
@@ -457,9 +522,35 @@ class JanelaCaderno(QDialog):
             chip.setChecked(chave == valor)
         self.atualizar()
 
+    def _sincronizar_jogos(self) -> str:
+        """Reflete no seletor os jogos que o caderno tem. Devolve o escolhido.
+
+        Só reconstrói quando a lista MUDOU: ``atualizar`` roda a cada tecla
+        digitada na busca, e refazer os itens do combo a cada uma faria o
+        popup se fechar debaixo do dedo de quem estivesse com ele aberto.
+        """
+        desejados = [TODOS_OS_JOGOS, *self._store.jogos()]
+        atuais = [self.campo_jogo.itemText(i) for i in range(self.campo_jogo.count())]
+        if desejados != atuais:
+            escolhido = self.campo_jogo.currentText() or TODOS_OS_JOGOS
+            self.campo_jogo.blockSignals(True)
+            self.campo_jogo.clear()
+            self.campo_jogo.addItems(desejados)
+            # Um jogo que sumiu do caderno (última palavra dele apagada) não
+            # pode deixar o seletor mostrando uma opção que não existe mais.
+            self.campo_jogo.setCurrentText(
+                escolhido if escolhido in desejados else TODOS_OS_JOGOS
+            )
+            self.campo_jogo.blockSignals(False)
+        # Um seletor com uma opção só não é uma escolha; ele some do caminho.
+        self.campo_jogo.setVisible(len(desejados) > 1)
+        atual = self.campo_jogo.currentText()
+        return "" if atual == TODOS_OS_JOGOS else atual
+
     def atualizar(self) -> None:
         """Recarrega estatísticas e lista a partir do banco."""
         self._espera.stop()
+        self._jogo = self._sincronizar_jogos()
         estatisticas = self._store.estatisticas()
         if estatisticas.acertos or estatisticas.erros:
             aproveitamento = f"   ·   {estatisticas.aproveitamento:.0%} de acerto nas revisões"
@@ -473,7 +564,8 @@ class JanelaCaderno(QDialog):
         )
 
         entradas = self._store.listar(
-            busca=self.busca.text(), filtro=self._filtro, limite=LIMITE_CARTOES + 1
+            busca=self.busca.text(), filtro=self._filtro, jogo=self._jogo,
+            limite=LIMITE_CARTOES + 1,
         )
         excedeu = len(entradas) > LIMITE_CARTOES
         entradas = entradas[:LIMITE_CARTOES]
@@ -518,8 +610,20 @@ class JanelaCaderno(QDialog):
                 "Inicie uma sessão e pergunte o significado de qualquer palavra "
                 "em inglês: o assistente salva aqui, sozinho, tudo o que ensinar."
             )
+        # O jogo entra na frase em vez de deixar o vazio parecer o caderno
+        # inteiro: com um filtro de jogo ativo, "nenhuma palavra difícil" é
+        # ambíguo entre "nenhuma no caderno" e "nenhuma NESTE jogo".
+        onde = f" em {self._jogo}" if self._jogo else ""
         if self.busca.text().strip():
-            return "Nenhuma palavra corresponde a esta busca."
+            return f"Nenhuma palavra{onde} corresponde a esta busca."
+        if self._jogo and self._filtro == FILTRO_TODAS:
+            return f"Nenhuma palavra de {self._jogo} no caderno."
+        if self._jogo:
+            return {
+                FILTRO_REVISAR: f"Nada de {self._jogo} vencido para revisar.",
+                FILTRO_DOMINADAS: f"Nenhuma palavra de {self._jogo} dominada ainda.",
+                FILTRO_DIFICEIS: f"Nenhuma palavra problemática em {self._jogo}.",
+            }.get(self._filtro, f"Nada para mostrar em {self._jogo}.")
         return {
             FILTRO_REVISAR: "Nada vencido. Você está em dia com as revisões.",
             FILTRO_DOMINADAS: (
@@ -535,8 +639,16 @@ class JanelaCaderno(QDialog):
             cartao.setParent(None)
             cartao.deleteLater()
         self._cartoes.clear()
+        # Os períodos vêm UMA vez para a lista inteira. Perguntar por cartão
+        # seriam 250 consultas a cada tecla digitada na busca.
+        periodos = self._janela.periodos_de_conversa()
         for entrada in entradas:
-            cartao = CartaoTermo(entrada, janela=self._janela, ao_remover=self._remover)
+            cartao = CartaoTermo(
+                entrada,
+                janela=self._janela,
+                ao_remover=self._remover,
+                sessao=sessao_em(periodos, entrada.criado_em) if entrada.criado_em else None,
+            )
             self._fluxo.insertWidget(self._fluxo.count() - 1, cartao)
             self._cartoes.append(cartao)
         self.rolagem.verticalScrollBar().setValue(0)

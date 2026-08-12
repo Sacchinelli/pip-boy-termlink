@@ -26,6 +26,7 @@ Quatro decisões sustentam a aparência do programa:
 from __future__ import annotations
 
 import colorsys
+import math
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Final
@@ -75,6 +76,23 @@ TIPO: Final[dict[str, Tipo]] = {
     "micro": Tipo(8),                 # hora, autor, sistema
     "vocab": Tipo(10, "normal", "italic"),
 }
+
+def escalar(base: int, escala: float) -> int:
+    """Aplica o fator de tamanho de texto a uma medida da rampa ou da grade.
+
+    Existe porque a rampa tipográfica era literal: sete tamanhos fixos, sem
+    como pedir letra maior. Este programa é feito para ficar ao lado de um
+    jogo — às vezes numa TV, a dois metros —, e a atmosfera já foi tratada
+    como assunto de acessibilidade, com três níveis e a justificativa escrita.
+    Tamanho de texto é a outra metade da mesma preocupação, e faltava.
+
+    Serve também às MEDIDAS que confinam texto, e não só às fontes: a coluna
+    lateral é uma coluna de texto, e mantê-la em 296 px enquanto as letras
+    crescem só troca "pequeno demais" por "cortado". O piso de 6 pontos
+    protege do arredondamento em escalas menores que 1.
+    """
+    return max(6, round(base * escala))
+
 
 # Famílias neutras para os CONTROLES. A fonte temática de cada jogo continua
 # assinando a marca e a fala do assistente — é ali que ela cria identidade.
@@ -177,6 +195,34 @@ def garantir_contraste(frente: str, fundo: str, minimo: float = 4.5) -> str:
         if luz <= 0.0 or luz >= 1.0:
             break
     return melhor
+
+
+# ------------------------------------------------------------------ Medidor
+# Nível mais baixo que o medidor representa. Abaixo disto tudo é chão.
+MEDIDOR_PISO: Final = 0.003
+_MEDIDOR_ALCANCE: Final = -math.log10(MEDIDOR_PISO)
+
+
+def escala_do_medidor(nivel: float) -> float:
+    """Converte um nível de áudio (0.0–1.0) em posição na régua (0.0–1.0).
+
+    A conversão é LOGARÍTMICA, como todo medidor de áudio, e a razão é que a
+    régua linear que existia aqui gastava as dezoito barras numa faixa que o
+    sinal nunca visita. Sala silenciosa fica em 0.005–0.02 e fala normal passa
+    de 0.1: na escala linear isso é *uma* barra contra *duas*, e alguém falando
+    em bom volume acendia duas de dezoito e concluía, com toda razão, que o
+    microfone estava quebrado. As dezesseis barras restantes esperavam um grito.
+
+    Com a régua logarítmica a mesma faixa se abre: o silêncio fica no pé, o
+    limiar do portão cai por volta do meio e a fala normal acende dois terços.
+    Passa a ser possível VER a distância entre o que se está falando e o que o
+    portão exige — que é a pergunta inteira que o medidor existe para responder.
+    """
+    if nivel <= MEDIDOR_PISO:
+        return 0.0
+    if nivel >= 1.0:
+        return 1.0
+    return min(1.0, math.log10(nivel / MEDIDOR_PISO) / _MEDIDOR_ALCANCE)
 
 
 def css_selecao(fundo: str, acento: str, texto: str) -> str:

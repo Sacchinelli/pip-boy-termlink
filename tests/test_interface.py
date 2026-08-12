@@ -110,6 +110,74 @@ def main() -> int:
     checar(janela._caderno.isVisible(), "caderno abre")
     checar(not janela._caderno.grab().isNull(), "caderno desenha")
 
+    # -- Filtro por jogo: uma dimensão separada dos chips de estado.
+    from pipboy.interface.caderno import TODOS_OS_JOGOS
+
+    caderno = janela._caderno
+    caderno.atualizar()
+    aplicacao.processEvents()
+    opcoes = [caderno.campo_jogo.itemText(i) for i in range(caderno.campo_jogo.count())]
+    checar(opcoes == [TODOS_OS_JOGOS, "Elden Ring", "Fallout"], f"seletor lista os jogos ({opcoes})")
+    checar(caderno.campo_jogo.isVisible(), "com dois jogos, o seletor aparece")
+
+    caderno.campo_jogo.setCurrentText("Fallout")
+    aplicacao.processEvents()
+    mostrados = [c._entrada.termo for c in caderno._cartoes]
+    checar(mostrados == ["wasteland"], f"escolher o jogo recorta a lista ({mostrados})")
+    checar("1 resultado" in caderno.contagem.text(), "e a contagem do rodapé acompanha")
+
+    # Os chips continuam mandando no estado, e os dois eixos se somam.
+    caderno._escolher_filtro("dominadas")
+    aplicacao.processEvents()
+    checar(caderno._cartoes == [], "'dominadas' + 'Fallout' não devolve nada ainda")
+    checar("Fallout" in caderno.vazio.text(), "e o vazio diz de que jogo está falando")
+
+    caderno._escolher_filtro("todas")
+    caderno.campo_jogo.setCurrentText(TODOS_OS_JOGOS)
+    aplicacao.processEvents()
+    checar(len(caderno._cartoes) == 2, "voltar para 'todos os jogos' devolve a lista")
+
+    # -- Importação: a porta de entrada do caderno, pelo caminho da janela.
+    #    O QFileDialog é substituído porque um diálogo nativo trava a suíte
+    #    esperando alguém clicar; o resto do caminho é o de produção.
+    import pipboy.interface.janela as mod_import
+    from pipboy.interface.dialogo import Caixa
+
+    # 'wasteland' já está no caderno e 'raider' não. O repetido tem de ser um
+    # termo que EXISTE aqui: 'ghoul' só nasce mais adiante neste arquivo, e
+    # criá-lo antes da sessão do histórico quebraria o teste do elo entre a
+    # palavra e a conversa em que ela foi ensinada.
+    arquivo = dados / "importar.txt"
+    arquivo.write_text(
+        "raider\tsaqueador\tRaiders ahead.\tFallout\n"
+        "wasteland\tterra devastada\tThe wasteland.\tFallout\n",
+        encoding="utf-8",
+    )
+    escolha_original = mod_import.QFileDialog.getOpenFileName
+    aviso_original = mod_import.avisar
+    vistos: list[str] = []
+    try:
+        mod_import.QFileDialog.getOpenFileName = staticmethod(  # type: ignore[assignment]
+            lambda *a, **k: (str(arquivo), "")
+        )
+        mod_import.avisar = lambda *a, **k: vistos.append(str(a[2]))  # type: ignore[assignment]
+        antes_total = store.total()
+        janela.importar_vocabulario()
+        aplicacao.processEvents()
+        checar(store.total() == antes_total + 1, "importar soma só o termo que faltava")
+        checar(
+            any("já estava" in v for v in vistos),
+            f"e o aviso diz o que aconteceu com o repetido ({vistos})",
+        )
+        checar(
+            any(c._entrada.termo == "raider" for c in janela._caderno._cartoes),
+            "o caderno aberto mostra o termo novo sem precisar ser reaberto",
+        )
+    finally:
+        mod_import.QFileDialog.getOpenFileName = escolha_original  # type: ignore[assignment]
+        mod_import.avisar = aviso_original  # type: ignore[assignment]
+    assert Caixa is not None  # o diálogo temático existe; só não foi aberto aqui
+
     from pipboy.interface.progresso import JanelaProgresso
 
     progresso = JanelaProgresso(janela, store, parent=janela)
@@ -150,6 +218,105 @@ def main() -> int:
     visor._busca.clear()
     aplicacao.processEvents()
     checar("de 2 falas" not in visor._cabecalho.text(), "limpar a busca devolve tudo")
+
+    # -- Do caderno de volta para a conversa em que a palavra nasceu.
+    # A ordem aqui é a de produção: a palavra entra no caderno e SÓ ENTÃO a
+    # anotação vira fala. É o que garante que o fim do período da sessão
+    # nunca fique atrás do instante em que a palavra nasceu.
+    from pipboy.historico import sessao_em
+
+    ghoul, _ = store.registrar("ghoul", "carniçal", "A ghoul.", "Fallout")
+    historico.registrar_fala(sessao, autor="", tag="vocab", texto="⊕ ghoul — carniçal")
+
+    destino = sessao_em(janela.periodos_de_conversa(), ghoul.criado_em)
+    checar(destino == sessao, f"a palavra encontra a conversa em que nasceu ({destino})")
+
+    janela.abrir_conversa(sessao, "ghoul")
+    aplicacao.processEvents()
+    visor = janela._visor_historico
+    checar(visor._sessao_aberta == sessao, "o salto abre a conversa certa")
+    checar(visor._destaque == "ghoul", "e leva junto a palavra que trouxe até aqui")
+    checar(not visor.grab().isNull(), "a conversa com a linha destacada desenha")
+    # Trocar de sessão à mão apaga o destaque: ele pertence ao salto, não à
+    # janela — senão a próxima conversa aberta viria marcada sem motivo.
+    visor._abrir_sessao(historico.listar_sessoes()[0])
+    checar(visor._destaque == "", "abrir outra sessão à mão limpa o destaque")
+
+    # O botão do cartão só existe quando há para onde ir. 'wasteland' faz o
+    # papel do vocabulário herdado de versões sem histórico, e ele não pode
+    # virar um botão que não faz nada.
+    #
+    # A data é recuada à força: tudo neste teste acontece no mesmo segundo, e
+    # os carimbos têm essa resolução — sem recuar, 'wasteland' nasceria dentro
+    # da sessão criada logo acima e o caso deixaria de ser o que se quer medir.
+    with store._lock:
+        store._connection.execute(
+            "UPDATE vocabulario SET criado_em = ? WHERE termo = ?",
+            ("2020-01-01T10:00:00-03:00", "wasteland"),
+        )
+        store._connection.commit()
+
+    janela._caderno.atualizar()
+    aplicacao.processEvents()
+    cartoes = {c._entrada.termo: c for c in janela._caderno._cartoes}
+    checar(
+        cartoes["ghoul"].botao_conversa.isEnabled(),
+        "palavra com conversa tem o botão vivo",
+    )
+    checar(
+        not cartoes["wasteland"].botao_conversa.isEnabled(),
+        "palavra sem conversa tem o botão desabilitado, não ausente",
+    )
+    checar(
+        "não está no histórico" in cartoes["wasteland"].botao_conversa.toolTip(),
+        "e o botão desabilitado diz por quê",
+    )
+
+    # -- Busca entre TODAS as conversas, na coluna da esquerda.
+    outra_sessao = historico.iniciar_sessao(jogo="Elden Ring")
+    historico.registrar_fala(
+        outra_sessao, autor="VOCÊ", tag="usuario", texto="o que é bonfire?"
+    )
+    janela.abrir_historico()
+    aplicacao.processEvents()
+    visor = janela._visor_historico
+
+    def buscar_sessoes(texto: str) -> None:
+        visor._busca_sessoes.setText(texto)
+        visor._espera_sessoes.stop()  # o amortecedor de 180 ms não espera aqui
+        visor._recarregar()
+        aplicacao.processEvents()
+
+    buscar_sessoes("bonfire")
+    checar(visor._sessao_aberta == outra_sessao, "a busca abre a conversa que casa")
+    checar(visor._destaque == "bonfire", "e leva o termo procurado até a transcrição")
+    checar(not visor.grab().isNull(), "a lista filtrada desenha")
+
+    buscar_sessoes("ghoul")
+    checar(visor._sessao_aberta == sessao, "outro termo leva a outra conversa")
+
+    buscar_sessoes("zzzznadadisso")
+    checar(visor._sessao_aberta is None, "termo sem resultado não deixa conversa aberta")
+    checar("Nenhuma conversa contém" in visor._cabecalho.text(), "e explica o vazio")
+    checar(visor._destaque == "", "o destaque some junto com o resultado")
+
+    buscar_sessoes("")
+    checar(visor._sessao_aberta is not None, "limpar a busca devolve a lista inteira")
+
+    # Vindo do caderno com um filtro ativo, o filtro é de quem estava aqui
+    # antes — e esconderia da lista justamente a conversa pedida.
+    buscar_sessoes("bonfire")
+    janela.abrir_conversa(sessao, "ghoul")
+    aplicacao.processEvents()
+    checar(
+        janela._visor_historico._busca_sessoes.text() == "",
+        "o salto pelo caderno limpa o filtro de conversas",
+    )
+    checar(
+        janela._visor_historico._sessao_aberta == sessao,
+        "e abre a conversa pedida, não a que o filtro deixara aberta",
+    )
+    janela._visor_historico.close()
     visor.close()
 
     print("atalhos diretos")
@@ -206,6 +373,105 @@ def main() -> int:
     depois = len(janela._visor_historico._falas_abertas)
     checar(depois == antes + 1, f"reabrir o histórico relê a transcrição ({antes}→{depois})")
     janela._visor_historico.close()
+
+    # 1b. Tamanho do texto: acessibilidade, e por isso vale em toda superfície
+    #     do programa — inclusive nas janelas satélites e DURANTE a sessão.
+    from pipboy.interface.janela import ESCALA_TEXTO_PADRAO
+
+    antes_corpo = janela.fonte("corpo").pointSize()
+    antes_lateral = janela.largura_lateral
+    antes_secao = janela._rotulos_secao[0].font().pointSize()
+    antes_campo = janela._rotulos_campo[0].font().pointSize()
+
+    janela.abrir_caderno()
+    aplicacao.processEvents()
+    antes_caderno = janela._caderno.busca.font().pointSize()
+
+    janela.campo_tamanho_texto.setCurrentText("Maior")
+    aplicacao.processEvents()
+    checar(janela.fonte("corpo").pointSize() > antes_corpo, "a rampa cresce")
+    checar(janela.largura_lateral > antes_lateral, "a coluna de texto cresce junto")
+    # Estes dois recebiam fonte uma vez só, dentro de funções locais da
+    # montagem: eram os únicos rótulos fora do alcance de uma repintura.
+    checar(
+        janela._rotulos_secao[0].font().pointSize() > antes_secao,
+        "os títulos de seção acompanham",
+    )
+    checar(
+        janela._rotulos_campo[0].font().pointSize() > antes_campo,
+        "e os rótulos de campo também",
+    )
+    checar(
+        janela._caderno.busca.font().pointSize() > antes_caderno,
+        "o caderno aberto acompanha sem precisar ser reaberto",
+    )
+    checar(not janela.grab().isNull(), "a janela desenha inteira na escala maior")
+    checar(not janela._caderno.grab().isNull(), "e o caderno também")
+
+    # O travamento de sessão existe para o que vai na abertura da conexão.
+    # Letra e atmosfera não vão a lugar nenhum — e são justamente os dois
+    # ajustes de acessibilidade, que quem precisa deles precisa DURANTE.
+    janela._definir_controles(ativa=True)
+    checar(janela.campo_tamanho_texto.isEnabled(), "o tamanho do texto não trava na sessão")
+    checar(janela.campo_atmosfera.isEnabled(), "a atmosfera também não")
+    checar(not janela.campo_jogo.isEnabled(), "mas o jogo trava, como sempre")
+    janela._definir_controles(ativa=False)
+
+    janela.campo_tamanho_texto.setCurrentText(ESCALA_TEXTO_PADRAO)
+    aplicacao.processEvents()
+    checar(janela.fonte("corpo").pointSize() == antes_corpo, "e volta ao padrão")
+    janela._salvar_preferencias()
+    checar(
+        janela._prefs.extras.get("tamanho_texto") == ESCALA_TEXTO_PADRAO,
+        "a escolha é persistida junto das outras preferências",
+    )
+    janela._caderno.close()
+
+    # 1c. "Reduzir animações" do Windows decide o PADRÃO da atmosfera — e só
+    #     o padrão. A preferência do sistema é injetada porque o caminho que
+    #     importa é o de quem a ligou, e um teste não mexe na configuração da
+    #     máquina de quem o roda.
+    import pipboy.interface.janela as mod_janela
+
+    original_movimento = mod_janela.movimento_reduzido
+    try:
+        mod_janela.movimento_reduzido = lambda: True  # type: ignore[assignment]
+        janela._prefs.extras.pop("atmosfera", None)
+        janela._aplicar_preferencias()
+        aplicacao.processEvents()
+        checar(
+            janela.campo_atmosfera.currentText() == "Desligada",
+            "com o sistema pedindo calma, a atmosfera nasce desligada",
+        )
+        # 'Discreta' continuaria animando; só 'Desligada' para o movimento, que
+        # é literalmente o que o sistema pediu.
+        checar(janela.intensidade_atmosfera == 0.0, "e o movimento realmente para")
+        checar(janela._atmosfera_veio_do_sistema, "o jogador é avisado de onde isso veio")
+
+        # Escolha gravada vence o sistema: o programa LÊ a preferência dele,
+        # não obedece a ela para sempre.
+        janela._prefs.extras["atmosfera"] = "Completa"
+        janela._aplicar_preferencias()
+        aplicacao.processEvents()
+        checar(
+            janela.campo_atmosfera.currentText() == "Completa",
+            "uma escolha já gravada vence o pedido do sistema",
+        )
+        checar(not janela._atmosfera_veio_do_sistema, "e nesse caso não há o que avisar")
+
+        mod_janela.movimento_reduzido = lambda: False  # type: ignore[assignment]
+        janela._prefs.extras.pop("atmosfera", None)
+        janela._aplicar_preferencias()
+        aplicacao.processEvents()
+        checar(
+            janela.campo_atmosfera.currentText() == "Completa",
+            "sem pedido do sistema, o padrão continua sendo a atmosfera cheia",
+        )
+    finally:
+        mod_janela.movimento_reduzido = original_movimento  # type: ignore[assignment]
+        janela._prefs.extras["atmosfera"] = "Completa"
+        janela._aplicar_preferencias()
+        aplicacao.processEvents()
 
     # 2. O botão de maximizar ficava preso em "Restaurar" para sempre.
     botao_max = janela.barra_titulo.botao_maximizar
@@ -276,7 +542,34 @@ def main() -> int:
     checar(janela.sessao_ativa is False, "sem sessão, sessao_ativa é falso")
     checar(janela.mudo is False, "sem sessão, mudo é falso")
     checar(janela.nivel_entrada == 0.0, "sem sessão, o nível de entrada é zero")
+    checar(janela.limiar_entrada == 0.0, "sem sessão, não há limiar a desenhar")
     checar(janela.estado_texto == janela.tema.idle_text, "parada, a janela mostra o ocioso do tema")
+
+    # 7b. O risco do limiar no medidor. É o encanamento inteiro — sessão →
+    #     janela → widget — e ele atravessa três módulos sem teste de tipo que
+    #     o cubra, porque o Qt devolve Any em quase tudo.
+    janela.medidor.definir_ativo(True)
+    janela.medidor.definir_limiar(0.0)
+    checar(janela.medidor._limiar == 0.0, "limiar zero não desenha risco")
+    janela.medidor.definir_limiar(0.035)
+    checar(
+        0.0 < janela.medidor._limiar < 1.0,
+        f"o limiar entra na régua do medidor ({janela.medidor._limiar:.2f})",
+    )
+    # Mesma régua para os dois: se o nível e o limiar fossem convertidos por
+    # caminhos diferentes, o risco marcaria um ponto que o nível nunca cruza.
+    janela.medidor.definir_nivel(0.035)
+    checar(
+        abs(janela.medidor._nivel_alvo - janela.medidor._limiar) < 1e-9,
+        "nível e limiar iguais caem no mesmo ponto da régua",
+    )
+    janela.medidor.definir_nivel(0.30)
+    checar(
+        janela.medidor._nivel_alvo > janela.medidor._limiar,
+        "fala normal fica à direita do risco",
+    )
+    janela.medidor.repaint()  # o risco tem que sobreviver a uma pintura real
+    janela.medidor.definir_ativo(False)
 
     # 8. Eventos de uma sessão que já morreu entravam na conversa da seguinte —
     #    e iam para o histórico gravados sob o id errado.

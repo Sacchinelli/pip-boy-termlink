@@ -16,11 +16,13 @@ tudo fica em ``%LOCALAPPDATA%``, nada sai da máquina.
 
 from __future__ import annotations
 
-import sqlite3
 import threading
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+
+from .banco import conectar
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessoes (
@@ -46,6 +48,21 @@ CREATE TABLE IF NOT EXISTS atividade (
 """
 
 
+# Por quantos dias uma conversa fica guardada.
+#
+# O caderno tem cópia diária com rotação; o histórico não tinha teto NENHUM.
+# Ele guarda transcrições inteiras, cresce todo dia e a única forma de apagar
+# era sessão a sessão, à mão, numa lista que só mostra as sessenta mais
+# recentes — ou seja: na prática, nunca. Um arquivo que só cresce e que
+# ninguém nunca poda é um vazamento com passo lento.
+#
+# Um ano é deliberadamente generoso: é mais do que qualquer pessoa volta para
+# reler, e ainda assim faz o arquivo chegar num tamanho estável em vez de
+# subir para sempre. Quem quiser guardar menos apaga à mão; quem quiser
+# guardar mais tem aqui a única linha a mudar.
+RETENCAO_DIAS: int = 365
+
+
 def _agora() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
@@ -68,14 +85,47 @@ class Fala:
     texto: str
 
 
+def sessao_em(periodos: Iterable[tuple[int, str, str]], quando: str) -> int | None:
+    """Qual sessão estava acontecendo no instante ``quando``. Sem banco.
+
+    Recebe ``(id, início, fim)`` de cada sessão — o fim sendo a última fala
+    dela — e devolve o id da que contém o instante, ou ``None``.
+
+    É o fio entre os dois bancos, que não têm chave estrangeira um para o
+    outro de propósito. O que torna isto uma RESPOSTA em vez de um palpite é
+    exigir o instante dentro do período fechado, e não apenas depois do
+    começo: uma palavra cuja conversa já saiu do histórico — apagada à mão,
+    ou podada pela retenção — cairia, com a regra frouxa, na sessão anterior
+    que por acaso sobrou, e o jogador abriria uma conversa que nada tem a ver
+    com a palavra que ele clicou. Aqui ela devolve ``None``, e quem chamou
+    diz que não há o que abrir.
+
+    A última fala serve de fim porque é o único carimbo de fechamento que
+    existe: a tabela guarda quando a sessão começou, não quando acabou. Para
+    esta pergunta basta — a anotação de vocabulário é ELA MESMA uma fala, e
+    entra no histórico no mesmo instante em que a palavra entra no caderno.
+
+    O desempate é por ``(início, id)``, e não só pelo início, porque os
+    carimbos têm resolução de UM SEGUNDO: encerrar e recomeçar uma sessão na
+    mesma batida do relógio produz dois períodos idênticos. Desempatando só
+    pelo início, a resposta passava a depender da ordem em que o banco
+    devolveu as linhas — que nenhuma cláusula garante. O id maior é a sessão
+    mais nova, que é a resposta certa quando as duas cabem.
+    """
+    achado: tuple[str, int] | None = None
+    for identificador, inicio, fim in periodos:
+        if inicio <= quando <= fim and (achado is None or (inicio, identificador) > achado):
+            achado = (inicio, identificador)
+    return achado[1] if achado is not None else None
+
+
 class HistoricoStore:
     """Acesso thread-safe ao histórico de sessões."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
         self._lock = threading.Lock()
-        self._connection = sqlite3.connect(path, check_same_thread=False)
-        self._connection.row_factory = sqlite3.Row
+        self._connection = conectar(path)
         with self._lock:
             self._connection.execute("PRAGMA foreign_keys = ON")
             self._connection.executescript(_SCHEMA)
@@ -115,6 +165,32 @@ class HistoricoStore:
             )
             self._connection.commit()
             return cursor.rowcount > 0
+
+    def podar_antigas(self, dias: int = RETENCAO_DIAS) -> int:
+        """Apaga sessões mais velhas que ``dias``. Devolve quantas se foram.
+
+        As falas vão junto pelo ``ON DELETE CASCADE``, e a tabela ``atividade``
+        NÃO é tocada: ela guarda um dia por linha, custa nada, e é dela que sai
+        a sequência de estudo — podá-la apagaria a única coisa do programa que
+        mede constância ao longo de anos.
+
+        Sem ``VACUUM`` de propósito. Ele devolveria o espaço ao sistema de
+        arquivos uma vez, ao preço de reescrever o banco inteiro no arranque —
+        justo quando a janela está sendo construída. Sem ele, as páginas
+        liberadas são reaproveitadas pelas sessões seguintes: o arquivo para de
+        crescer, que é o problema real, em vez de encolher e voltar a subir.
+        """
+        if dias <= 0:
+            return 0
+        limite = (
+            datetime.now(timezone.utc).astimezone() - timedelta(days=dias)
+        ).isoformat(timespec="seconds")
+        with self._lock:
+            cursor = self._connection.execute(
+                "DELETE FROM sessoes WHERE iniciada_em < ?", (limite,)
+            )
+            self._connection.commit()
+            return int(cursor.rowcount or 0)
 
     def descartar_sessao_vazia(self, sessao_id: int) -> bool:
         """Remove a sessão se ela terminou sem NENHUMA fala gravada.
@@ -186,6 +262,93 @@ class HistoricoStore:
             ResumoDeSessao(
                 int(r["id"]), str(r["iniciada_em"]), str(r["jogo"]),
                 str(r["modo"]), str(r["nivel"]), int(r["falas"]),
+            )
+            for r in rows
+        ]
+
+    def sessao(self, sessao_id: int) -> ResumoDeSessao | None:
+        """Uma sessão pelo id, ou ``None``.
+
+        Existe à parte de ``listar_sessoes`` porque aquela é uma LISTA, com
+        teto: quem chega pelo caderno pede uma sessão específica, que pode ser
+        de meses atrás e estar muito além das sessenta mais recentes. Buscá-la
+        na lista faria o salto funcionar só para o vocabulário novo — e falhar
+        calado justamente no vocabulário antigo, que é o que mais precisa do
+        contexto de volta.
+        """
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT s.id, s.iniciada_em, s.jogo, s.modo, s.nivel, "
+                "COUNT(f.id) AS falas "
+                "FROM sessoes s LEFT JOIN falas f ON f.sessao_id = s.id "
+                "WHERE s.id = ? GROUP BY s.id",
+                (sessao_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return ResumoDeSessao(
+            int(row["id"]), str(row["iniciada_em"]), str(row["jogo"]),
+            str(row["modo"]), str(row["nivel"]), int(row["falas"]),
+        )
+
+    def periodos(self) -> list[tuple[int, str, str]]:
+        """``(id, início, fim)`` de cada sessão, para ``sessao_em``.
+
+        Uma consulta só, e não uma por palavra: o caderno resolve o destino de
+        até 250 cartões de uma vez, e 250 idas ao banco por tecla digitada na
+        busca travariam a janela que a existência desses cartões deveria
+        tornar agradável.
+        """
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT s.id, s.iniciada_em, "
+                "COALESCE(MAX(f.quando), s.iniciada_em) AS fim "
+                "FROM sessoes s LEFT JOIN falas f ON f.sessao_id = s.id "
+                "GROUP BY s.id"
+            ).fetchall()
+        return [(int(r["id"]), str(r["iniciada_em"]), str(r["fim"])) for r in rows]
+
+    def buscar_sessoes(
+        self, texto: str, limite: int = 60
+    ) -> list[tuple[ResumoDeSessao, int]]:
+        """Sessões que contêm ``texto``, cada uma com quantas falas casam.
+
+        A busca que já existia era DENTRO da conversa aberta, o que só serve a
+        quem já sabe em qual conversa procurar — e ninguém sabe. "Onde foi
+        mesmo que ele explicou isso?" é a pergunta que se faz, e ela varre o
+        histórico inteiro.
+
+        A contagem viaja junto do resumo porque é ela que diz onde vale
+        entrar: quatro conversas com uma menção cada e uma com dezessete não
+        são a mesma resposta, e uma lista sem o número faz o jogador abrir as
+        cinco para descobrir isso.
+
+        Como no caderno, o ``LIKE`` do SQLite ignora maiúsculas apenas em
+        ASCII, e o ``ESCAPE`` impede que um ``%`` digitado vire curinga e
+        devolva o histórico inteiro.
+        """
+        alvo = " ".join(texto.split()).strip()
+        if not alvo:
+            return []
+        padrao = "%" + alvo.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT s.id, s.iniciada_em, s.jogo, s.modo, s.nivel, "
+                "COUNT(f.id) AS falas, "
+                "SUM(CASE WHEN f.texto LIKE ? ESCAPE '\\' "
+                "         OR f.autor LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END) AS casam "
+                "FROM sessoes s LEFT JOIN falas f ON f.sessao_id = s.id "
+                "GROUP BY s.id HAVING casam > 0 "
+                "ORDER BY s.iniciada_em DESC, s.id DESC LIMIT ?",
+                (padrao, padrao, max(1, limite)),
+            ).fetchall()
+        return [
+            (
+                ResumoDeSessao(
+                    int(r["id"]), str(r["iniciada_em"]), str(r["jogo"]),
+                    str(r["modo"]), str(r["nivel"]), int(r["falas"]),
+                ),
+                int(r["casam"] or 0),
             )
             for r in rows
         ]

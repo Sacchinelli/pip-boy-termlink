@@ -14,11 +14,14 @@ from __future__ import annotations
 import contextlib
 import csv
 import math
+import re
 import sqlite3
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from .banco import conectar
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS vocabulario (
@@ -85,6 +88,10 @@ class Entrada:
     erros: int = 0
     intervalo_dias: int = 0
     proxima_revisao: str = ""
+    # Quando a palavra foi ensinada pela PRIMEIRA vez. É o que permite achar a
+    # conversa em que ela nasceu: os dois bancos são separados de propósito e
+    # não há chave estrangeira entre eles, então o instante é o único fio.
+    criado_em: str = ""
 
     @property
     def dias_ate_revisao(self) -> int:
@@ -139,6 +146,87 @@ def _agora() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
+# Teto de linhas lidas numa importação. Um arquivo trocado por engano — um log,
+# um dump — não pode segurar a interface enquanto o programa tenta entendê-lo.
+MAX_LINHAS_IMPORTACAO = 20_000
+
+_MARCA_QUEBRA = re.compile(r"<br\s*/?>", re.IGNORECASE)
+_MARCA_TAG = re.compile(r"<[^>]+>")
+
+
+def _limpar(texto: str) -> str:
+    """Tira marcação e normaliza espaços de um campo vindo de fora."""
+    return " ".join(_MARCA_TAG.sub("", texto).split()).strip()
+
+
+@dataclass(frozen=True, slots=True)
+class ResultadoDaImportacao:
+    """O que aconteceu com cada linha de um arquivo importado."""
+
+    novos: int
+    existentes: int
+    ignorados: int
+
+    @property
+    def total(self) -> int:
+        return self.novos + self.existentes + self.ignorados
+
+
+def interpretar_linha(colunas: list[str]) -> tuple[str, str, str, str] | None:
+    """Lê uma linha de TSV como ``(termo, tradução, exemplo, jogo)``.
+
+    O número de colunas é o que decide o formato, e isso é deliberado: a
+    exportação para Anki escreve TRÊS colunas — termo, verso, jogo — com o
+    exemplo embutido no verso (``tradução<br><i>exemplo</i>``), enquanto uma
+    lista feita à mão naturalmente teria quatro, uma por campo. Adivinhar pelo
+    conteúdo quebraria exatamente no caso mais comum: uma palavra exportada
+    SEM exemplo tem o verso limpo, e o jogo na terceira coluna seria lido como
+    exemplo.
+
+    * 2 colunas — termo, tradução.
+    * 3 colunas — o formato desta casa: termo, verso, jogo.
+    * 4 ou mais — termo, tradução, exemplo, jogo. As excedentes são ignoradas.
+
+    Devolve ``None`` para a linha que não dá um termo E uma tradução: sem os
+    dois não há o que ensinar, e o caderno não guarda meia palavra.
+    """
+    campos = [c.strip() for c in colunas]
+    if not campos or not campos[0].strip():
+        return None
+
+    termo = " ".join(campos[0].split()).strip()
+    traducao = exemplo = jogo = ""
+    if len(campos) == 2:
+        traducao = _limpar(campos[1])
+    elif len(campos) == 3:
+        verso, jogo = campos[1], _limpar(campos[2])
+        partes = _MARCA_QUEBRA.split(verso, maxsplit=1)
+        traducao = _limpar(partes[0])
+        exemplo = _limpar(partes[1]) if len(partes) > 1 else ""
+    elif len(campos) >= 4:
+        traducao, exemplo, jogo = (_limpar(c) for c in campos[1:4])
+    else:
+        return None
+
+    if not termo or not traducao:
+        return None
+    return termo, traducao, exemplo, jogo
+
+
+def _semana_de(momento: datetime) -> str:
+    """Identificador da semana (segunda a domingo) a que um instante pertence.
+
+    Semana ISO, e não ``%Y-%W``: o segundo reinicia a contagem em 1º de
+    janeiro, então a semana que atravessa a virada do ano é PARTIDA em dois
+    baldes — 31/dez cai em '2026-52' e 1º/jan, da mesma semana, em '2027-00'.
+    Uma vez por ano o painel de progresso mostrava a barra da virada pela
+    metade e uma segunda barra fantasma com o resto. O ano ISO acompanha a
+    semana em vez de cortá-la ao meio.
+    """
+    ano, semana, _ = momento.isocalendar()
+    return f"{ano:04d}-{semana:02d}"
+
+
 class VocabularyStore:
     """Acesso thread-safe ao banco de vocabulário.
 
@@ -153,8 +241,7 @@ class VocabularyStore:
     def __init__(self, path: Path) -> None:
         self.path = path
         self._lock = threading.Lock()
-        self._connection = sqlite3.connect(path, check_same_thread=False)
-        self._connection.row_factory = sqlite3.Row
+        self._connection = conectar(path)
         with self._lock:
             self._connection.executescript(_SCHEMA)
             existentes = {
@@ -201,7 +288,7 @@ class VocabularyStore:
                     (termo, traducao, exemplo, jogo, agora, agora),
                 )
                 self._connection.commit()
-                return Entrada(termo, traducao, exemplo, jogo, 1, agora), True
+                return Entrada(termo, traducao, exemplo, jogo, 1, agora, criado_em=agora), True
 
             encontros = int(existente["encontros"]) + 1
             # Só sobrescreve exemplo/tradução quando o novo dado tem conteúdo.
@@ -231,6 +318,10 @@ class VocabularyStore:
                     jogo or existente["jogo"],
                     encontros,
                     agora,
+                    # O nascimento é o da PRIMEIRA vez, e o reencontro não o
+                    # move: é ele que aponta para a conversa em que a palavra
+                    # foi ensinada.
+                    criado_em=str(existente["criado_em"]),
                 ),
                 False,
             )
@@ -267,6 +358,7 @@ class VocabularyStore:
             r["termo"], r["traducao"], r["exemplo"], r["jogo"], r["encontros"],
             r["visto_em"], int(r["acertos"]), int(r["erros"]),
             int(r["intervalo_dias"]), str(r["proxima_revisao"]),
+            str(r["criado_em"]),
         )
 
     # ------------------------------------------------- Repetição espaçada
@@ -361,8 +453,28 @@ class VocabularyStore:
     # nele. Os métodos abaixo servem ao JOGADOR, que quer ver o caderno inteiro
     # e procurar dentro dele — requisitos opostos, e por isso métodos separados.
 
+    def jogos(self) -> list[str]:
+        """Jogos presentes no caderno, do que tem mais termos para o que tem menos.
+
+        Só os que REALMENTE aparecem, e não a lista de temas: um seletor com
+        dez jogos dos quais nove nunca deram uma palavra é uma lista de becos
+        sem saída. Termos sem jogo ficam de fora — eles não formam uma
+        categoria que alguém queira pedir, e continuam alcançáveis por 'Todos'.
+        """
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT jogo, COUNT(*) AS total FROM vocabulario "
+                "WHERE jogo != '' GROUP BY jogo ORDER BY total DESC, jogo ASC"
+            ).fetchall()
+        return [str(r["jogo"]) for r in rows]
+
     def listar(
-        self, *, busca: str = "", filtro: str = FILTRO_TODAS, limite: int | None = None
+        self,
+        *,
+        busca: str = "",
+        filtro: str = FILTRO_TODAS,
+        jogo: str = "",
+        limite: int | None = None,
     ) -> list[Entrada]:
         """Palavras do caderno para exibição, filtradas e ordenadas.
 
@@ -370,9 +482,19 @@ class VocabularyStore:
         stimpak" não lembra necessariamente do termo em inglês. O ``LIKE`` do
         SQLite já ignora maiúsculas em ASCII; ``ESCAPE`` impede que um ``%``
         digitado vire curinga e traga o caderno inteiro.
+
+        ``jogo`` é uma dimensão SEPARADA de ``filtro``, e não mais um valor
+        dele: "difíceis" e "do Cyberpunk" são perguntas independentes, e quem
+        quer as duas ao mesmo tempo — que é o pedido natural de quem acabou de
+        trocar de jogo — não teria como fazê-lo se elas disputassem o mesmo
+        controle.
         """
         condicoes: list[str] = []
         params: list[object] = []
+
+        if jogo:
+            condicoes.append("jogo = ?")
+            params.append(jogo)
 
         alvo = " ".join(busca.split()).strip()
         if alvo:
@@ -488,6 +610,11 @@ class VocabularyStore:
         O agrupamento é feito em Python, no fuso LOCAL: o strftime do SQLite
         converteria os offsets para UTC, e uma palavra salva no domingo à
         noite cairia na barra da semana errada.
+
+        O rótulo é a SEGUNDA-FEIRA do balde, não "o mesmo dia da semana N
+        semanas atrás": o balde vai de segunda a domingo (ver ``_semana_de``),
+        e datar uma barra por uma quinta-feira qualquer dentro dela convidava
+        a ler o eixo como se cada coluna começasse naquele dia.
         """
         semanas = max(1, semanas)
         with self._lock:
@@ -498,16 +625,15 @@ class VocabularyStore:
                 quando = datetime.fromisoformat(str(r["criado_em"])).astimezone()
             except ValueError:
                 continue  # data ilegível não derruba o painel
-            chave = quando.strftime("%Y-%W")
+            chave = _semana_de(quando)
             por_semana[chave] = por_semana.get(chave, 0) + 1
 
         resultado: list[tuple[str, int]] = []
         alvo = datetime.now(timezone.utc).astimezone()
         for atras in range(semanas - 1, -1, -1):
             data = alvo - timedelta(weeks=atras)
-            chave = data.strftime("%Y-%W")
-            rotulo = data.strftime("%d/%m")
-            resultado.append((rotulo, por_semana.get(chave, 0)))
+            segunda = data - timedelta(days=data.weekday())
+            resultado.append((segunda.strftime("%d/%m"), por_semana.get(_semana_de(data), 0)))
         return resultado
 
     def por_jogo(self, limite: int = 6) -> list[tuple[str, int]]:
@@ -538,6 +664,60 @@ class VocabularyStore:
             int(linha["aprendendo"] or 0),
             int(linha["dominadas"] or 0),
         )
+
+    # ------------------------------------------------------------ Importação
+
+    def importar_csv(self, origem: Path) -> ResultadoDaImportacao:
+        """Traz termos de um TSV para dentro do caderno, SEM sobrescrever nada.
+
+        O caderno já sabia sair e não sabia entrar. Faltava para as duas coisas
+        que a exportação sozinha não resolve: juntar os cadernos de duas
+        máquinas usadas em paralelo — copiar o ``.sqlite3`` substitui, não
+        funde — e trazer uma lista pronta de termos de um jogo.
+
+        **Palavra que já existe é deixada em paz**, e essa é a regra central.
+        Ela carrega facilidade, intervalo, data da próxima revisão, acertos e
+        erros: meses de repetição espaçada que um arquivo de texto não tem como
+        conhecer. Um import que "atualizasse" a tradução levaria junto o
+        agendamento, e o jogador perderia o progresso ao tentar somar a ele.
+        Por isso ``registrar`` não serve aqui — ele conta um reencontro, e
+        importar não é reencontrar.
+
+        Termos novos entram vencidos, como qualquer palavra nova: é o que os
+        coloca no próximo quiz, que é o motivo de importá-los.
+        """
+        novos = existentes = ignorados = 0
+        agora = _agora()
+        with origem.open("r", encoding="utf-8", errors="replace", newline="") as handle:
+            leitor = csv.reader(handle, delimiter="\t")
+            with self._lock:
+                for numero, colunas in enumerate(leitor):
+                    if numero >= MAX_LINHAS_IMPORTACAO:
+                        ignorados += 1
+                        break
+                    campos = interpretar_linha(colunas)
+                    if campos is None:
+                        # Linha em branco, sem termo ou sem tradução. Contar em
+                        # vez de estourar: um arquivo de fora não tem obrigação
+                        # de estar limpo, e uma linha ruim não pode custar as
+                        # outras mil.
+                        ignorados += 1
+                        continue
+                    termo, traducao, exemplo, jogo = campos
+                    cursor = self._connection.execute(
+                        "INSERT OR IGNORE INTO vocabulario "
+                        "(termo, traducao, exemplo, jogo, criado_em, visto_em, encontros) "
+                        "VALUES (?, ?, ?, ?, ?, ?, 1)",
+                        (termo, traducao, exemplo, jogo, agora, agora),
+                    )
+                    # O índice único em `termo COLLATE NOCASE` é quem decide o
+                    # que é repetido; o INSERT OR IGNORE apenas não reclama.
+                    if cursor.rowcount:
+                        novos += 1
+                    else:
+                        existentes += 1
+                self._connection.commit()
+        return ResultadoDaImportacao(novos=novos, existentes=existentes, ignorados=ignorados)
 
     def exportar_csv(self, destino: Path) -> int:
         """Exporta em CSV separado por tabulação, pronto para importar no Anki.
