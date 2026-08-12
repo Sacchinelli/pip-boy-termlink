@@ -95,7 +95,7 @@ class JanelaCompacta(QWidget):
         linha.addStretch(1)
 
         self._medidor = Medidor()
-        self._medidor.setToolTip("Nível do microfone")
+        self._medidor.setToolTip("Nível do microfone — o risco é onde o portão de voz abre")
         linha.addWidget(self._medidor)
 
         self._botao_mudo = _BotaoGlifo("○", "Silenciar o microfone", janela, self)
@@ -194,6 +194,7 @@ class JanelaCompacta(QWidget):
         self._estado.setText(texto.upper())
         self._medidor.definir_ativo(ativa)
         self._medidor.definir_nivel(janela.nivel_entrada)
+        self._medidor.definir_limiar(janela.limiar_entrada)
         self._botao_mudo.definir_glifo("●" if janela.mudo else "○")
 
     # -------------------------------------------------------------- Visual
@@ -207,6 +208,7 @@ class JanelaCompacta(QWidget):
         self._medidor.definir_cores(
             primary=tema.primary, accent=tema.accent, alert=tema.alert,
             apagada=design.elevar(tema.screen, 0.16, tema.primary),
+            limiar=tema.text_muted,
         )
         # A largura é MEDIDA, não estimada: o maior texto possível do estado
         # (o ocioso do tema mais o sufixo de mudo, em maiúsculas) mais o

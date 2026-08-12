@@ -222,6 +222,17 @@ class LiveSessionWorker:
         capture = self._audio.capture if self._audio else None
         return capture.last_level if capture else 0.0
 
+    @property
+    def input_threshold(self) -> float:
+        """Limiar que o portão de voz está exigindo agora; 0.0 sem captura.
+
+        Sobe até a interface pelo mesmo caminho do nível porque é com ele que
+        faz sentido: os dois desenham no mesmo medidor, e é a distância entre
+        eles que responde "por que a minha pergunta não está sendo enviada?".
+        """
+        capture = self._audio.capture if self._audio else None
+        return capture.portao_de_voz.limiar if capture else 0.0
+
     # -------------------------------------------------------------- Eventos
 
     def _log(self, text: str, tag: Tag = Tag.ASSISTENTE, autor: str = "") -> None:

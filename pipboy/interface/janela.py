@@ -311,6 +311,11 @@ class Janela(QWidget):
         return self._worker.input_level if self._worker is not None else 0.0
 
     @property
+    def limiar_entrada(self) -> float:
+        """Limiar do portão de voz, para o medidor desenhar. 0.0 sem sessão."""
+        return self._worker.input_threshold if self._worker is not None else 0.0
+
+    @property
     def intensidade_atmosfera(self) -> float:
         """0.0 (desligada) a 1.0 (completa). Vale para o olho e para o ouvido."""
         return self._intensidade_atmosfera
@@ -650,7 +655,10 @@ class Janela(QWidget):
         self.pilula.setFont(self.fonte("micro"))
         barra.addWidget(self.pilula)
         self.medidor = Medidor()
-        self.medidor.setToolTip("Nível do seu microfone. Parado = microfone errado ou bloqueado.")
+        self.medidor.setToolTip(
+            "Nível do seu microfone. O risco marca onde o portão de voz abre: "
+            "à esquerda dele nada é transmitido. Parado = microfone errado ou bloqueado."
+        )
         barra.addWidget(self.medidor)
         # Numa barra apertada é ESTE texto que cede — os botões ao lado não
         # têm como se abreviar.
@@ -757,6 +765,9 @@ class Janela(QWidget):
         self.medidor.definir_cores(
             primary=t.primary, accent=t.accent, alert=t.alert,
             apagada=design.elevar(t.screen, 0.16, t.primary),
+            # Neutro de propósito: o risco é uma marca de régua, não um estado.
+            # Na cor do tema competiria com as barras vivas, que são o dado.
+            limiar=t.text_muted,
         )
         self.pilula.setFont(self.fonte("micro"))
         self.setStyleSheet(self._folha())
@@ -1053,6 +1064,7 @@ class Janela(QWidget):
     def _atualizar_medidor(self) -> None:
         self.medidor.definir_ativo(self.sessao_ativa)
         self.medidor.definir_nivel(self.nivel_entrada)
+        self.medidor.definir_limiar(self.limiar_entrada)
 
     def _atualizar_meta(self) -> None:
         if self._worker is None:

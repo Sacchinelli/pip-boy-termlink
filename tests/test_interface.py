@@ -276,7 +276,34 @@ def main() -> int:
     checar(janela.sessao_ativa is False, "sem sessão, sessao_ativa é falso")
     checar(janela.mudo is False, "sem sessão, mudo é falso")
     checar(janela.nivel_entrada == 0.0, "sem sessão, o nível de entrada é zero")
+    checar(janela.limiar_entrada == 0.0, "sem sessão, não há limiar a desenhar")
     checar(janela.estado_texto == janela.tema.idle_text, "parada, a janela mostra o ocioso do tema")
+
+    # 7b. O risco do limiar no medidor. É o encanamento inteiro — sessão →
+    #     janela → widget — e ele atravessa três módulos sem teste de tipo que
+    #     o cubra, porque o Qt devolve Any em quase tudo.
+    janela.medidor.definir_ativo(True)
+    janela.medidor.definir_limiar(0.0)
+    checar(janela.medidor._limiar == 0.0, "limiar zero não desenha risco")
+    janela.medidor.definir_limiar(0.035)
+    checar(
+        0.0 < janela.medidor._limiar < 1.0,
+        f"o limiar entra na régua do medidor ({janela.medidor._limiar:.2f})",
+    )
+    # Mesma régua para os dois: se o nível e o limiar fossem convertidos por
+    # caminhos diferentes, o risco marcaria um ponto que o nível nunca cruza.
+    janela.medidor.definir_nivel(0.035)
+    checar(
+        abs(janela.medidor._nivel_alvo - janela.medidor._limiar) < 1e-9,
+        "nível e limiar iguais caem no mesmo ponto da régua",
+    )
+    janela.medidor.definir_nivel(0.30)
+    checar(
+        janela.medidor._nivel_alvo > janela.medidor._limiar,
+        "fala normal fica à direita do risco",
+    )
+    janela.medidor.repaint()  # o risco tem que sobreviver a uma pintura real
+    janela.medidor.definir_ativo(False)
 
     # 8. Eventos de uma sessão que já morreu entravam na conversa da seguinte —
     #    e iam para o histórico gravados sob o id errado.

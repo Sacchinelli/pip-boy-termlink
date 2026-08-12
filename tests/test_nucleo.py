@@ -10,6 +10,7 @@ exige hardware não é executado, e teste não executado não protege nada.
 from __future__ import annotations
 
 import contextlib
+import itertools
 import os
 import sys
 import tempfile
@@ -73,6 +74,22 @@ def teste_dsp() -> None:
     saturado = dsp.pcm_to_array(dsp.array_to_pcm(dsp.mix(np.full(2, 30000), np.full(2, 30000), 1.0)))
     checar(saturado[0] == 32767, "satura em vez de estourar o int16")
     checar(dsp.rms_level(b"\x00\x00" * 50) == 0.0, "nível de silêncio é zero")
+
+    # O medidor da tela e o portão precisam julgar o MESMO número, agora que o
+    # medidor desenha o limiar. Eles não julgavam: a tela media o bloco cru, na
+    # taxa nativa do dispositivo, e o portão media o vetor já reamostrado para
+    # 16 kHz. A interpolação derruba o RMS, e o quanto depende do conteúdo —
+    # num tom de 3 kHz é 1%, mas em RUÍDO BRANCO, que é o que uma sala parada
+    # de fato produz e é justamente o que passou a calibrar o limiar, passa de
+    # 15%. Com o limiar desenhado, essa diferença viraria uma mentira na tela.
+    ruido = (np.random.default_rng(7).normal(0, 1, 9600) * 600).astype("<i2")
+    cru = dsp.rms_level(ruido.tobytes())
+    reamostrado = dsp.nivel_de(dsp.resample(ruido.astype(np.int32), 48000, 16000))
+    checar(
+        cru > 0 and (cru - reamostrado) / cru > 0.15,
+        f"em ruído de sala, medir antes de reamostrar infla o nível em "
+        f"{(cru - reamostrado) / cru:.0%} ({cru:.3f} contra {reamostrado:.3f})",
+    )
 
 
 def teste_vocabulario() -> None:
@@ -655,6 +672,34 @@ def teste_design() -> None:
     print("design")
     from pipboy import design
     from pipboy.themes import TEMAS
+
+    # --- Régua do medidor de nível ---
+    # A régua linear que existia gastava as dezoito barras numa faixa que o
+    # sinal nunca visita: sala silenciosa em 0.005–0.02, fala normal a partir
+    # de 0.1. Alguém falando em bom volume acendia DUAS barras de dezoito e
+    # concluía, com razão, que o microfone estava quebrado.
+    escala = design.escala_do_medidor
+    checar(escala(0.0) == 0.0 and escala(design.MEDIDOR_PISO) == 0.0, "abaixo do piso, chão")
+    checar(escala(1.0) == 1.0 and escala(2.0) == 1.0, "o topo satura em 1.0")
+    pontos = [0.004, 0.01, 0.035, 0.09, 0.2, 0.6, 1.0]
+    checar(
+        all(escala(a) < escala(b) for a, b in itertools.pairwise(pontos)),
+        "a régua é monotônica em toda a faixa útil",
+    )
+    checar(
+        escala(0.1) > 0.55,
+        f"fala normal (0.1) passa da metade da régua, e não de 10% ({escala(0.1):.0%})",
+    )
+    checar(
+        escala(0.02) < 0.35,
+        f"sala silenciosa fica no primeiro terço ({escala(0.02):.0%})",
+    )
+    # É esta distância que torna o risco do limiar legível: no linear, 0.035 e
+    # 0.1 distam 6,5% da régua — menos de uma barra e meia de dezoito.
+    checar(
+        escala(0.1) - escala(0.035) > 0.15,
+        f"entre o limiar típico e a fala normal cabem barras ({escala(0.1) - escala(0.035):.0%})",
+    )
 
     checar(design.contraste("#000000", "#ffffff") > 20.9, "contraste preto/branco é 21:1")
     checar(design.garantir_contraste("#0a1208", "#0a1208") != "#0a1208", "corrige cor sobre si mesma")

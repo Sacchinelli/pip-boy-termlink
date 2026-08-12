@@ -67,7 +67,7 @@ O código passa limpo por três verificadores, e a suíte de testes cobre o núc
 ```powershell
 py -m ruff check .                                # lint (zero apontamentos)
 py -m mypy pipboy pip_boy.py diagnostico.py       # tipos, modo estrito
-py tests/test_nucleo.py                           # ~305 testes sem hardware
+py tests/test_nucleo.py                           # ~310 testes sem hardware
 py tests/test_interface.py                        # a interface inteira, sem tela
 ```
 
@@ -257,6 +257,8 @@ pip-boy-termlink/
 | --- | --- | --- |
 | Ventilador, teclado mecânico, ganho de microfone alto | O fundo passa do limiar sozinho, o portão nunca fecha: **0% de economia** | **88%** |
 | Silenciosa, microfone de ganho baixo | A fala inteira fica abaixo do limiar: **a pergunta é comida** | as perguntas passam inteiras |
+
+**E o limiar é visível.** O medidor ao lado da cápsula de estado ganhou um risco vertical: à esquerda dele nada é transmitido, à direita o portão abre. É o que responde "estou falando e ele não me ouve" sem abrir log nenhum — se as barras não passam do risco, o problema é ganho de microfone, não o programa. Para o risco significar alguma coisa, a régua do medidor passou a ser **logarítmica**, como a de todo medidor de áudio: na régua linear que existia, fala normal acendia *duas* barras de dezoito e as dezesseis restantes esperavam um grito. E o número desenhado é o mesmo que o portão julga — antes a tela media o bloco cru, na taxa nativa do dispositivo, e o portão media o vetor já reamostrado, o que em ruído de sala dá 19% de diferença.
 
 Os dois números saem de `py tests/test_nucleo.py`, no mesmo material. O piso de ruído é estimado por estatística de mínimos — a janela dos últimos dez segundos, ordenada, e um percentil baixo dela. Funciona porque fala humana tem buraco: entre palavras, entre sílabas, entre frases, muito mais de 10% dos blocos de uma janela de dez segundos são fundo, mesmo com alguém falando sem parar. O limiar resultante tem dois batentes, e o de cima é o que importa: ele fica **abaixo do nível da fala normal**, de modo que uma sala barulhenta demais faz o portão desistir de economizar em vez de cortar a pergunta. Perder tokens se recupera; perder a pergunta, não.
 

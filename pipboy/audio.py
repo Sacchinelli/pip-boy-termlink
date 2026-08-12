@@ -640,7 +640,31 @@ class Capture:
             if self._stop.is_set():
                 break
 
-            self.last_level = dsp.rms_level(bruto)
+            # O sinal é decodificado e reamostrado ANTES de qualquer decisão,
+            # para que o medidor da tela e o portão julguem exatamente o mesmo
+            # número. Eram dois: a tela recebia o RMS do bloco cru, na taxa
+            # nativa do dispositivo, e o portão media o vetor já reamostrado
+            # para 16 kHz — a interpolação suaviza o sinal e derruba um pouco o
+            # RMS, então os dois discordavam justamente em quem abre o portão.
+            # Enquanto o limiar era invisível, a discordância era acadêmica;
+            # agora que o medidor DESENHA o limiar, ela viraria uma mentira
+            # desenhada na tela.
+            #
+            # O custo de reamostrar também no caminho que não envia (mudo, ou
+            # assistente falando) é uma interpolação de mil amostras dezesseis
+            # vezes por segundo — e, na maioria das máquinas, nem isso: em
+            # 16 kHz nativo ``resample`` devolve o próprio vetor.
+            amostras = dsp.pcm_to_array(bruto).astype(np.int32)
+            if self._native_rate != INPUT_SAMPLE_RATE:
+                amostras = dsp.resample(amostras, self._native_rate, INPUT_SAMPLE_RATE)
+
+            # O nível que abre o portão é o do MICROFONE, medido antes da
+            # mistura. Medi-lo depois — como se fazia — entregava a decisão ao
+            # jogo, que nunca está em silêncio: o portão ficava escancarado a
+            # sessão inteira e a economia que ele existe para dar virava zero
+            # justamente para quem liga 'Ouvir o jogo'.
+            nivel_microfone = dsp.nivel_de(amostras)
+            self.last_level = nivel_microfone
 
             silenciado = self.muted.is_set()
             # A nossa própria voz saindo pela placa de som, neste instante.
@@ -695,17 +719,6 @@ class Capture:
                 if self.portao_de_voz.fechar():
                     self._enfileirar(FIM_DE_FALA)
                 continue
-
-            amostras = dsp.pcm_to_array(bruto).astype(np.int32)
-            if self._native_rate != INPUT_SAMPLE_RATE:
-                amostras = dsp.resample(amostras, self._native_rate, INPUT_SAMPLE_RATE)
-
-            # O nível que abre o portão é o do MICROFONE, medido antes da
-            # mistura. Medi-lo depois — como se fazia — entregava a decisão ao
-            # jogo, que nunca está em silêncio: o portão ficava escancarado a
-            # sessão inteira e a economia que ele existe para dar virava zero
-            # justamente para quem liga 'Ouvir o jogo'.
-            nivel_microfone = dsp.nivel_de(amostras)
 
             if jogo_ligado:
                 # Com o buffer limpo durante a fala, isto devolve silêncio — o

@@ -415,10 +415,11 @@ class Medidor(QWidget):
         self._pico = 0.0
         self._pico_em = 0.0
         self._nivel_alvo = 0.0
+        self._limiar = 0.0
         self._ativo = False
         self._cores = {
             "primary": "#4dff7a", "accent": "#ffb000",
-            "alert": "#ff5c5c", "apagada": "#1c4a2c",
+            "alert": "#ff5c5c", "apagada": "#1c4a2c", "limiar": "#7f8c8d",
         }
         self.setFixedSize(
             design.MEDIDOR_BARRAS * (design.MEDIDOR_LARGURA_BARRA + design.MEDIDOR_ESPACO_BARRA),
@@ -434,7 +435,24 @@ class Medidor(QWidget):
         self.update()
 
     def definir_nivel(self, nivel: float) -> None:
-        self._nivel_alvo = nivel
+        # A conversão para a régua acontece na ENTRADA, e não na pintura, para
+        # que a balística (queda e retenção de pico) integre em unidades de
+        # tela. Convertida só na hora de desenhar, a queda constante de
+        # ``QUEDA`` viraria um tombo acelerado no alto da régua e uma lesma no
+        # pé — a mesma velocidade de sinal parecendo três velocidades de tinta.
+        self._nivel_alvo = design.escala_do_medidor(nivel)
+
+    def definir_limiar(self, limiar: float) -> None:
+        """Onde o portão de voz abre, na mesma régua do nível. 0.0 esconde.
+
+        É o que transforma o medidor de enfeite em diagnóstico: enquanto o
+        limiar era invisível, "estou falando e ele não me ouve" não tinha como
+        ser respondido olhando a tela.
+        """
+        novo = design.escala_do_medidor(limiar) if limiar > 0.0 else 0.0
+        if abs(novo - self._limiar) > 0.005:
+            self._limiar = novo
+            self.update()
 
     def definir_ativo(self, ativo: bool) -> None:
         """Liga ou apaga o medidor conforme exista sessão.
@@ -490,6 +508,17 @@ class Medidor(QWidget):
                 )
             pintor.end()
             return
+
+        # O risco do limiar vai ANTES das barras e cai numa FOLGA entre elas:
+        # atravessado por cima do desenho ele leria como defeito de pintura, e
+        # a folga é o único lugar da régua onde uma linha vertical não disputa
+        # espaço com nada. À esquerda dele o portão retém; à direita, transmite.
+        if self._limiar > 0.0:
+            barra_limiar = round(self._limiar * design.MEDIDOR_BARRAS)
+            if 0 < barra_limiar < design.MEDIDOR_BARRAS:
+                x = barra_limiar * passo - design.MEDIDOR_ESPACO_BARRA / 2.0
+                pintor.setBrush(QColor(self._cores["limiar"]))
+                pintor.drawRect(QRectF(x - 0.5, 0.0, 1.0, base + 2.0))
 
         for i in range(design.MEDIDOR_BARRAS):
             fracao = i / (design.MEDIDOR_BARRAS - 1)
