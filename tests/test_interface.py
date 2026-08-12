@@ -226,7 +226,7 @@ def main() -> int:
     from pipboy.historico import sessao_em
 
     ghoul, _ = store.registrar("ghoul", "carniçal", "A ghoul.", "Fallout")
-    historico.registrar_fala(sessao, autor="", tag="vocab", texto="＋ ghoul — carniçal")
+    historico.registrar_fala(sessao, autor="", tag="vocab", texto="⊕ ghoul — carniçal")
 
     destino = sessao_em(janela.periodos_de_conversa(), ghoul.criado_em)
     checar(destino == sessao, f"a palavra encontra a conversa em que nasceu ({destino})")

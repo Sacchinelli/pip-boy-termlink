@@ -44,3 +44,11 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests/test_interface.py
+
+      # Deliberadamente SEM QT_QPA_PLATFORM: esta é a única verificação que
+      # precisa da base de fontes real do sistema. No offscreen o Qt enxerga
+      # zero famílias — a suíte acima desenha a janela toda em caixinhas e
+      # passa feliz, e é por isso que o glifo faltando escapa dela. Se o runner
+      # também não tiver fontes, o script avisa e sai limpo em vez de reprovar.
+      - name: Glifos existem nas fontes dos temas
+        run: python ferramentas/verificar_glifos.py

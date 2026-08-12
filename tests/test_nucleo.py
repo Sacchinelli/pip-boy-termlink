@@ -1835,7 +1835,7 @@ def teste_palavra_ate_a_conversa() -> None:
     hist.registrar_fala(sessao, autor="VOCÊ", tag="usuario", texto="o que é wasteland?")
     entrada, _ = store.registrar("wasteland", "terra devastada", "Welcome.", "Fallout")
     hist.registrar_fala(
-        sessao, autor="", tag="vocab", texto="＋ wasteland — terra devastada"
+        sessao, autor="", tag="vocab", texto="⊕ wasteland — terra devastada"
     )
     checar(entrada.criado_em != "", "a entrada carrega o instante em que nasceu")
 
@@ -1901,7 +1901,7 @@ def teste_busca_entre_conversas() -> None:
     a = hist.iniciar_sessao(jogo="Fallout")
     hist.registrar_fala(a, autor="VOCÊ", tag="usuario", texto="o que é wasteland?")
     hist.registrar_fala(a, autor="PIP-BOY", tag="assistente", texto="Wasteland é terra devastada.")
-    hist.registrar_fala(a, autor="", tag="vocab", texto="＋ wasteland — terra devastada")
+    hist.registrar_fala(a, autor="", tag="vocab", texto="⊕ wasteland — terra devastada")
     b = hist.iniciar_sessao(jogo="Elden Ring")
     hist.registrar_fala(b, autor="VOCÊ", tag="usuario", texto="e bonfire?")
     hist.registrar_fala(b, autor="MENSAGEIRO", tag="assistente", texto="Fogueira, para descansar.")

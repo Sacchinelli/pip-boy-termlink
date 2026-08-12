@@ -76,9 +76,14 @@ py -m ruff check .                                # lint (zero apontamentos)
 py -m mypy pipboy pip_boy.py diagnostico.py       # tipos, modo estrito
 py tests/test_nucleo.py                           # ~400 testes sem hardware
 py tests/test_interface.py                        # a interface inteira, sem tela
+py ferramentas/verificar_glifos.py                # todo símbolo tem glifo nas fontes
 ```
 
 A suíte de interface constrói a janela de verdade no backend *offscreen* do Qt: repinta os dez ambientes por completo, abre caderno, cartões de revisão, progresso, histórico, cápsula compacta e o cartão de boas-vindas, e exercita a busca. É ela que pega o que o núcleo nunca vê — a chave de paleta digitada errada, o import circular novo, o widget que explode ao trocar de tema. Roda sem monitor, sem microfone e sem rede, então o CI a executa igual.
+
+**E há um defeito que ela é estruturalmente incapaz de ver.** No backend *offscreen* o Qt enxerga **zero** famílias de fonte: a suíte desenha a janela inteira em caixinhas e passa feliz, então um símbolo sem glifo — a armadilha que este README já descreve duas vezes, e que já mordeu — escapa dela por construção. `verificar_glifos.py` é a resposta: roda na plataforma padrão, com a base de fontes real, lê com o `ast` **todo literal de texto** de `pipboy/` (docstrings de fora, que são texto para quem lê o código) e exige que cada caractere da categoria *Symbol* do Unicode exista em cada uma das doze fontes que os dez temas resolvem. Não é uma lista escrita à mão, que envelheceria no primeiro glifo novo — é o código sendo lido.
+
+Ele achou um na primeira execução: a anotação de palavra nova usava `＋` (U+FF0B, a forma *fullwidth*, feita para tipografia CJK), ausente de **todas** as fontes dos temas. Toda palavra salva aparecia com uma caixinha na frente, em todos os ambientes. Hoje é `⊕`. Se o runner não tiver base de fontes, o script diz que não mediu nada e sai limpo — não saber medir não é o mesmo que encontrar defeito.
 
 A configuração vive no `pyproject.toml`. Duas supressões são deliberadas e estão documentadas lá: o padrão `objectName=` no construtor (válido no PySide6, ausente das stubs) e os imports tardios do teste.
 
@@ -200,7 +205,9 @@ pip-boy-termlink/
 ├── pip_boy.spec          # Receita do executável (PyInstaller)
 ├── pyproject.toml        # Metadados, ruff e mypy
 ├── ferramentas/
-│   └── gerar_icone.py    # Renderiza o .ico do build (nenhum binário no repo)
+│   ├── gerar_icone.py    # Renderiza o .ico do build (nenhum binário no repo)
+│   ├── verificar_glifos.py    # Todo símbolo do código existe nas fontes?
+│   └── verificar_segredos.py  # Nada de segredo entre os arquivos rastreados
 ├── pipboy/
 │   ├── __init__.py       # Logging, abertura e ponto de entrada
 │   ├── constants.py      # Taxas de amostragem e temporizações

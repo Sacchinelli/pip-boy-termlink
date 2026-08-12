@@ -258,7 +258,12 @@ class LiveSessionWorker:
         )
 
     def _on_vocab(self, termo: str, traducao: str, nova: bool) -> None:
-        prefixo = "＋" if nova else "↻"
+        # "⊕" (U+2295) e não "＋" (U+FF0B, o mais largo): o segundo é da forma
+        # FULLWIDTH, feita para tipografia CJK, e não existe em NENHUMA das
+        # doze fontes que os dez temas usam — a anotação de palavra nova saía
+        # com uma caixinha na frente em todos eles. É a mesma armadilha do "✕",
+        # e agora `py ferramentas/verificar_glifos.py` a pega sozinho.
+        prefixo = "⊕" if nova else "↻"
         self._log(f"{prefixo} {termo} — {traducao}", Tag.VOCAB)
         self._publish(
             UiEvent(UiEventKind.VOCAB_ADDED, session_id=self.session_id, payload=self._store.total())
