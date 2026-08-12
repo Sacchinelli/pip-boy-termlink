@@ -85,6 +85,8 @@ A suíte de interface constrói a janela de verdade no backend *offscreen* do Qt
 
 Ele achou um na primeira execução: a anotação de palavra nova usava `＋` (U+FF0B, a forma *fullwidth*, feita para tipografia CJK), ausente de **todas** as fontes dos temas. Toda palavra salva aparecia com uma caixinha na frente, em todos os ambientes. Hoje é `⊕`. Se o runner não tiver base de fontes, o script diz que não mediu nada e sai limpo — não saber medir não é o mesmo que encontrar defeito.
 
+**E nem os dois juntos substituem abrir a janela.** O *offscreen* prova que a interface se constrói e não explode; o verificador de glifos prova que os símbolos existem nas fontes. Nenhum dos dois olha para o resultado. Por isso o procedimento de rodar o programa de verdade — subir pelo `.venv`, provar que a janela desenhou, mandar os atalhos e fotografar — está registrado em `.claude/skills/rodar-pipboy/`, com as armadilhas que ele custou para descobrir: que **INICIAR** abre sessão com a Live API e passa a gastar a chave por minuto de áudio, de modo que conferir a interface não autoriza clicar nele; que conferir o ambiente pela `python314.dll` não prova nada, porque um ambiente virtual compartilha o binário do interpretador base; e que fotografar a *tela*, em vez de pedir o conteúdo à *janela*, produz uma imagem convincente do programa errado — mais rica em cores que a foto certa, e por isso invisível a qualquer limiar.
+
 A configuração vive no `pyproject.toml`. Duas supressões são deliberadas e estão documentadas lá: o padrão `objectName=` no construtor (válido no PySide6, ausente das stubs) e os imports tardios do teste.
 
 Exceções imprevistas não derrubam nem silenciam o programa: um capturador global (`pipboy/crash.py`) grava o traço completo no `pipboy.log` e avisa numa caixa temática — uma vez por defeito, sem tempestade de janelas.
@@ -247,6 +249,8 @@ pip-boy-termlink/
 ├── tests/
 │   ├── test_nucleo.py    # Lógica: sem hardware, sem rede, sem efeito colateral
 │   └── test_interface.py # A janela inteira, no backend offscreen do Qt
+├── .claude/skills/
+│   └── rodar-pipboy/     # Como subir e dirigir o app — o que teste algum vê
 ├── .env.example
 └── requirements.txt
 ```
