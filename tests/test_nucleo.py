@@ -726,6 +726,26 @@ def teste_design() -> None:
         f"entre o limiar típico e a fala normal cabem barras ({escala(0.1) - escala(0.035):.0%})",
     )
 
+    # --- Tamanho do texto ---
+    # A rampa é o produto: se dois degraus colidem numa escala, a hierarquia
+    # tipográfica desaparece justamente para quem pediu letra maior.
+    checar(design.escalar(11, 1.0) == 11, "escala 1.0 não mexe em nada")
+    checar(design.escalar(8, 1.3) == 10 and design.escalar(19, 1.3) == 25, "escala arredonda")
+    checar(design.escalar(2, 0.5) == 6, "o piso protege do arredondamento a zero")
+    degraus = [t.tamanho for t in design.TIPO.values()]
+    for fator in (1.0, 1.15, 1.30):
+        escalados = [design.escalar(d, fator) for d in degraus]
+        ordem_igual = all(
+            (a < b) == (design.escalar(a, fator) < design.escalar(b, fator))
+            or design.escalar(a, fator) == design.escalar(b, fator)
+            for a in degraus
+            for b in degraus
+        )
+        checar(
+            min(escalados) >= 6 and ordem_igual,
+            f"a rampa sobrevive à escala {fator} sem inverter degraus",
+        )
+
     checar(design.contraste("#000000", "#ffffff") > 20.9, "contraste preto/branco é 21:1")
     checar(design.garantir_contraste("#0a1208", "#0a1208") != "#0a1208", "corrige cor sobre si mesma")
     escuro = design.garantir_contraste("#2c7a44", "#0a1208")

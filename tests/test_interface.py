@@ -333,6 +333,59 @@ def main() -> int:
     checar(depois == antes + 1, f"reabrir o histórico relê a transcrição ({antes}→{depois})")
     janela._visor_historico.close()
 
+    # 1b. Tamanho do texto: acessibilidade, e por isso vale em toda superfície
+    #     do programa — inclusive nas janelas satélites e DURANTE a sessão.
+    from pipboy.interface.janela import ESCALA_TEXTO_PADRAO
+
+    antes_corpo = janela.fonte("corpo").pointSize()
+    antes_lateral = janela.largura_lateral
+    antes_secao = janela._rotulos_secao[0].font().pointSize()
+    antes_campo = janela._rotulos_campo[0].font().pointSize()
+
+    janela.abrir_caderno()
+    aplicacao.processEvents()
+    antes_caderno = janela._caderno.busca.font().pointSize()
+
+    janela.campo_tamanho_texto.setCurrentText("Maior")
+    aplicacao.processEvents()
+    checar(janela.fonte("corpo").pointSize() > antes_corpo, "a rampa cresce")
+    checar(janela.largura_lateral > antes_lateral, "a coluna de texto cresce junto")
+    # Estes dois recebiam fonte uma vez só, dentro de funções locais da
+    # montagem: eram os únicos rótulos fora do alcance de uma repintura.
+    checar(
+        janela._rotulos_secao[0].font().pointSize() > antes_secao,
+        "os títulos de seção acompanham",
+    )
+    checar(
+        janela._rotulos_campo[0].font().pointSize() > antes_campo,
+        "e os rótulos de campo também",
+    )
+    checar(
+        janela._caderno.busca.font().pointSize() > antes_caderno,
+        "o caderno aberto acompanha sem precisar ser reaberto",
+    )
+    checar(not janela.grab().isNull(), "a janela desenha inteira na escala maior")
+    checar(not janela._caderno.grab().isNull(), "e o caderno também")
+
+    # O travamento de sessão existe para o que vai na abertura da conexão.
+    # Letra e atmosfera não vão a lugar nenhum — e são justamente os dois
+    # ajustes de acessibilidade, que quem precisa deles precisa DURANTE.
+    janela._definir_controles(ativa=True)
+    checar(janela.campo_tamanho_texto.isEnabled(), "o tamanho do texto não trava na sessão")
+    checar(janela.campo_atmosfera.isEnabled(), "a atmosfera também não")
+    checar(not janela.campo_jogo.isEnabled(), "mas o jogo trava, como sempre")
+    janela._definir_controles(ativa=False)
+
+    janela.campo_tamanho_texto.setCurrentText(ESCALA_TEXTO_PADRAO)
+    aplicacao.processEvents()
+    checar(janela.fonte("corpo").pointSize() == antes_corpo, "e volta ao padrão")
+    janela._salvar_preferencias()
+    checar(
+        janela._prefs.extras.get("tamanho_texto") == ESCALA_TEXTO_PADRAO,
+        "a escolha é persistida junto das outras preferências",
+    )
+    janela._caderno.close()
+
     # 2. O botão de maximizar ficava preso em "Restaurar" para sempre.
     botao_max = janela.barra_titulo.botao_maximizar
     assert botao_max is not None

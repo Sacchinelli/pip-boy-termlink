@@ -77,6 +77,23 @@ TIPO: Final[dict[str, Tipo]] = {
     "vocab": Tipo(10, "normal", "italic"),
 }
 
+def escalar(base: int, escala: float) -> int:
+    """Aplica o fator de tamanho de texto a uma medida da rampa ou da grade.
+
+    Existe porque a rampa tipográfica era literal: sete tamanhos fixos, sem
+    como pedir letra maior. Este programa é feito para ficar ao lado de um
+    jogo — às vezes numa TV, a dois metros —, e a atmosfera já foi tratada
+    como assunto de acessibilidade, com três níveis e a justificativa escrita.
+    Tamanho de texto é a outra metade da mesma preocupação, e faltava.
+
+    Serve também às MEDIDAS que confinam texto, e não só às fontes: a coluna
+    lateral é uma coluna de texto, e mantê-la em 296 px enquanto as letras
+    crescem só troca "pequeno demais" por "cortado". O piso de 6 pontos
+    protege do arredondamento em escalas menores que 1.
+    """
+    return max(6, round(base * escala))
+
+
 # Famílias neutras para os CONTROLES. A fonte temática de cada jogo continua
 # assinando a marca e a fala do assistente — é ali que ela cria identidade.
 # Aplicada também a rótulo, botão e campo, ela fazia a janela inteira parecer

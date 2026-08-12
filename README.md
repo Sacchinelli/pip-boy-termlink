@@ -46,6 +46,8 @@ Cada jogo tem o seu ambiente. A troca é imediata, sem reiniciar o programa.
 
 Cada ambiente tem também uma **atmosfera** — varredura, grão, vinheta, partículas, interferência e a forma dos cantos — sintetizada com o QPainter. Não há textura, arte, logotipo ou fonte de terceiros no repositório: o que caracteriza um jogo na tela não é a cor, é o material, e material se desenha. A intensidade tem três níveis na coluna lateral (**Completa**, **Discreta**, **Desligada**), porque varredura e cintilação são obstáculo real para baixa visão.
 
+Ao lado dela, **Tamanho do texto** (Padrão, Grande, Maior) multiplica a rampa tipográfica inteira — e junto com ela a coluna lateral, que é uma coluna de texto e só trocaria "pequeno demais" por "cortado" se ficasse parada. Vale na janela, no caderno, no histórico e na cápsula, porque toda a tipografia do programa passa por um ponto só. Os dois controles de apresentação são os **únicos que continuam livres durante a sessão**: o travamento existe para o que vai na abertura da conexão (jogo, nível, microfone), e letra e atmosfera não vão a lugar nenhum — quem precisa de letra maior para ler a conversa precisa disso durante a conversa, não depois dela.
+
 O jogo escolhido define quatro coisas de uma vez: a aparência, o contexto linguístico enviado ao modelo (que inglês esperar naquele título), o nome do assistente no registro e a primeira persona da lista — a persona temática. As personas gerais (Assistente Amigável, Instrutor Rígido, Professor Nativo) continuam disponíveis em qualquer jogo.
 
 ### Adicionar um jogo
@@ -69,7 +71,7 @@ O código passa limpo por três verificadores, e a suíte de testes cobre o núc
 ```powershell
 py -m ruff check .                                # lint (zero apontamentos)
 py -m mypy pipboy pip_boy.py diagnostico.py       # tipos, modo estrito
-py tests/test_nucleo.py                           # ~355 testes sem hardware
+py tests/test_nucleo.py                           # ~360 testes sem hardware
 py tests/test_interface.py                        # a interface inteira, sem tela
 ```
 

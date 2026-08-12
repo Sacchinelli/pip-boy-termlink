@@ -115,6 +115,12 @@ FONTES_MONO: tuple[str, ...] = ("Cascadia Mono", "Consolas", "Courier New", "Cou
 
 NIVEIS_ATMOSFERA: dict[str, float] = {"Completa": 1.0, "Discreta": 0.45, "Desligada": 0.0}
 
+# Fator aplicado à rampa tipográfica inteira e às medidas que confinam texto.
+# Os saltos são de 15%: menos que isso não se percebe, e mais que isso pula o
+# tamanho que resolveria o problema de alguém.
+ESCALAS_TEXTO: dict[str, float] = {"Padrão": 1.0, "Grande": 1.15, "Maior": 1.30}
+ESCALA_TEXTO_PADRAO = "Padrão"
+
 # Quanto do som do jogo entra na mistura enviada ao modelo. A preferência
 # ``ganho_jogo`` existia, era lida na abertura da sessão e validada por teste —
 # mas nenhum controle a escrevia: só se mudava editando o JSON à mão. O valor
@@ -201,6 +207,9 @@ class Janela(QWidget):
         # meia dúzia de leitores usavam getattr com padrão para contornar a
         # janela em que ela não existia.
         self._intensidade_atmosfera = 1.0
+        # Nasce antes de qualquer widget: `fonte()` é chamada durante a
+        # montagem, e ela lê este fator.
+        self._escala_texto = 1.0
 
         self._tema: GameTheme = theme_for(self._prefs.jogo)
         self._atmosfera = atmosfera_de(self._tema.name)
@@ -346,27 +355,38 @@ class Janela(QWidget):
 
         ``ui=True`` usa a família neutra dos controles; ``ui=False`` usa a
         fonte do tema, reservada à marca e à fala do assistente.
+
+        Ponto de estrangulamento de TODA a tipografia do programa — inclusive
+        das janelas satélites, que recebem a janela como provedor. É por isso
+        que o tamanho do texto é um fator aplicado aqui, e não uma rampa
+        alternativa a manter em paralelo.
         """
         tipo = design.TIPO[papel]
         familia = self._primeira_instalada(
             self._tema.ui_font_candidates if ui else self._tema.font_candidates
         )
-        fonte = QFont(familia, tipo.tamanho)
+        fonte = QFont(familia, design.escalar(tipo.tamanho, self._escala_texto))
         fonte.setBold(tipo.peso == "bold")
         fonte.setItalic(tipo.estilo == "italic")
         return fonte
 
     def _fonte_mono(self, papel: str) -> QFont:
         tipo = design.TIPO[papel]
-        return QFont(self._mono, tipo.tamanho)
+        return QFont(self._mono, design.escalar(tipo.tamanho, self._escala_texto))
+
+    @property
+    def largura_lateral(self) -> int:
+        """A coluna de ajustes é uma coluna de TEXTO, e acompanha o tamanho dele."""
+        return design.escalar(design.LARGURA_LATERAL, self._escala_texto)
 
     def _ajustar_marca(self, texto: str) -> QFont:
         """Encolhe o nome do ambiente até ele caber na largura da coluna."""
         fonte = self.fonte("display", ui=False)
-        maximo = design.TIPO["display"].tamanho
+        maximo = fonte.pointSize()
+        limite = design.escalar(design.CABECALHO_LARGURA_MAX, self._escala_texto)
         for tamanho in range(maximo, maximo - 10, -1):
             fonte.setPointSize(tamanho)
-            if QFontMetrics(fonte).horizontalAdvance(texto) <= design.CABECALHO_LARGURA_MAX:
+            if QFontMetrics(fonte).horizontalAdvance(texto) <= limite:
                 break
         return fonte
 
@@ -423,7 +443,7 @@ class Janela(QWidget):
         # não parece rolável. Um destino permanente não é um ajuste; ancorá-lo
         # no rodapé o torna independente da altura da janela.
         self.coluna_lateral = QWidget(objectName="colunaLateral")
-        self.coluna_lateral.setFixedWidth(design.LARGURA_LATERAL)
+        self.coluna_lateral.setFixedWidth(self.largura_lateral)
         pilha = QVBoxLayout(self.coluna_lateral)
         pilha.setContentsMargins(0, 0, 0, 0)
         pilha.setSpacing(0)
@@ -467,6 +487,12 @@ class Janela(QWidget):
         coluna.addSpacing(16)
 
         self.campos: dict[str, CampoSelecao] = {}
+        # Estes dois recebiam fonte uma vez só, dentro das funções locais
+        # abaixo, e ficavam fora do alcance de qualquer repintura. Enquanto a
+        # rampa era fixa isso nunca apareceu; com o tamanho do texto ajustável,
+        # seriam os únicos rótulos da coluna a não crescer.
+        self._rotulos_secao: list[QLabel] = []
+        self._rotulos_campo: list[QLabel] = []
 
         def secao(titulo: str) -> None:
             # Título e fio na MESMA linha, o fio começando onde o texto acaba.
@@ -479,6 +505,7 @@ class Janela(QWidget):
             linha.setSpacing(10)
             rotulo = QLabel(titulo.upper(), objectName="secao")
             rotulo.setFont(self.fonte("secao"))
+            self._rotulos_secao.append(rotulo)
             linha.addWidget(rotulo)
             regua = QFrame(objectName="regua")
             regua.setFixedHeight(1)
@@ -490,6 +517,7 @@ class Janela(QWidget):
         def campo(nome: str, rotulo: str, valores: list[str], dica: str = "") -> CampoSelecao:
             etiqueta = QLabel(rotulo, objectName="rotuloCampo")
             etiqueta.setFont(self.fonte("rotulo"))
+            self._rotulos_campo.append(etiqueta)
             coluna.addWidget(etiqueta)
             coluna.addSpacing(4)
             seletor = CampoSelecao()
@@ -607,6 +635,12 @@ class Janela(QWidget):
             "se o efeito atrapalhar a leitura.",
         )
         self.campo_atmosfera.currentTextChanged.connect(self._ajustar_atmosfera)
+        self.campo_tamanho_texto = campo(
+            "tamanho_texto", "Tamanho do texto", list(ESCALAS_TEXTO),
+            "Aumenta a letra na janela inteira, inclusive no caderno e no histórico. "
+            "Este programa costuma ficar ao lado do jogo, às vezes numa TV.",
+        )
+        self.campo_tamanho_texto.currentTextChanged.connect(self._ajustar_tamanho_texto)
 
         coluna.addStretch(1)
 
@@ -745,10 +779,11 @@ class Janela(QWidget):
         t = self._tema
         self.setWindowTitle(t.window_title)
         self.barra_titulo.aplicar_tema()
+        # Só os TEXTOS aqui; as fontes de todos eles saem de _aplicar_fontes,
+        # chamada logo abaixo — duplicar as duas coisas fazia a marca ser
+        # medida duas vezes por repintura, e a segunda apagava a primeira.
         self.marca.setText(t.header_title)
-        self.marca.setFont(self._ajustar_marca(t.header_title))
         self.submarca.setText(t.header_subtitle)
-        self.submarca.setFont(self.fonte("micro"))
 
         ativa = self._worker is not None
         self.botao_acao.setText(t.stop_label if ativa else t.start_label)
@@ -763,6 +798,7 @@ class Janela(QWidget):
             botao.forma = self._atmosfera.forma
             botao.update()
 
+        self._aplicar_fontes()
         self.medidor.definir_cores(
             primary=t.primary, accent=t.accent, alert=t.alert,
             apagada=design.elevar(t.screen, 0.16, t.primary),
@@ -770,7 +806,6 @@ class Janela(QWidget):
             # Na cor do tema competiria com as barras vivas, que são o dado.
             limiar=t.text_muted,
         )
-        self.pilula.setFont(self.fonte("micro"))
         self.setStyleSheet(self._folha())
         self._posicionar_veu()
         for campo in self.campos.values():
@@ -782,6 +817,55 @@ class Janela(QWidget):
         if hasattr(self, "_sobreposicao"):
             self._sobreposicao.raise_()
         self.update()
+
+    def _aplicar_fontes(self) -> None:
+        """Reaplica a rampa inteira aos widgets da janela principal.
+
+        As janelas satélites já refaziam suas fontes em ``aplicar_tema``; a
+        principal montava as dela uma vez e nunca mais, porque a família dos
+        controles é a mesma em todos os temas e a rampa era fixa. Com o
+        tamanho do texto ajustável, "uma vez e nunca mais" vira "metade da
+        janela ignora a escolha".
+        """
+        self.coluna_lateral.setFixedWidth(self.largura_lateral)
+        self.marca.setFont(self._ajustar_marca(self._tema.header_title))
+        self.submarca.setFont(self.fonte("micro"))
+        for rotulo in self._rotulos_secao:
+            rotulo.setFont(self.fonte("secao"))
+        for etiqueta in self._rotulos_campo:
+            etiqueta.setFont(self.fonte("rotulo"))
+        for campo in self.campos.values():
+            campo.setFont(self.fonte("aux"))
+        for chip in (self.chip_alto_falante, self.chip_jogo, self.chip_busca):
+            chip.setFont(self.fonte("legenda"))
+        self.rotulo_caderno.setFont(self.fonte("micro"))
+        self.pilula.setFont(self.fonte("micro"))
+        self.rotulo_meta.setFont(self._fonte_mono("micro"))
+        self.entrada_texto.setFont(self.fonte("corpo"))
+        for botao in (
+            self.botao_caderno, self.botao_historico,
+            self.botao_acao, self.botao_mudo, self.botao_enviar,
+        ):
+            botao.setFont(self.fonte("corpo_forte"))
+
+    def _ajustar_tamanho_texto(self, escolha: str) -> None:
+        """Aplica o tamanho do texto na janela e em tudo que ela hospeda.
+
+        Como a atmosfera, isto é acessibilidade e não gosto — então vale em
+        toda superfície do programa, e não só onde o controle está. As janelas
+        satélites pegam a rampa nova pelo ``aplicar_tema`` delas, que é o
+        mesmo caminho por onde já pegam a paleta.
+        """
+        nova = ESCALAS_TEXTO.get(escolha, 1.0)
+        if nova == self._escala_texto:
+            return
+        self._escala_texto = nova
+        self._aplicar_tema()
+        # As bolhas guardam a fonte capturada na construção; só refazendo.
+        self.conversa.repintar()
+        for satelite in (self._caderno, self._visor_historico, self._capsula):
+            if satelite is not None:
+                satelite.aplicar_tema()
 
     def _folha(self) -> str:
         """Folha de estilo derivada do tema — o equivalente ao repintar."""
@@ -1172,8 +1256,15 @@ class Janela(QWidget):
         self.rotulo_caderno.setText(texto)
 
     def _definir_controles(self, ativa: bool, pode_parar: bool = True) -> None:
+        # Os dois controles de APRESENTAÇÃO seguem vivos durante a sessão. O
+        # travamento existe porque jogo, nível e microfone vão na abertura da
+        # conexão e trocá-los no meio mentiria sobre o que está valendo; letra
+        # e atmosfera não vão para lugar nenhum. E são justamente os dois
+        # ajustes de acessibilidade: quem precisa de letra maior para LER a
+        # conversa precisa disso durante a conversa, não depois dela.
+        livres = (self.campo_atmosfera, self.campo_tamanho_texto)
         for campo in self.campos.values():
-            if campo is not self.campo_atmosfera:
+            if campo not in livres:
                 campo.setEnabled(not ativa)
         for chip in (self.chip_alto_falante, self.chip_busca):
             chip.setEnabled(not ativa)
@@ -1222,6 +1313,12 @@ class Janela(QWidget):
         atmosfera = str(p.extras.get("atmosfera", "Completa"))
         selecionar(self.campo_atmosfera, atmosfera, "Completa")
         self._ajustar_atmosfera(self.campo_atmosfera.currentText())
+        tamanho = str(p.extras.get("tamanho_texto", ESCALA_TEXTO_PADRAO))
+        selecionar(self.campo_tamanho_texto, tamanho, ESCALA_TEXTO_PADRAO)
+        # Direto no campo, sem passar por _ajustar_tamanho_texto: aqui a janela
+        # ainda está sendo montada, o _aplicar_tema logo a seguir já refaz tudo,
+        # e as satélites que aquele método repinta ainda nem existem.
+        self._escala_texto = ESCALAS_TEXTO.get(self.campo_tamanho_texto.currentText(), 1.0)
         self._atualizar_caderno()
 
     def _salvar_preferencias(self) -> None:
@@ -1240,6 +1337,7 @@ class Janela(QWidget):
             self.campo_ganho_jogo.currentText(), DEFAULT_GAME_AUDIO_GAIN
         )
         p.extras["atmosfera"] = self.campo_atmosfera.currentText()
+        p.extras["tamanho_texto"] = self.campo_tamanho_texto.currentText()
         g = self.geometry()
         p.extras["geometria"] = f"{g.width()},{g.height()},{g.x()},{g.y()}"
         p.save()
