@@ -1,4 +1,4 @@
-"""Verifica que todo símbolo desenhado pela interface existe nas fontes dos temas.
+"""Verifica que todo símbolo desenhado pela interface aparece — nenhum vira caixinha.
 
 Uso:  py ferramentas/verificar_glifos.py
 
@@ -26,12 +26,26 @@ Docstrings ficam de fora. Elas são texto para quem lê o código, não para a
 tela, e a seta de "novas → aprendendo → dominadas" numa explicação não
 justifica exigir a seta de nenhuma fonte.
 
-**O critério é a regra do projeto, não o pixel.** O Qt sabe substituir a fonte
-por caractere na hora de pintar, então um símbolo ausente às vezes aparece
-assim mesmo — com a fonte errada, fora do tema, que é meio caminho do defeito
-original. Aqui a exigência é a documentada: o símbolo tem de existir na fonte
-que o tema escolheu. Depender do socorro do sistema é o mesmo que não ter
-regra.
+**O que ele garante.** A medição é ``QFontMetrics.inFont``, e ela responde a
+pergunta do usuário: este caractere vai aparecer? O Qt substitui a fonte por
+caractere na hora de pintar, e o ``inFont`` conta essa substituição — a ponto
+de responder que sim para um ideograma chinês perguntado a uma fonte latina de
+38 KB. Reprovar aqui significa, então, que NENHUMA fonte do sistema tem o
+glifo: caixinha na certa, em qualquer máquina. Foi assim que o ``＋`` fullwidth
+foi pego, e é uma garantia forte, que vale ter no CI.
+
+**O que ele NÃO garante** é que o glifo esteja na fonte que o tema escolheu.
+Boa parte dos símbolos é emprestada de outra família pelo Windows e sai
+desenhada fora da tipografia do tema — 26 dos 35, hoje. Quem responde essa
+outra pergunta é ``ferramentas/cobertura_de_glifos.py``, lendo a tabela ``cmap``
+dos arquivos, onde não há empréstimo possível.
+
+O projeto **depende** do socorro do sistema para símbolos. Sempre dependeu,
+desde antes de existir qualquer verificação, e funciona. Uma versão anterior
+desta docstring afirmava o oposto — que a exigência era o símbolo existir na
+fonte do tema, e que "depender do socorro do sistema é o mesmo que não ter
+regra". Era uma garantia que este script nunca deu, e acreditar nela é pior
+que não tê-la: some a diferença entre "aparece" e "aparece certo".
 """
 
 from __future__ import annotations
@@ -181,7 +195,10 @@ def main() -> int:
             "  seta básica, que toda fonte de texto do Windows possui.\n"
         )
         return 1
-    print("  TODO SÍMBOLO TEM GLIFO nas fontes de todos os temas.")
+    print("  TODO SÍMBOLO APARECE — nenhum vira caixinha em nenhum tema.")
+    print("=" * 68)
+    print("  (Parte deles é emprestada de outra família pelo Windows, e sai fora")
+    print("   da tipografia do tema. Quanto: py ferramentas/cobertura_de_glifos.py)")
     print("=" * 68 + "\n")
     return 0
 
