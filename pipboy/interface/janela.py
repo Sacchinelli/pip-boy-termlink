@@ -50,7 +50,12 @@ from PySide6.QtWidgets import (
 
 from .. import design
 from ..audio import HAS_LOOPBACK_SUPPORT, Device, list_devices
-from ..config import AppConfiguration, Preferences, data_directory
+from ..config import (
+    AppConfiguration,
+    Preferences,
+    data_directory,
+    movimento_reduzido,
+)
 from ..constants import (
     DEFAULT_GAME_AUDIO_GAIN,
     SHUTDOWN_TIMEOUT_SECONDS,
@@ -210,6 +215,9 @@ class Janela(QWidget):
         # Nasce antes de qualquer widget: `fonte()` é chamada durante a
         # montagem, e ela lê este fator.
         self._escala_texto = 1.0
+        # A atmosfera nasceu desligada por causa do Windows, e não por escolha?
+        # Só para poder dizer isso ao jogador uma vez, no registro.
+        self._atmosfera_veio_do_sistema = False
 
         self._tema: GameTheme = theme_for(self._prefs.jogo)
         self._atmosfera = atmosfera_de(self._tema.name)
@@ -258,6 +266,16 @@ class Janela(QWidget):
             f"{self._store.total()} termos no caderno",
             Tag.SISTEMA,
         )
+        if self._atmosfera_veio_do_sistema:
+            # Sem este aviso, a primeira execução numa máquina com animação
+            # desligada parece um programa sem a aparência que ele anuncia —
+            # e o jogador não teria como ligar o que não sabe que existe.
+            self._registrar(
+                "O Windows está configurado para reduzir animações, então a atmosfera "
+                "começou DESLIGADA. Para ver o ambiente completo, mude 'Atmosfera do "
+                "jogo' na coluna ao lado — a escolha fica gravada.",
+                Tag.SISTEMA,
+            )
         if keyboard is not None and configuration.global_hotkeys_enabled:
             self._registrar(
                 f"Atalhos globais: {configuration.hotkey_toggle} iniciar/parar · "
@@ -1310,8 +1328,21 @@ class Janela(QWidget):
             GANHO_JOGO_PADRAO,
         )
         selecionar(self.campo_ganho_jogo, rotulo_ganho, GANHO_JOGO_PADRAO)
-        atmosfera = str(p.extras.get("atmosfera", "Completa"))
-        selecionar(self.campo_atmosfera, atmosfera, "Completa")
+        # O sistema decide só o PADRÃO, e só enquanto não houver escolha
+        # gravada: a chave só falta no arquivo antes da primeira vez que o
+        # jogador mexeu nela. Depois disso a escolha é dele, mesmo que
+        # contrarie o Windows — o programa lê a preferência do sistema, não
+        # obedece a ela para sempre.
+        #
+        # E o padrão é DESLIGADA, não Discreta. O que o Windows pede é menos
+        # ANIMAÇÃO, e 'Discreta' continua animando: ela reduz a intensidade,
+        # mas só 'Desligada' para a partícula, a cintilação e as transições.
+        # Atender pela metade um pedido de acessibilidade é não atender.
+        pediu_calma = movimento_reduzido()
+        padrao_atmosfera = "Desligada" if pediu_calma else "Completa"
+        self._atmosfera_veio_do_sistema = pediu_calma and "atmosfera" not in p.extras
+        atmosfera = str(p.extras.get("atmosfera", padrao_atmosfera))
+        selecionar(self.campo_atmosfera, atmosfera, padrao_atmosfera)
         self._ajustar_atmosfera(self.campo_atmosfera.currentText())
         tamanho = str(p.extras.get("tamanho_texto", ESCALA_TEXTO_PADRAO))
         selecionar(self.campo_tamanho_texto, tamanho, ESCALA_TEXTO_PADRAO)

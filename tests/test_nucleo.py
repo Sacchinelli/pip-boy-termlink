@@ -682,6 +682,24 @@ def teste_config() -> None:
     env.unlink(missing_ok=True)
 
 
+def teste_movimento_reduzido() -> None:
+    """A preferência de animação do sistema, lida sem derrubar nada.
+
+    O valor depende da máquina e não pode ser afirmado; o que PODE ser
+    exigido é que a leitura sempre responda, e responda um booleano. Uma
+    chamada de ctypes com assinatura errada estoura, e este é o único lugar
+    do projeto onde ela acontece.
+    """
+    print("preferência de animação do sistema")
+    from pipboy.config import movimento_reduzido
+
+    resposta = movimento_reduzido()
+    checar(isinstance(resposta, bool), f"a leitura devolve um booleano ({resposta!r})")
+    checar(movimento_reduzido() == resposta, "e a mesma resposta duas vezes seguidas")
+    if sys.platform != "win32":
+        checar(resposta is False, "fora do Windows não há o que perguntar")
+
+
 def teste_design() -> None:
     """Contraste e coerência das dez paletas.
 
@@ -1910,6 +1928,7 @@ def main() -> int:
         teste_caderno_navegavel,
         teste_profiles,
         teste_config,
+        teste_movimento_reduzido,
         teste_design,
         teste_contagem_tokens,
         teste_classificacao_de_erro,

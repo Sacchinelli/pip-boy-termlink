@@ -63,6 +63,40 @@ def data_directory() -> Path:
     return application_directory()
 
 
+def movimento_reduzido() -> bool:
+    """O sistema pede menos animação? Falso fora do Windows e em caso de dúvida.
+
+    Windows tem essa preferência desde sempre (*Efeitos visuais → Efeitos de
+    animação*, nas versões novas; *Mostrar animações no Windows* nas antigas),
+    e quem a desliga já disse uma vez, para o sistema inteiro, que animação lhe
+    faz mal. Perguntar de novo, na forma de uma janela que roda partículas e
+    cintila na primeira execução, é ignorar uma resposta que já foi dada.
+
+    Mora em ``config.py`` porque é exatamente isto: configuração — só que lida
+    do sistema em vez do nosso ``.env``.
+
+    Qualquer falha devolve ``False``. Errar aqui para o lado de "não pediu
+    nada" mantém o programa como ele é; errar para o outro lado apagaria a
+    identidade visual de quem nunca pediu isso.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+
+        SPI_GETCLIENTAREAANIMATION = 0x1042
+        # A API devolve se a ANIMAÇÃO ESTÁ LIGADA, e não se ela foi reduzida;
+        # o valor inicial 1 é o que sobra se a chamada não escrever nada.
+        animacao = ctypes.c_int(1)
+        ok = ctypes.windll.user32.SystemParametersInfoW(
+            SPI_GETCLIENTAREAANIMATION, 0, ctypes.byref(animacao), 0
+        )
+        return bool(ok) and not animacao.value
+    except (OSError, AttributeError, ValueError):  # pragma: no cover - depende do Windows
+        LOGGER.debug("Preferência de animação do sistema indisponível.", exc_info=True)
+        return False
+
+
 def _env_flag(name: str, default: bool = False) -> bool:
     raw = os.getenv(name, "").strip().lower()
     if not raw:

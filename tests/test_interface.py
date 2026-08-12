@@ -386,6 +386,52 @@ def main() -> int:
     )
     janela._caderno.close()
 
+    # 1c. "Reduzir animações" do Windows decide o PADRÃO da atmosfera — e só
+    #     o padrão. A preferência do sistema é injetada porque o caminho que
+    #     importa é o de quem a ligou, e um teste não mexe na configuração da
+    #     máquina de quem o roda.
+    import pipboy.interface.janela as mod_janela
+
+    original_movimento = mod_janela.movimento_reduzido
+    try:
+        mod_janela.movimento_reduzido = lambda: True  # type: ignore[assignment]
+        janela._prefs.extras.pop("atmosfera", None)
+        janela._aplicar_preferencias()
+        aplicacao.processEvents()
+        checar(
+            janela.campo_atmosfera.currentText() == "Desligada",
+            "com o sistema pedindo calma, a atmosfera nasce desligada",
+        )
+        # 'Discreta' continuaria animando; só 'Desligada' para o movimento, que
+        # é literalmente o que o sistema pediu.
+        checar(janela.intensidade_atmosfera == 0.0, "e o movimento realmente para")
+        checar(janela._atmosfera_veio_do_sistema, "o jogador é avisado de onde isso veio")
+
+        # Escolha gravada vence o sistema: o programa LÊ a preferência dele,
+        # não obedece a ela para sempre.
+        janela._prefs.extras["atmosfera"] = "Completa"
+        janela._aplicar_preferencias()
+        aplicacao.processEvents()
+        checar(
+            janela.campo_atmosfera.currentText() == "Completa",
+            "uma escolha já gravada vence o pedido do sistema",
+        )
+        checar(not janela._atmosfera_veio_do_sistema, "e nesse caso não há o que avisar")
+
+        mod_janela.movimento_reduzido = lambda: False  # type: ignore[assignment]
+        janela._prefs.extras.pop("atmosfera", None)
+        janela._aplicar_preferencias()
+        aplicacao.processEvents()
+        checar(
+            janela.campo_atmosfera.currentText() == "Completa",
+            "sem pedido do sistema, o padrão continua sendo a atmosfera cheia",
+        )
+    finally:
+        mod_janela.movimento_reduzido = original_movimento  # type: ignore[assignment]
+        janela._prefs.extras["atmosfera"] = "Completa"
+        janela._aplicar_preferencias()
+        aplicacao.processEvents()
+
     # 2. O botão de maximizar ficava preso em "Restaurar" para sempre.
     botao_max = janela.barra_titulo.botao_maximizar
     assert botao_max is not None
