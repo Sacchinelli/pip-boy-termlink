@@ -12,7 +12,7 @@ jobs:
   verificar:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Antes de qualquer outra coisa: um segredo comitado por engano já é
       # público no instante do push, e nenhum teste verde desfaz isso. Este
@@ -20,7 +20,7 @@ jobs:
       - name: Segredos e dados pessoais
         run: python ferramentas/verificar_segredos.py
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
