@@ -14,6 +14,7 @@ from __future__ import annotations
 import contextlib
 import csv
 import math
+import re
 import sqlite3
 import threading
 from dataclasses import dataclass
@@ -143,6 +144,73 @@ class Estatisticas:
 
 def _agora() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+# Teto de linhas lidas numa importação. Um arquivo trocado por engano — um log,
+# um dump — não pode segurar a interface enquanto o programa tenta entendê-lo.
+MAX_LINHAS_IMPORTACAO = 20_000
+
+_MARCA_QUEBRA = re.compile(r"<br\s*/?>", re.IGNORECASE)
+_MARCA_TAG = re.compile(r"<[^>]+>")
+
+
+def _limpar(texto: str) -> str:
+    """Tira marcação e normaliza espaços de um campo vindo de fora."""
+    return " ".join(_MARCA_TAG.sub("", texto).split()).strip()
+
+
+@dataclass(frozen=True, slots=True)
+class ResultadoDaImportacao:
+    """O que aconteceu com cada linha de um arquivo importado."""
+
+    novos: int
+    existentes: int
+    ignorados: int
+
+    @property
+    def total(self) -> int:
+        return self.novos + self.existentes + self.ignorados
+
+
+def interpretar_linha(colunas: list[str]) -> tuple[str, str, str, str] | None:
+    """Lê uma linha de TSV como ``(termo, tradução, exemplo, jogo)``.
+
+    O número de colunas é o que decide o formato, e isso é deliberado: a
+    exportação para Anki escreve TRÊS colunas — termo, verso, jogo — com o
+    exemplo embutido no verso (``tradução<br><i>exemplo</i>``), enquanto uma
+    lista feita à mão naturalmente teria quatro, uma por campo. Adivinhar pelo
+    conteúdo quebraria exatamente no caso mais comum: uma palavra exportada
+    SEM exemplo tem o verso limpo, e o jogo na terceira coluna seria lido como
+    exemplo.
+
+    * 2 colunas — termo, tradução.
+    * 3 colunas — o formato desta casa: termo, verso, jogo.
+    * 4 ou mais — termo, tradução, exemplo, jogo. As excedentes são ignoradas.
+
+    Devolve ``None`` para a linha que não dá um termo E uma tradução: sem os
+    dois não há o que ensinar, e o caderno não guarda meia palavra.
+    """
+    campos = [c.strip() for c in colunas]
+    if not campos or not campos[0].strip():
+        return None
+
+    termo = " ".join(campos[0].split()).strip()
+    traducao = exemplo = jogo = ""
+    if len(campos) == 2:
+        traducao = _limpar(campos[1])
+    elif len(campos) == 3:
+        verso, jogo = campos[1], _limpar(campos[2])
+        partes = _MARCA_QUEBRA.split(verso, maxsplit=1)
+        traducao = _limpar(partes[0])
+        exemplo = _limpar(partes[1]) if len(partes) > 1 else ""
+    elif len(campos) >= 4:
+        traducao, exemplo, jogo = (_limpar(c) for c in campos[1:4])
+    else:
+        return None
+
+    if not termo or not traducao:
+        return None
+    return termo, traducao, exemplo, jogo
 
 
 def _semana_de(momento: datetime) -> str:
@@ -596,6 +664,60 @@ class VocabularyStore:
             int(linha["aprendendo"] or 0),
             int(linha["dominadas"] or 0),
         )
+
+    # ------------------------------------------------------------ Importação
+
+    def importar_csv(self, origem: Path) -> ResultadoDaImportacao:
+        """Traz termos de um TSV para dentro do caderno, SEM sobrescrever nada.
+
+        O caderno já sabia sair e não sabia entrar. Faltava para as duas coisas
+        que a exportação sozinha não resolve: juntar os cadernos de duas
+        máquinas usadas em paralelo — copiar o ``.sqlite3`` substitui, não
+        funde — e trazer uma lista pronta de termos de um jogo.
+
+        **Palavra que já existe é deixada em paz**, e essa é a regra central.
+        Ela carrega facilidade, intervalo, data da próxima revisão, acertos e
+        erros: meses de repetição espaçada que um arquivo de texto não tem como
+        conhecer. Um import que "atualizasse" a tradução levaria junto o
+        agendamento, e o jogador perderia o progresso ao tentar somar a ele.
+        Por isso ``registrar`` não serve aqui — ele conta um reencontro, e
+        importar não é reencontrar.
+
+        Termos novos entram vencidos, como qualquer palavra nova: é o que os
+        coloca no próximo quiz, que é o motivo de importá-los.
+        """
+        novos = existentes = ignorados = 0
+        agora = _agora()
+        with origem.open("r", encoding="utf-8", errors="replace", newline="") as handle:
+            leitor = csv.reader(handle, delimiter="\t")
+            with self._lock:
+                for numero, colunas in enumerate(leitor):
+                    if numero >= MAX_LINHAS_IMPORTACAO:
+                        ignorados += 1
+                        break
+                    campos = interpretar_linha(colunas)
+                    if campos is None:
+                        # Linha em branco, sem termo ou sem tradução. Contar em
+                        # vez de estourar: um arquivo de fora não tem obrigação
+                        # de estar limpo, e uma linha ruim não pode custar as
+                        # outras mil.
+                        ignorados += 1
+                        continue
+                    termo, traducao, exemplo, jogo = campos
+                    cursor = self._connection.execute(
+                        "INSERT OR IGNORE INTO vocabulario "
+                        "(termo, traducao, exemplo, jogo, criado_em, visto_em, encontros) "
+                        "VALUES (?, ?, ?, ?, ?, ?, 1)",
+                        (termo, traducao, exemplo, jogo, agora, agora),
+                    )
+                    # O índice único em `termo COLLATE NOCASE` é quem decide o
+                    # que é repetido; o INSERT OR IGNORE apenas não reclama.
+                    if cursor.rowcount:
+                        novos += 1
+                    else:
+                        existentes += 1
+                self._connection.commit()
+        return ResultadoDaImportacao(novos=novos, existentes=existentes, ignorados=ignorados)
 
     def exportar_csv(self, destino: Path) -> int:
         """Exporta em CSV separado por tabulação, pronto para importar no Anki.

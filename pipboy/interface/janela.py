@@ -1698,6 +1698,33 @@ class Janela(QWidget):
             return
         self._registrar(f"{total} termos exportados para {caminho.name}.", Tag.SISTEMA)
 
+    def importar_vocabulario(self) -> None:
+        """Traz termos de um TSV para o caderno, sem tocar no que já existe."""
+        origem, _ = QFileDialog.getOpenFileName(
+            self, "Importar vocabulário", "", "Anki / TSV (*.txt *.tsv);;Todos (*)"
+        )
+        if not origem:
+            return
+        try:
+            resultado = self._store.importar_csv(Path(origem))
+        except OSError as erro:
+            avisar(self, "Falha ao importar", str(erro), erro=True)
+            return
+
+        partes = [f"{resultado.novos} termo(s) novo(s)"]
+        if resultado.existentes:
+            # Dito sempre que acontecer, e não escondido num total: quem
+            # importa de volta o próprio caderno vê "0 novos" e precisa saber
+            # que isso é o esperado, não uma falha silenciosa.
+            partes.append(f"{resultado.existentes} já estava(m) no caderno e ficou(ram) intacto(s)")
+        if resultado.ignorados:
+            partes.append(f"{resultado.ignorados} linha(s) sem termo ou tradução")
+        avisar(self, "Importação concluída", ".\n".join(partes) + ".")
+
+        self.caderno_mudou(f"{resultado.novos} termo(s) importado(s) de {Path(origem).name}.")
+        if self._caderno is not None:
+            self._caderno.atualizar()
+
     # ------------------------------------------------------------ Encerramento
 
     def _sessao_encerrada(self, session_id: int) -> None:

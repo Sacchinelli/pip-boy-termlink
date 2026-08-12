@@ -395,6 +395,13 @@ class JanelaCaderno(QDialog):
         self.botao_exportar.setToolTip("Salvar o caderno como TSV para o Anki ou como Markdown")
         self.botao_exportar.clicked.connect(self._janela.exportar_vocabulario)
         rodape.addWidget(self.botao_exportar)
+        self.botao_importar = Botao("↑   Importar", variante="sutil", paleta=self._janela.paleta)
+        self.botao_importar.setToolTip(
+            "Somar ao caderno os termos de um arquivo TSV. Palavras que já existem "
+            "ficam como estão — o histórico de revisão delas não é tocado."
+        )
+        self.botao_importar.clicked.connect(self._janela.importar_vocabulario)
+        rodape.addWidget(self.botao_importar)
         self.botao_fechar = Botao("Fechar", variante="acento", paleta=self._janela.paleta)
         self.botao_fechar.clicked.connect(self.close)
         rodape.addWidget(self.botao_fechar)
@@ -427,7 +434,8 @@ class JanelaCaderno(QDialog):
         self.campo_jogo.setFont(janela.fonte("legenda"))
         self.campo_jogo.definir_cor_seta(t.text_muted)
         for botao in (
-            self.botao_progresso, self.botao_revisar, self.botao_exportar, self.botao_fechar
+            self.botao_progresso, self.botao_revisar, self.botao_exportar,
+            self.botao_importar, self.botao_fechar,
         ):
             botao.setFont(janela.fonte("corpo_forte"))
             botao.forma = forma

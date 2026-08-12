@@ -682,6 +682,121 @@ def teste_config() -> None:
     env.unlink(missing_ok=True)
 
 
+def teste_importacao() -> None:
+    """Trazer termos de fora sem destruir o que já está dentro.
+
+    A regra que este teste protege é uma só: palavra que já existe é deixada
+    EM PAZ. Ela carrega facilidade, intervalo, próxima revisão, acertos e
+    erros — meses de repetição espaçada que um arquivo de texto não tem como
+    conhecer. Um import que "atualizasse" levaria o agendamento junto, e o
+    jogador perderia o progresso justamente ao tentar somar a ele.
+    """
+    print("importação")
+    from pipboy.vocabulary import interpretar_linha
+
+    # --- A leitura de uma linha, isolada. É o número de COLUNAS que decide o
+    #     formato: adivinhar pelo conteúdo quebraria na palavra exportada sem
+    #     exemplo, cujo jogo na terceira coluna viraria exemplo.
+    checar(interpretar_linha([]) is None, "linha vazia não vira palavra")
+    checar(interpretar_linha(["  "]) is None, "termo em branco não vira palavra")
+    checar(interpretar_linha(["ghoul"]) is None, "termo sem tradução não vira palavra")
+    checar(interpretar_linha(["ghoul", "  "]) is None, "tradução em branco também não")
+    checar(
+        interpretar_linha(["ghoul", "carniçal"]) == ("ghoul", "carniçal", "", ""),
+        "duas colunas são termo e tradução",
+    )
+    checar(
+        interpretar_linha(["ghoul", "carniçal<br><i>A ghoul.</i>", "Fallout"])
+        == ("ghoul", "carniçal", "A ghoul.", "Fallout"),
+        "três colunas são o formato desta casa, com o exemplo dentro do verso",
+    )
+    checar(
+        interpretar_linha(["ghoul", "carniçal", "Fallout"])
+        == ("ghoul", "carniçal", "", "Fallout"),
+        "e sem exemplo a terceira coluna continua sendo o JOGO, não o exemplo",
+    )
+    checar(
+        interpretar_linha(["ghoul", "carniçal", "A ghoul.", "Fallout", "sobra"])
+        == ("ghoul", "carniçal", "A ghoul.", "Fallout"),
+        "quatro colunas são um campo cada, e o excedente é descartado",
+    )
+    checar(
+        interpretar_linha(["ghoul", "carniçal<br/><i>A ghoul.</i>", ""])[2] == "A ghoul.",  # type: ignore[index]
+        "a quebra também é reconhecida na forma <br/>",
+    )
+    checar(
+        interpretar_linha(["  ghoul  crawls ", "carniçal"])[0] == "ghoul crawls",  # type: ignore[index]
+        "espaço de sobra é normalizado",
+    )
+
+    # --- Ida e volta com a própria exportação, que é o caso principal.
+    origem = VocabularyStore(Path(tempfile.mkdtemp()) / "origem.sqlite3")
+    origem.registrar("wasteland", "terra devastada", "Welcome to the wasteland.", "Fallout")
+    origem.registrar("ghoul", "carniçal", "", "Fallout")  # sem exemplo: o caso frágil
+    origem.registrar("bonfire", "fogueira", "Rest here.", "Elden Ring")
+    arquivo = Path(tempfile.mkdtemp()) / "vocabulario.txt"
+    origem.exportar_csv(arquivo)
+
+    destino = VocabularyStore(Path(tempfile.mkdtemp()) / "destino.sqlite3")
+    resultado = destino.importar_csv(arquivo)
+    checar(resultado.novos == 3 and resultado.total == 3, f"os três termos entram ({resultado})")
+    trazidas = {e.termo: e for e in destino.listar()}
+    checar(trazidas["wasteland"].exemplo == "Welcome to the wasteland.", "o exemplo sobrevive")
+    checar(trazidas["wasteland"].jogo == "Fallout", "o jogo sobrevive")
+    checar(trazidas["ghoul"].exemplo == "", "palavra sem exemplo não ganha um do nada")
+    checar(trazidas["ghoul"].jogo == "Fallout", "e o jogo dela não vira exemplo")
+    checar(trazidas["bonfire"].vencida, "termo importado entra vencido, para o próximo quiz")
+
+    # --- A regra central: reimportar não mexe em quem já está lá.
+    for _ in range(6):
+        destino.avaliar("wasteland", True)
+    antes = destino.listar(busca="wasteland")[0]
+    de_novo = destino.importar_csv(arquivo)
+    checar(
+        de_novo.novos == 0 and de_novo.existentes == 3,
+        f"reimportar não duplica nem cria nada ({de_novo})",
+    )
+    depois = destino.listar(busca="wasteland")[0]
+    checar(
+        (depois.intervalo_dias, depois.acertos, depois.proxima_revisao)
+        == (antes.intervalo_dias, antes.acertos, antes.proxima_revisao),
+        "o agendamento de quem já estava lá fica intacto",
+    )
+    checar(depois.encontros == antes.encontros, "e importar não conta como reencontro")
+    checar(destino.total() == 3, "o total não cresce")
+
+    # --- Lixo no arquivo não pode custar as linhas boas.
+    sujo = Path(tempfile.mkdtemp()) / "sujo.txt"
+    sujo.write_text(
+        "\n".join([
+            "perk\tvantagem\tYou gained a perk.\tFallout",
+            "",                      # linha vazia
+            "\tsó tradução",         # sem termo
+            "só termo",              # sem tradução
+            "stimpak\testimulante",  # mínimo válido
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    misto = destino.importar_csv(sujo)
+    checar(misto.novos == 2, f"as duas linhas boas entram ({misto.novos})")
+    checar(misto.ignorados == 3, f"e as três ruins são contadas, não fatais ({misto.ignorados})")
+    checar(destino.listar(busca="perk")[0].jogo == "Fallout", "a linha de quatro colunas é lida")
+
+    # Arquivo que não é um TSV nenhum — um log trocado por engano — não estoura.
+    lixo = Path(tempfile.mkdtemp()) / "lixo.txt"
+    lixo.write_text("isto não é um caderno\noutra linha qualquer\n", encoding="utf-8")
+    nada = destino.importar_csv(lixo)
+    checar(nada.novos == 0 and nada.ignorados == 2, "arquivo sem colunas não importa nada")
+
+    # Maiúsculas: o índice único é NOCASE, então 'GHOUL' não vira uma segunda
+    # entrada de 'ghoul'.
+    caixa = Path(tempfile.mkdtemp()) / "caixa.txt"
+    caixa.write_text("GHOUL\tcarniçal\n", encoding="utf-8")
+    checar(destino.importar_csv(caixa).existentes == 1, "maiúsculas não duplicam a palavra")
+    origem.close()
+    destino.close()
+
+
 def teste_movimento_reduzido() -> None:
     """A preferência de animação do sistema, lida sem derrubar nada.
 
@@ -1928,6 +2043,7 @@ def main() -> int:
         teste_caderno_navegavel,
         teste_profiles,
         teste_config,
+        teste_importacao,
         teste_movimento_reduzido,
         teste_design,
         teste_contagem_tokens,

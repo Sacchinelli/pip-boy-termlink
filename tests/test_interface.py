@@ -137,6 +137,47 @@ def main() -> int:
     aplicacao.processEvents()
     checar(len(caderno._cartoes) == 2, "voltar para 'todos os jogos' devolve a lista")
 
+    # -- Importação: a porta de entrada do caderno, pelo caminho da janela.
+    #    O QFileDialog é substituído porque um diálogo nativo trava a suíte
+    #    esperando alguém clicar; o resto do caminho é o de produção.
+    import pipboy.interface.janela as mod_import
+    from pipboy.interface.dialogo import Caixa
+
+    # 'wasteland' já está no caderno e 'raider' não. O repetido tem de ser um
+    # termo que EXISTE aqui: 'ghoul' só nasce mais adiante neste arquivo, e
+    # criá-lo antes da sessão do histórico quebraria o teste do elo entre a
+    # palavra e a conversa em que ela foi ensinada.
+    arquivo = dados / "importar.txt"
+    arquivo.write_text(
+        "raider\tsaqueador\tRaiders ahead.\tFallout\n"
+        "wasteland\tterra devastada\tThe wasteland.\tFallout\n",
+        encoding="utf-8",
+    )
+    escolha_original = mod_import.QFileDialog.getOpenFileName
+    aviso_original = mod_import.avisar
+    vistos: list[str] = []
+    try:
+        mod_import.QFileDialog.getOpenFileName = staticmethod(  # type: ignore[assignment]
+            lambda *a, **k: (str(arquivo), "")
+        )
+        mod_import.avisar = lambda *a, **k: vistos.append(str(a[2]))  # type: ignore[assignment]
+        antes_total = store.total()
+        janela.importar_vocabulario()
+        aplicacao.processEvents()
+        checar(store.total() == antes_total + 1, "importar soma só o termo que faltava")
+        checar(
+            any("já estava" in v for v in vistos),
+            f"e o aviso diz o que aconteceu com o repetido ({vistos})",
+        )
+        checar(
+            any(c._entrada.termo == "raider" for c in janela._caderno._cartoes),
+            "o caderno aberto mostra o termo novo sem precisar ser reaberto",
+        )
+    finally:
+        mod_import.QFileDialog.getOpenFileName = escolha_original  # type: ignore[assignment]
+        mod_import.avisar = aviso_original  # type: ignore[assignment]
+    assert Caixa is not None  # o diálogo temático existe; só não foi aberto aqui
+
     from pipboy.interface.progresso import JanelaProgresso
 
     progresso = JanelaProgresso(janela, store, parent=janela)
