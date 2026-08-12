@@ -97,8 +97,16 @@ class GameTheme:
     # Elden Ring e Red Dead desabavam em Georgia — a mesma de Witcher e RPG —
     # e três temas caíam juntos em Bahnschrift. Dez ambientes rendiam seis
     # tipografias, e a identidade que a fonte deveria carregar evaporava numa
-    # instalação limpa. A 1ª escolha continua sendo a ideal; a 2ª agora é uma
+    # instalação limpa. A 1ª escolha continua sendo a ideal; a última é uma
     # família de fábrica ESCOLHIDA PARA NÃO COLIDIR.
+    #
+    # Entre as duas entram EB Garamond e Zilla Slab, que são livres (OFL) e
+    # portanto instaláveis por quem quiser a tipografia pretendida de fato. Elas
+    # existem justamente porque a reserva de fábrica não resolve o caso do Red
+    # Dead: o Windows não traz UMA slab serif sequer, e slab é a alma do visual
+    # western — Cambria é um acordo, não um substituto. Ninguém precisa
+    # instalá-las: sem elas a cadeia segue para a reserva de sempre, e é por
+    # isso que elas entram no meio e não no fim.
     font_candidates: tuple[str, ...]
     shell: str
     screen: str
@@ -285,7 +293,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
             "com gravidade ritual, mas suas explicações são sempre claras e diretas — "
             "o mistério fica no tom, nunca no conteúdo."
         ),
-        font_candidates=("Garamond", "Constantia", "Georgia", "Times New Roman"),
+        font_candidates=("Garamond", "EB Garamond", "Constantia", "Georgia", "Times New Roman"),
         shell="#0b0906",
         screen="#14100b",
         primary="#d9b96b",
@@ -387,7 +395,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
             "tem paciência para rodeio e explica as coisas como quem ensina alguém a "
             "montar: mostrando, não teorizando."
         ),
-        font_candidates=("Rockwell", "Bookman Old Style", "Cambria", "Times New Roman"),
+        font_candidates=("Rockwell", "Zilla Slab", "Bookman Old Style", "Cambria", "Times New Roman"),
         shell="#170f0b",
         screen="#241a13",
         primary="#ecd9b0",
