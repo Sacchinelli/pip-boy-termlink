@@ -140,7 +140,16 @@ def checar_estrutura() -> None:
     else:
         falhar("Arquivo .env não encontrado.", "Crie-o com a linha GEMINI_API_KEY=sua_chave.")
 
-    caches = list(RAIZ.rglob("__pycache__"))
+    # Só o bytecode do NOSSO código interessa. Um rglob cru desce para dentro
+    # do .venv e do build/, onde cada dependência traz os próprios caches: com
+    # o PySide6 instalado o aviso saltava de 4 para 262 pastas, sugerindo uma
+    # bagunça que não existe e escondendo o caso real que ele deve pegar —
+    # bytecode de um módulo que você renomeou ou moveu.
+    IGNORADAS = {".venv", "venv", "env", "ENV", "build", "dist", ".git"}
+    caches = [
+        c for c in RAIZ.rglob("__pycache__")
+        if not IGNORADAS.intersection(c.relative_to(RAIZ).parts)
+    ]
     if caches:
         avisar(
             f"{len(caches)} pasta(s) __pycache__ com bytecode antigo.",
