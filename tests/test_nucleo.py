@@ -626,6 +626,39 @@ def teste_config() -> None:
     except ConfigurationError:
         checar(True, "rejeita a chave de exemplo")
 
+    # --- Estimativa de custo. Sem preço no .env não há palpite: um número
+    #     sobre dinheiro que envelheceu é pior que número nenhum, porque não
+    #     parece errado e ninguém confere.
+    os.environ["GEMINI_API_KEY"] = "AIzaTESTE1234567890"
+    for lixo in ("PRECO_POR_MILHAO_TOKENS", "MOEDA"):
+        os.environ.pop(lixo, None)
+    mudo = AppConfiguration.load(base)
+    checar(mudo.preco_por_milhao == 0.0, "sem preço configurado, o preço é zero")
+    checar(mudo.custo_de(1_000_000) == "", "e sem preço não se diz nada sobre dinheiro")
+
+    os.environ["PRECO_POR_MILHAO_TOKENS"] = "3,00"  # vírgula: é assim que se escreve
+    cotado = AppConfiguration.load(base)
+    checar(cotado.preco_por_milhao == 3.0, "a vírgula decimal é aceita")
+    checar(cotado.custo_de(1_000_000) == "~US$ 3,00", "um milhão de tokens custa o preço cheio")
+    checar(cotado.custo_de(500_000) == "~US$ 1,50", "meio milhão custa metade")
+    checar(cotado.custo_de(0) == "" and cotado.custo_de(-5) == "", "sem tokens, sem custo")
+    # Abaixo de meio centavo só se pode dizer "0,00", que ocupa espaço no
+    # rodapé sem informar nada.
+    checar(cotado.custo_de(100) == "", "valor que arredonda para zero não é exibido")
+    checar(cotado.custo_de(2_000) == "~US$ 0,01", "e a partir de um centavo aparece")
+    # Milhar com ponto e decimal com vírgula, como se escreve em português.
+    checar(cotado.custo_de(1_000_000_000) == "~US$ 3.000,00", "milhar em português")
+
+    os.environ["MOEDA"] = "R$"
+    checar(AppConfiguration.load(base).custo_de(1_000_000) == "~R$ 3,00", "a moeda é um rótulo")
+
+    os.environ["PRECO_POR_MILHAO_TOKENS"] = "de graça"
+    checar(AppConfiguration.load(base).custo_de(1_000_000) == "", "preço ilegível desliga, não quebra")
+    os.environ["PRECO_POR_MILHAO_TOKENS"] = "-2"
+    checar(AppConfiguration.load(base).custo_de(1_000_000) == "", "preço negativo também desliga")
+    for lixo in ("PRECO_POR_MILHAO_TOKENS", "MOEDA"):
+        os.environ.pop(lixo, None)
+
     prefs = Preferences(persona="Instrutor Rígido")
     prefs.save()
     checar(Preferences.load().persona == "Instrutor Rígido", "preferências persistem")

@@ -1123,6 +1123,11 @@ class Janela(QWidget):
             partes.append("OUVINDO O JOGO")
         if self._tokens:
             partes.append(f"{self._tokens:,} tokens".replace(",", "."))
+            # Só aparece com PRECO_POR_MILHAO_TOKENS no .env: sem preço, o
+            # programa não tem como dizer nada sobre dinheiro — e não inventa.
+            custo = self._configuration.custo_de(self._tokens)
+            if custo:
+                partes.append(custo)
         self.rotulo_meta.definir_texto("   ·   ".join(partes))
 
     # ------------------------------------------------------------- Eventos

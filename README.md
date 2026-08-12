@@ -74,7 +74,7 @@ O código passa limpo por três verificadores, e a suíte de testes cobre o núc
 ```powershell
 py -m ruff check .                                # lint (zero apontamentos)
 py -m mypy pipboy pip_boy.py diagnostico.py       # tipos, modo estrito
-py tests/test_nucleo.py                           # ~390 testes sem hardware
+py tests/test_nucleo.py                           # ~400 testes sem hardware
 py tests/test_interface.py                        # a interface inteira, sem tela
 ```
 
@@ -255,6 +255,8 @@ pip-boy-termlink/
 ## Custos
 
 Áudio consome cerca de 25 tokens por segundo em cada direção. Uma sessão de uma hora com conversa constante fica na casa das dezenas de milhares de tokens. O rodapé da janela mostra o total acumulado em tempo real.
+
+**E mostra quanto isso custa, se você disser o preço.** "48.291 tokens" não significa nada para quem precisa decidir se continua a sessão — e este é um programa construído inteiro em torno de gastar menos. Preencha `PRECO_POR_MILHAO_TOKENS` no `.env` (e `MOEDA`, se quiser outro rótulo) e o rodapé passa a mostrar `~US$ 0,14` ao lado da contagem. O preço vem do `.env`, e não de uma constante do código, **de propósito**: um número sobre dinheiro que envelheceu é pior que número nenhum, porque não parece errado e ninguém confere. Sem preço configurado, o programa não estima nada. E o `~` não é enfeite: o serviço reporta um total só, sem separar entrada de saída nem áudio de texto, que têm preços diferentes — o que dá para oferecer com honestidade é ordem de grandeza, não fatura.
 
 **O microfone só é transmitido quando há som.** Um portão de voz local mede o nível de cada bloco e retém o que estiver abaixo do limiar, com pré-rolo (para não cortar a primeira sílaba) e cauda (para não confundir pausa entre palavras com fim de fala). Antes disso, uma sessão aberta numa sala silenciosa gastava cerca de 90 mil tokens por hora sem ninguém perguntar nada. Numa conversa esparsa a economia fica em torno de 60%.
 

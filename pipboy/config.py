@@ -104,6 +104,25 @@ def _env_flag(name: str, default: bool = False) -> bool:
     return raw in {"1", "true", "yes", "sim", "on"}
 
 
+def _env_float(name: str, default: float = 0.0) -> float:
+    """Número do ambiente, tolerante à vírgula decimal e a lixo.
+
+    Quem escreve um preço em português digita ``0,30``. Recusar isso — ou pior,
+    derrubar a leitura da configuração inteira por causa dele — seria punir a
+    grafia certa do idioma do programa. Valor ilegível ou negativo vira o
+    padrão, que desliga a estimativa em vez de inventar um número.
+    """
+    raw = os.getenv(name, "").strip().replace(",", ".")
+    if not raw:
+        return default
+    try:
+        valor = float(raw)
+    except ValueError:
+        LOGGER.warning("%s=%r não é um número; a estimativa de custo fica desligada.", name, raw)
+        return default
+    return valor if valor > 0.0 else default
+
+
 @dataclass(frozen=True, slots=True)
 class AppConfiguration:
     """Segredos e parâmetros globais. Nunca lidos direto pela thread da UI."""
@@ -114,6 +133,10 @@ class AppConfiguration:
     hotkey_mute: str
     hotkey_game_audio: str
     global_hotkeys_enabled: bool
+    # Preço por MILHÃO de tokens e o símbolo da moeda, para o rodapé traduzir
+    # o contador em dinheiro. Zero desliga a estimativa — ver ``custo_de``.
+    preco_por_milhao: float
+    moeda: str
 
     @classmethod
     def load(cls, base_directory: Path) -> AppConfiguration:
@@ -144,7 +167,39 @@ class AppConfiguration:
             hotkey_mute=os.getenv("HOTKEY_MUTE", "ctrl+alt+m").strip(),
             hotkey_game_audio=os.getenv("HOTKEY_GAME_AUDIO", "ctrl+alt+g").strip(),
             global_hotkeys_enabled=_env_flag("HOTKEYS_GLOBAIS", True),
+            preco_por_milhao=_env_float("PRECO_POR_MILHAO_TOKENS"),
+            moeda=os.getenv("MOEDA", "").strip() or "US$",
         )
+
+    def custo_de(self, tokens: int) -> str:
+        """O contador de tokens em dinheiro, ou ``""`` quando não dá para dizer.
+
+        O rodapé mostrava "48.291 tokens", que não significa nada para quem
+        precisa decidir se continua a sessão — e este é um programa construído
+        inteiro em torno de gastar menos. Traduzir o número é o passo que
+        faltava para ele virar informação acionável.
+
+        **Sem preço configurado não há estimativa.** Um número sobre dinheiro
+        que envelheceu é pior que número nenhum: ele não parece errado, e
+        ninguém confere. Por isso o preço vem do ``.env``, escrito por quem
+        olhou a tabela do próprio projeto, e não de uma constante daqui que
+        estaria desatualizada no mês seguinte.
+
+        A estimativa é grosseira por construção, e o ``~`` na tela diz isso: o
+        serviço reporta UM total, sem separar entrada de saída nem áudio de
+        texto, que têm preços diferentes. O que se pode honestamente oferecer é
+        uma taxa média — ordem de grandeza, não fatura.
+        """
+        if self.preco_por_milhao <= 0.0 or tokens <= 0:
+            return ""
+        valor = tokens / 1_000_000 * self.preco_por_milhao
+        if valor < 0.005:
+            # Abaixo disto o arredondamento só sabe dizer "0,00", que ocupa
+            # espaço no rodapé para não informar nada.
+            return ""
+        # Vírgula decimal e ponto de milhar, como se escreve em português.
+        formatado = f"{valor:,.2f}".replace(",", "\x00").replace(".", ",").replace("\x00", ".")
+        return f"~{self.moeda} {formatado}"
 
     def redacted_key(self) -> str:
         """Versão segura da chave para exibir em log ou interface."""
