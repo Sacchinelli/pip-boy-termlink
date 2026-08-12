@@ -9,6 +9,7 @@ exige hardware não é executado, e teste não executado não protege nada.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
 import tempfile
@@ -270,6 +271,26 @@ def teste_portao_de_voz() -> None:
     g.esquecer()
     saida = g.avaliar(b"\x22\x22", 0.4, 5 * BLOCO)
     checar(saida == [b"\x22\x22"], "esquecer() descarta o pré-rolo retido")
+
+    # O estado de abertura é o que avisa o serviço onde a fala começa e termina.
+    # Sem esse aviso o servidor refaz a detecção sozinho e gasta ~580 ms a mais
+    # por pergunta (medido: 717 ms contra 136 ms).
+    g = PortaoDeVoz(pre_roll=2, cauda=0.0)
+    checar(not g.aberto, "portão nasce fechado")
+    g.avaliar(b"\x00\x00", 0.001, 0.0)
+    checar(not g.aberto, "silêncio não abre")
+    g.avaliar(b"\x33\x33", 0.4, BLOCO)
+    checar(g.aberto, "fala abre")
+    g.avaliar(b"\x00\x00", 0.001, 2 * BLOCO)
+    checar(not g.aberto, "silêncio depois da cauda fecha")
+
+    # fechar() existe para o contrato de atividade manual: todo início precisa
+    # de um fim, inclusive quando quem interrompe é o mudo ou o assistente.
+    g = PortaoDeVoz(pre_roll=0, cauda=0.0)
+    g.avaliar(b"\x33\x33", 0.4, 0.0)
+    checar(g.fechar(), "fechar() devolve True quando havia fala em curso")
+    checar(not g.aberto, "e o portão fica fechado")
+    checar(not g.fechar(), "fechar() de novo não inventa um segundo fim de fala")
 
 
 def teste_economia_com_jogo() -> None:
@@ -698,6 +719,26 @@ def teste_classificacao_de_erro() -> None:
     checar("DIÁRIO" in diaria, "limite por dia é distinguido do limite por minuto")
     checar("DIÁRIO" not in W._dica(429, "", "quota exceeded"), "cota genérica não vira diária")
 
+    # -- a busca na web tem cota PRÓPRIA e usa a mesma frase genérica de cota:
+    #    sem saber que a conexão pedia a ferramenta, a dica acusa o modelo.
+    cota = "You exceeded your current quota, please check your plan and billing"
+    com_busca = W._dica(1011, "", cota, busca_web=True)
+    checar("BUSCA NA WEB" in com_busca, "com a busca ligada, a dica acusa a busca")
+    checar("Cota do modelo esgotada" not in com_busca, "e não culpa a cota do modelo")
+    checar("Cota do modelo esgotada" in W._dica(1011, "", cota, busca_web=False),
+           "sem a busca ligada, a dica antiga permanece")
+    checar("BUSCA NA WEB" not in W._dica(404, "", "", busca_web=True),
+           "a busca só é acusada em erro de cota, não em qualquer falha")
+    checar("BUSCA NA WEB" in W._friendly_error(erro_de(cota, code=1011), busca_web=True),
+           "a tradução completa também repassa o aviso da busca")
+
+    # -- o classificador de cota, isolado: é ele que decide o desligamento
+    checar(W._e_cota(1011, "", cota), "cota vestida de 1011 é cota")
+    checar(W._e_cota(429, "", "qualquer coisa"), "429 é cota")
+    checar(W._e_cota(None, "RESOURCE_EXHAUSTED", ""), "status sozinho basta")
+    checar(not W._e_cota(1008, "", "invalid authentication credentials"),
+           "recusa por credencial NÃO é cota — desligar a busca não a resolveria")
+
     checar("política" in W._dica(1008, "", ""), "1008 é recusa por política")
     checar("instabilidade de rede" in W._dica(1006, "", ""), "1006 é queda abrupta")
     checar("Chave de API inválida" in W._dica(401, "", ""), "401 fala da chave")
@@ -1045,6 +1086,155 @@ def teste_regressoes() -> None:
             break
     checar(espera is not None, "reciclagem normal do WebSocket nunca esgota as tentativas")
 
+    # 6. A cota da BUSCA derrubava a sessão inteira já na primeira conexão. A
+    #    ferramenta de grounding é cobrada no aperto de mão e tem cota própria:
+    #    a sessão precisa desistir DELA, não da sessão.
+    teste_desligar_busca_ao_estourar_cota()
+
+
+def teste_sinal_de_atividade() -> None:
+    """As bordas de fala viram avisos de atividade, em alternância estrita.
+
+    O serviço descarta áudio que chega sem início declarado e fica esperando o
+    resto de um turno cujo fim nunca foi anunciado. Os dois erros emudecem a
+    sessão inteira, e nenhum dos dois aparece como exceção — por isso a
+    alternância é verificada aqui, e não deixada para o serviço reclamar.
+    """
+    print("sinal de atividade (fim de fala)")
+    import asyncio
+    import queue as _queue
+    from types import SimpleNamespace
+
+    from pipboy.audio import FIM_DE_FALA, INICIO_DE_FALA
+    from pipboy.session import LiveSessionWorker
+
+    class SessaoFalsa:
+        def __init__(self) -> None:
+            self.eventos: list[str] = []
+
+        async def send_realtime_input(self, **kw):
+            if "activity_start" in kw:
+                self.eventos.append("inicio")
+            elif "activity_end" in kw:
+                self.eventos.append("fim")
+            else:
+                self.eventos.append("audio")
+
+    def correr(itens: list) -> list[str]:
+        w = LiveSessionWorker.__new__(LiveSessionWorker)
+        w._stop_event = asyncio.Event()
+        w._fala_aberta = False
+        capture = SimpleNamespace(frames=_queue.Queue())
+        for i in itens:
+            capture.frames.put(i)
+        sessao = SessaoFalsa()
+
+        async def main():
+            audio = SimpleNamespace(capture=capture)
+            tarefa = asyncio.create_task(w._send_audio(sessao, audio))
+            while not capture.frames.empty():
+                await asyncio.sleep(0.01)
+            await asyncio.sleep(0.05)
+            w._stop_event.set()
+            await asyncio.wait_for(tarefa, timeout=2)
+
+        asyncio.run(main())
+        return sessao.eventos
+
+    som = b"\x33\x33"
+
+    # O caso normal: uma pergunta inteira, cercada pelas duas bordas.
+    ev = correr([INICIO_DE_FALA, som, som, FIM_DE_FALA])
+    checar(ev == ["inicio", "audio", "audio", "fim"], f"turno completo em ordem ({ev})")
+
+    # Início repetido quebraria o contrato; o segundo é engolido.
+    ev = correr([INICIO_DE_FALA, som, INICIO_DE_FALA, som, FIM_DE_FALA])
+    checar(ev.count("inicio") == 1, f"início repetido não é reenviado ({ev})")
+
+    # Fim sem início pendente é ruído — o serviço não deve recebê-lo.
+    ev = correr([FIM_DE_FALA, FIM_DE_FALA])
+    checar(ev == [], f"fim sem fala aberta não vira aviso ({ev})")
+
+    # Áudio órfão (reconexão no meio de uma frase) precisa abrir o turno, senão
+    # o serviço o descarta em silêncio e a pergunta se perde.
+    ev = correr([som, som, FIM_DE_FALA])
+    checar(ev[0] == "inicio", f"áudio sem início declarado abre o turno ({ev})")
+    checar(ev == ["inicio", "audio", "audio", "fim"], f"e segue em ordem ({ev})")
+
+
+def teste_desligar_busca_ao_estourar_cota() -> None:
+    """O laço de conexão sacrifica a busca antes de sacrificar a sessão."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from pipboy.events import UiEventKind
+    from pipboy.session import LiveSessionWorker
+
+    def montar(web_search: bool) -> tuple[LiveSessionWorker, list]:
+        eventos: list = []
+        worker = LiveSessionWorker.__new__(LiveSessionWorker)  # sem thread nem áudio
+        worker.session_id = 1
+        worker._publish = eventos.append
+        # O cliente é construído mas nunca usado: quem conecta é o dublê abaixo.
+        worker._configuration = SimpleNamespace(api_key="chave-de-teste", model="modelo")
+        worker._web_search = web_search
+        worker._first_connection = True
+        worker._trafego_na_conexao = False
+        worker._renovacao_pedida = False
+        worker._stop_event = asyncio.Event()
+        return worker, eventos
+
+    def rodar(worker: LiveSessionWorker, falhas: list[Exception]) -> int:
+        """Roda o laço com um ``_one_connection`` de mentira. Devolve as tentativas."""
+        chamadas = 0
+        pedidos: list[bool] = []
+
+        async def falso(_cliente, _audio):
+            nonlocal chamadas
+            pedidos.append(worker._web_search)
+            chamadas += 1
+            if falhas:
+                raise falhas.pop(0)
+            worker._stop_event.set()  # sucesso: encerra o laço
+
+        worker._one_connection = falso  # type: ignore[method-assign]
+        worker._status = lambda *a, **k: None  # type: ignore[method-assign]
+        worker._log = lambda *a, **k: None  # type: ignore[method-assign]
+        asyncio.run(worker._connection_loop(None))  # type: ignore[arg-type]
+        worker._pedidos = pedidos  # type: ignore[attr-defined]
+        return chamadas
+
+    cota = Exception("You exceeded your current quota, please check your plan and billing")
+    cota.code = 1011  # type: ignore[attr-defined]
+
+    # -- com a busca ligada: reconecta SEM ela em vez de morrer
+    worker, eventos = montar(web_search=True)
+    chamadas = rodar(worker, [cota])
+    checar(chamadas == 2, f"a sessão tenta de novo em vez de desistir ({chamadas} conexões)")
+    checar(worker._pedidos == [True, False], "a segunda tentativa vai sem a busca")
+    checar(not worker._web_search, "a busca fica desligada pelo resto da sessão")
+    checar(
+        any(e.kind is UiEventKind.WEB_SEARCH_DISABLED for e in eventos),
+        "a interface é avisada para desmarcar o chip",
+    )
+
+    # -- sem a busca ligada, cota é cota: a primeira conexão ainda encerra
+    worker, _ = montar(web_search=False)
+    try:
+        rodar(worker, [cota])
+        caiu = False
+    except Exception:
+        caiu = True
+    checar(caiu, "sem busca a ligar, o erro de cota continua subindo")
+
+    # -- outro erro qualquer não deve custar a busca
+    worker, _ = montar(web_search=True)
+    credencial = Exception("Request had invalid authentication credentials")
+    credencial.code = 1008  # type: ignore[attr-defined]
+    with contextlib.suppress(Exception):
+        rodar(worker, [credencial])
+    checar(worker._web_search, "falha de credencial não desliga a busca")
+
 
 def teste_sons() -> None:
     """Síntese dos blips de interface.
@@ -1250,6 +1440,7 @@ def main() -> int:
         teste_vocabulario,
         teste_portao_de_eco,
         teste_portao_de_voz,
+        teste_sinal_de_atividade,
         teste_economia_com_jogo,
         teste_caderno_navegavel,
         teste_profiles,

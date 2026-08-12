@@ -239,8 +239,20 @@ class PortaoDeVoz:
         self._cauda = cauda
         self._buffer: deque[bytes] = deque(maxlen=max(0, pre_roll))
         self._aberto_ate = 0.0
+        self._aberto = False
         self.blocos_enviados = 0
         self.blocos_retidos = 0
+
+    @property
+    def aberto(self) -> bool:
+        """O portão está transmitindo agora?
+
+        É o que permite avisar o serviço quando a fala começa e termina. Sem
+        esse aviso, o servidor roda o VAD DELE do zero sobre o áudio que
+        recebe e leva cerca de setecentos milissegundos para concluir o que
+        este objeto já sabia — a cada pergunta.
+        """
+        return self._aberto
 
     def avaliar(self, bloco: bytes, nivel: float, agora: float) -> list[bytes]:
         """Devolve os blocos a transmitir agora — nenhum, este, ou o pré-rolo."""
@@ -255,12 +267,14 @@ class PortaoDeVoz:
         if not ativo and agora >= self._aberto_ate:
             self._buffer.append(bloco)
             self.blocos_retidos += 1
+            self._aberto = False
             return []
 
         saida = list(self._buffer)
         self._buffer.clear()
         saida.append(bloco)
         self.blocos_enviados += len(saida)
+        self._aberto = True
         return saida
 
     def definir_pre_rolo(self, blocos: int) -> None:
@@ -283,11 +297,53 @@ class PortaoDeVoz:
         """Descarta o pré-rolo. Chamado quando o bloco não deve existir."""
         self._buffer.clear()
 
+    def fechar(self) -> bool:
+        """Força o portão fechado. Devolve se ele estava aberto.
+
+        Existe por causa do contrato de atividade manual: todo aviso de início
+        de fala PRECISA de um fim correspondente, senão o serviço fica
+        esperando o resto de um turno que nunca vem e a sessão emudece. Mudo,
+        assistente falando e troca de conexão fecham o portão por fora do
+        laço normal — e o valor devolvido diz a quem chamou se ainda há um
+        fim de fala a anunciar.
+        """
+        estava = self._aberto
+        self._aberto = False
+        self._aberto_ate = 0.0
+        return estava
+
     @property
     def economia(self) -> float:
         """Fração dos blocos que não foi transmitida."""
         total = self.blocos_enviados + self.blocos_retidos
         return self.blocos_retidos / total if total else 0.0
+
+
+class MarcaDeFala:
+    """Sentinela de borda de fala, viajando na fila junto com o áudio.
+
+    A ordem entre "a fala começou" e os blocos que a compõem é o significado
+    inteiro do aviso: mandar o início depois do pré-rolo faria o serviço
+    descartar justamente a primeira sílaba que o pré-rolo existe para
+    preservar. Por isso as marcas vão pela MESMA fila dos blocos, e não por um
+    canal paralelo que chegaria fora de hora.
+    """
+
+    __slots__ = ("nome",)
+
+    def __init__(self, nome: str) -> None:
+        self.nome = nome
+
+    def __repr__(self) -> str:  # pragma: no cover - conveniência de depuração
+        return f"<{self.nome}>"
+
+
+INICIO_DE_FALA = MarcaDeFala("INICIO_DE_FALA")
+FIM_DE_FALA = MarcaDeFala("FIM_DE_FALA")
+
+# O que trafega da captura para o envio: um bloco de áudio, uma borda de fala,
+# ou ``None`` para "acabou" (parada pedida ou microfone morto).
+ItemDeCaptura = bytes | MarcaDeFala
 
 
 def politica_de_portao(
@@ -336,7 +392,7 @@ class Capture:
         self._audio = audio
         self._game_gain = game_gain
         self._stop = threading.Event()
-        self.frames: queue.Queue[bytes | None] = queue.Queue(maxsize=CAPTURE_QUEUE_BLOCKS)
+        self.frames: queue.Queue[ItemDeCaptura | None] = queue.Queue(maxsize=CAPTURE_QUEUE_BLOCKS)
         self.blocos_descartados = 0
 
         self.muted = threading.Event()
@@ -422,7 +478,7 @@ class Capture:
             if not self._stop.is_set():
                 LOGGER.debug("Leitura de loopback falhou.", exc_info=True)
 
-    def _enfileirar(self, bloco: bytes) -> None:
+    def _enfileirar(self, bloco: ItemDeCaptura) -> None:
         """Entrega um bloco ao envio SEM NUNCA bloquear a thread de captura.
 
         Enquanto esta thread espera numa fila cheia, ela não está lendo o
@@ -532,6 +588,12 @@ class Capture:
                 # enquanto estávamos mudos ou falando, e enviá-los na abertura
                 # do portão entregaria justamente o que o portão bloqueou.
                 self.portao_de_voz.esquecer()
+                # Emudecer ou começar a falar por cima interrompe uma fala que
+                # podia estar em curso. O serviço precisa saber que ela acabou
+                # aqui, senão fica esperando o resto de um turno que este ramo
+                # garantiu que nunca virá.
+                if self.portao_de_voz.fechar():
+                    self._enfileirar(FIM_DE_FALA)
                 continue
 
             amostras = dsp.pcm_to_array(bruto).astype(np.int32)
@@ -556,11 +618,22 @@ class Capture:
             # qual CAPTURE_QUEUE_BLOCKS foi dimensionada, e é por ela que o
             # enfileiramento aqui não pode bloquear.
             pronto = dsp.array_to_pcm(amostras)
-            for envio in self.portao_de_voz.avaliar(
-                pronto, nivel_microfone, time.monotonic()
-            ):
-                self._enfileirar(envio)
+            estava_aberto = self.portao_de_voz.aberto
+            envios = self.portao_de_voz.avaliar(pronto, nivel_microfone, time.monotonic())
 
+            # As marcas cercam o áudio, e o lado em que entram importa: o
+            # início vai ANTES do pré-rolo (senão o serviço descarta a primeira
+            # sílaba) e o fim vai DEPOIS do último bloco (senão corta a última).
+            if envios and not estava_aberto:
+                self._enfileirar(INICIO_DE_FALA)
+            for envio in envios:
+                self._enfileirar(envio)
+            if estava_aberto and not self.portao_de_voz.aberto:
+                self._enfileirar(FIM_DE_FALA)
+
+        # A captura morrendo com o portão aberto deixaria um turno pendurado.
+        if self.portao_de_voz.fechar():
+            self._enfileirar(FIM_DE_FALA)
         with suppress(queue.Full):
             self.frames.put_nowait(None)
 

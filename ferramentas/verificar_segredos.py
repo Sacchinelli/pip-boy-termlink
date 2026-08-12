@@ -87,7 +87,13 @@ def falhar(msg: str) -> None:
 def _git(*args: str) -> tuple[int, str]:
     try:
         r = subprocess.run(
-            ["git", *args], cwd=RAIZ, capture_output=True, text=True, encoding="utf-8",
+            # core.quotepath=false é obrigatório, não cosmético: por padrão o git
+            # devolve nome com acento escapado em octal ("a\303\247ao.py"), o
+            # caminho não resolve, o arquivo cai no `is_file()` e é PULADO — sem
+            # erro, sem aviso. Num projeto em português, isso deixaria um buraco
+            # justamente nos arquivos mais prováveis de ter nome acentuado.
+            ["git", "-c", "core.quotepath=false", *args],
+            cwd=RAIZ, capture_output=True, text=True, encoding="utf-8",
         )
     except (OSError, subprocess.SubprocessError) as erro:
         return 127, str(erro)
