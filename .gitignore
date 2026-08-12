@@ -85,10 +85,22 @@ htmlcov/
 .tox/
 
 # Configuração local de editor e de agente — específica desta máquina.
-.claude/
 .vscode/
 .idea/
 *.code-workspace
+
+# O .claude mistura duas coisas de natureza oposta. O settings.local.json é
+# desta máquina — caminhos, permissões concedidas aqui — e não serve a mais
+# ninguém. Já .claude/skills/ é conhecimento SOBRE O PROJETO: como subir o
+# app, o que não apertar porque gasta crédito, qual verificação de ambiente
+# engana. Isso foi aprendido errando, e deixá-lo fora do repositório condena
+# a próxima pessoa (ou a próxima máquina) a errar de novo.
+#
+# A regra precisa ser assim, com /* e não com o nome da pasta: ao excluir
+# um diretório inteiro o git nem desce nele, e um "!" para o que está dentro
+# nunca chega a ser avaliado.
+.claude/*
+!.claude/skills/
 
 # =====================================================================
 # SISTEMA
