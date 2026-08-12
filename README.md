@@ -16,7 +16,7 @@ Tutor de inglês por voz, em tempo real, para quem joga em inglês. O programa o
 - **O ambiente se ajusta sozinho.** A cada meio minuto o programa olha os processos do Windows; se um jogo conhecido está aberto e a sessão está parada, a janela se veste dele e avisa no registro. A troca automática acontece no máximo uma vez por detecção — escolher outro ambiente à mão depois disso é respeitado.
 - **Backup diário do caderno.** Ao abrir, o programa guarda uma cópia íntegra do banco em `backups/` (uma por dia, as sete últimas ficam). O vocabulário de meses é o único dado que não se recupera perdendo.
 - **Primeira execução acolhedora.** Sem chave configurada, em vez de um erro sobre variáveis de ambiente aparece um cartão no tema explicando onde a chave nasce e recebendo a colagem — ele grava o `.env` no lugar certo sozinho.
-- **Histórico de sessões.** Cada conversa fica gravada (só neste computador) e pode ser relida no botão **Histórico**: a lista de sessões à esquerda, a transcrição à direita, com direito a apagar o que não quiser guardar. A palavra sem o contexto em que apareceu é metade da memória.
+- **Histórico de sessões.** Cada conversa fica gravada (só neste computador) e pode ser relida no botão **Histórico**: a lista de sessões à esquerda, a transcrição à direita, com direito a apagar o que não quiser guardar. A palavra sem o contexto em que apareceu é metade da memória. Conversas com mais de um ano são descartadas na abertura (`RETENCAO_DIAS`, em `pipboy/historico.py`): transcrição inteira que ninguém nunca poda é um arquivo que só cresce. A sequência de estudo não acompanha essa poda — ela é medida em anos.
 - **Modo compacto.** O botão de cápsula na barra de título encolhe o programa a uma barra mínima sempre-no-topo — estado, medidor do microfone e mudo — para deixar sobre o jogo em janela sem bordas. A sessão continua intacta; a cápsula é só outra vista dela.
 - **Bandeja do sistema.** Iniciar/encerrar, silenciar, mostrar e sair, sem caçar a janela atrás do jogo.
 - **O aparelho também se ouve.** Sessão iniciada, encerrada, palavra salva e erro têm um blip curto — sintetizado por código, com timbre próprio por jogo (o terminal 8-bit do Fallout, o sino do Elden Ring, o agudo netrunner do Cyberpunk). Nenhum arquivo de áudio no repositório, pelo mesmo princípio da atmosfera; o WAV nasce na primeira execução e fica em cache. Atmosfera **Desligada** silencia os blips também: a preferência por calma vale para o ouvido.
@@ -67,7 +67,7 @@ O código passa limpo por três verificadores, e a suíte de testes cobre o núc
 ```powershell
 py -m ruff check .                                # lint (zero apontamentos)
 py -m mypy pipboy pip_boy.py diagnostico.py       # tipos, modo estrito
-py tests/test_nucleo.py                           # ~190 testes sem hardware
+py tests/test_nucleo.py                           # ~290 testes sem hardware
 py tests/test_interface.py                        # a interface inteira, sem tela
 ```
 
@@ -183,6 +183,8 @@ backups\                Cópias diárias do caderno (as sete últimas)
 sons\                   Blips sintetizados, em cache por tema
 ```
 
+Os dois bancos abrem em **WAL** (`pipboy/banco.py`). Não é ajuste fino: cada frase transcrita do assistente vira um commit na thread da interface, e no modo padrão do SQLite todo commit paga um `fsync` — uma ida ao disco por frase falada, no meio do laço de eventos do Qt. Junto do WAL vai `synchronous=NORMAL`, que abre mão de durabilidade contra queda de energia (os commits dos últimos instantes), não contra queda do programa. Você vai ver arquivos `-wal` e `-shm` ao lado dos bancos enquanto o programa estiver aberto; eles somem no fechamento. Um disco que recuse o WAL — pasta de rede, por exemplo — apenas continua no modo antigo.
+
 ## Estrutura do projeto
 
 ```text
@@ -195,6 +197,7 @@ pip-boy-termlink/
 ├── pipboy/
 │   ├── __init__.py       # Logging, abertura e ponto de entrada
 │   ├── constants.py      # Taxas de amostragem e temporizações
+│   ├── banco.py          # Abertura das conexões SQLite (WAL)
 │   ├── crash.py          # Rede de segurança: exceção vira log + aviso
 │   ├── deteccao.py       # Reconhece o jogo aberto pela lista de processos
 │   ├── historico.py      # Banco de transcrições de sessões

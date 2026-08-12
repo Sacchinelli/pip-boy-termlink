@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from .banco import conectar
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS vocabulario (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -139,6 +141,20 @@ def _agora() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
+def _semana_de(momento: datetime) -> str:
+    """Identificador da semana (segunda a domingo) a que um instante pertence.
+
+    Semana ISO, e não ``%Y-%W``: o segundo reinicia a contagem em 1º de
+    janeiro, então a semana que atravessa a virada do ano é PARTIDA em dois
+    baldes — 31/dez cai em '2026-52' e 1º/jan, da mesma semana, em '2027-00'.
+    Uma vez por ano o painel de progresso mostrava a barra da virada pela
+    metade e uma segunda barra fantasma com o resto. O ano ISO acompanha a
+    semana em vez de cortá-la ao meio.
+    """
+    ano, semana, _ = momento.isocalendar()
+    return f"{ano:04d}-{semana:02d}"
+
+
 class VocabularyStore:
     """Acesso thread-safe ao banco de vocabulário.
 
@@ -153,8 +169,7 @@ class VocabularyStore:
     def __init__(self, path: Path) -> None:
         self.path = path
         self._lock = threading.Lock()
-        self._connection = sqlite3.connect(path, check_same_thread=False)
-        self._connection.row_factory = sqlite3.Row
+        self._connection = conectar(path)
         with self._lock:
             self._connection.executescript(_SCHEMA)
             existentes = {
@@ -488,6 +503,11 @@ class VocabularyStore:
         O agrupamento é feito em Python, no fuso LOCAL: o strftime do SQLite
         converteria os offsets para UTC, e uma palavra salva no domingo à
         noite cairia na barra da semana errada.
+
+        O rótulo é a SEGUNDA-FEIRA do balde, não "o mesmo dia da semana N
+        semanas atrás": o balde vai de segunda a domingo (ver ``_semana_de``),
+        e datar uma barra por uma quinta-feira qualquer dentro dela convidava
+        a ler o eixo como se cada coluna começasse naquele dia.
         """
         semanas = max(1, semanas)
         with self._lock:
@@ -498,16 +518,15 @@ class VocabularyStore:
                 quando = datetime.fromisoformat(str(r["criado_em"])).astimezone()
             except ValueError:
                 continue  # data ilegível não derruba o painel
-            chave = quando.strftime("%Y-%W")
+            chave = _semana_de(quando)
             por_semana[chave] = por_semana.get(chave, 0) + 1
 
         resultado: list[tuple[str, int]] = []
         alvo = datetime.now(timezone.utc).astimezone()
         for atras in range(semanas - 1, -1, -1):
             data = alvo - timedelta(weeks=atras)
-            chave = data.strftime("%Y-%W")
-            rotulo = data.strftime("%d/%m")
-            resultado.append((rotulo, por_semana.get(chave, 0)))
+            segunda = data - timedelta(days=data.weekday())
+            resultado.append((segunda.strftime("%d/%m"), por_semana.get(_semana_de(data), 0)))
         return resultado
 
     def por_jogo(self, limite: int = 6) -> list[tuple[str, int]]:

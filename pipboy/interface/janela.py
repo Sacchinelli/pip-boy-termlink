@@ -172,6 +172,12 @@ class Janela(QWidget):
         except Exception:
             LOGGER.exception("Backup do caderno falhou — o programa segue sem ele.")
         self._historico = HistoricoStore(data_directory() / "historico.sqlite3")
+        try:
+            podadas = self._historico.podar_antigas()
+            if podadas:
+                LOGGER.info("Histórico: %s sessão(ões) além da retenção removidas.", podadas)
+        except Exception:
+            LOGGER.exception("Poda do histórico falhou — o programa segue sem ela.")
         self._sessao_historico: int | None = None
 
         self._eventos: queue.Queue[UiEvent] = queue.Queue()

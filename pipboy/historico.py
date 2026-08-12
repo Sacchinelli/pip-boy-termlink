@@ -16,11 +16,12 @@ tudo fica em ``%LOCALAPPDATA%``, nada sai da máquina.
 
 from __future__ import annotations
 
-import sqlite3
 import threading
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+
+from .banco import conectar
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessoes (
@@ -44,6 +45,21 @@ CREATE TABLE IF NOT EXISTS atividade (
     dia TEXT PRIMARY KEY  -- AAAA-MM-DD, no fuso local de quem estuda
 );
 """
+
+
+# Por quantos dias uma conversa fica guardada.
+#
+# O caderno tem cópia diária com rotação; o histórico não tinha teto NENHUM.
+# Ele guarda transcrições inteiras, cresce todo dia e a única forma de apagar
+# era sessão a sessão, à mão, numa lista que só mostra as sessenta mais
+# recentes — ou seja: na prática, nunca. Um arquivo que só cresce e que
+# ninguém nunca poda é um vazamento com passo lento.
+#
+# Um ano é deliberadamente generoso: é mais do que qualquer pessoa volta para
+# reler, e ainda assim faz o arquivo chegar num tamanho estável em vez de
+# subir para sempre. Quem quiser guardar menos apaga à mão; quem quiser
+# guardar mais tem aqui a única linha a mudar.
+RETENCAO_DIAS: int = 365
 
 
 def _agora() -> str:
@@ -74,8 +90,7 @@ class HistoricoStore:
     def __init__(self, path: Path) -> None:
         self.path = path
         self._lock = threading.Lock()
-        self._connection = sqlite3.connect(path, check_same_thread=False)
-        self._connection.row_factory = sqlite3.Row
+        self._connection = conectar(path)
         with self._lock:
             self._connection.execute("PRAGMA foreign_keys = ON")
             self._connection.executescript(_SCHEMA)
@@ -115,6 +130,32 @@ class HistoricoStore:
             )
             self._connection.commit()
             return cursor.rowcount > 0
+
+    def podar_antigas(self, dias: int = RETENCAO_DIAS) -> int:
+        """Apaga sessões mais velhas que ``dias``. Devolve quantas se foram.
+
+        As falas vão junto pelo ``ON DELETE CASCADE``, e a tabela ``atividade``
+        NÃO é tocada: ela guarda um dia por linha, custa nada, e é dela que sai
+        a sequência de estudo — podá-la apagaria a única coisa do programa que
+        mede constância ao longo de anos.
+
+        Sem ``VACUUM`` de propósito. Ele devolveria o espaço ao sistema de
+        arquivos uma vez, ao preço de reescrever o banco inteiro no arranque —
+        justo quando a janela está sendo construída. Sem ele, as páginas
+        liberadas são reaproveitadas pelas sessões seguintes: o arquivo para de
+        crescer, que é o problema real, em vez de encolher e voltar a subir.
+        """
+        if dias <= 0:
+            return 0
+        limite = (
+            datetime.now(timezone.utc).astimezone() - timedelta(days=dias)
+        ).isoformat(timespec="seconds")
+        with self._lock:
+            cursor = self._connection.execute(
+                "DELETE FROM sessoes WHERE iniciada_em < ?", (limite,)
+            )
+            self._connection.commit()
+            return int(cursor.rowcount or 0)
 
     def descartar_sessao_vazia(self, sessao_id: int) -> bool:
         """Remove a sessão se ela terminou sem NENHUMA fala gravada.

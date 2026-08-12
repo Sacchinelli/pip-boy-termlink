@@ -967,6 +967,34 @@ def teste_progresso() -> None:
     novas, aprendendo, dominadas = store.dominio()
     checar((novas, aprendendo) == (3, 1), "um acerto move a palavra para aprendendo")
 
+    # A semana é ISO. Com %Y-%W, a semana que atravessa o Ano-Novo era partida
+    # em dois baldes ('2026-52' e '2027-00'), e uma vez por ano o painel
+    # mostrava a barra da virada pela metade mais uma barra fantasma.
+    from datetime import datetime as _dt
+    from datetime import timedelta, timezone
+
+    from pipboy.vocabulary import _semana_de
+
+    virada = [_dt(2026, 12, 28), _dt(2026, 12, 31), _dt(2027, 1, 1), _dt(2027, 1, 3)]
+    checar(
+        len({_semana_de(d) for d in virada}) == 1,
+        "a semana que atravessa o Ano-Novo é um balde só",
+    )
+    checar(
+        _semana_de(_dt(2027, 1, 4)) != _semana_de(_dt(2027, 1, 3)),
+        "a segunda-feira seguinte abre um balde novo",
+    )
+    checar(
+        all(len(r.split("/")) == 2 for r, _ in store.novas_por_semana(8)),
+        "todo balde recebe um rótulo de data",
+    )
+    hoje = _dt.now(timezone.utc).astimezone()
+    segunda = (hoje - timedelta(days=hoje.weekday())).strftime("%d/%m")
+    checar(
+        store.novas_por_semana(8)[-1][0] == segunda,
+        "o rótulo do balde é a segunda-feira dele, não o dia de hoje",
+    )
+
 
 def teste_regressoes() -> None:
     """Defeitos que já existiram uma vez. Cada linha aqui é uma cicatriz.
@@ -1346,6 +1374,87 @@ def teste_historico() -> None:
     morta.marcar_atividade((hoje - timedelta(days=2)).isoformat())
     checar(morta.sequencia_atual() == 0, "dois dias parado zera a sequência")
 
+    # Retenção: o histórico é o único banco que crescia sem teto.
+    from datetime import datetime, timezone
+
+    velho = HistoricoStore(Path(tempfile.mkdtemp()) / "poda.sqlite3")
+    antiga = velho.iniciar_sessao(jogo="Fallout")
+    recente = velho.iniciar_sessao(jogo="GTA")
+    velho.registrar_fala(antiga, autor="VOCÊ", tag="usuario", texto="fala velha")
+    velho.registrar_fala(recente, autor="VOCÊ", tag="usuario", texto="fala nova")
+    velho.marcar_atividade((hoje - timedelta(days=400)).isoformat())
+    # Envelhece a primeira à força: o relógio não anda dentro de um teste.
+    with velho._lock:
+        velho._connection.execute(
+            "UPDATE sessoes SET iniciada_em = ? WHERE id = ?",
+            (
+                (datetime.now(timezone.utc).astimezone() - timedelta(days=400)).isoformat(
+                    timespec="seconds"
+                ),
+                antiga,
+            ),
+        )
+        velho._connection.commit()
+
+    checar(velho.podar_antigas(dias=0) == 0, "retenção desligada não apaga nada")
+    checar(velho.podar_antigas() == 1, "a sessão de 400 dias atrás é podada")
+    checar(velho.total_sessoes() == 1, "a sessão recente fica")
+    checar(velho.falas_de(antiga) == [], "as falas da podada vão junto (CASCADE)")
+    checar(velho.falas_de(recente) != [], "as falas da recente ficam")
+    checar(
+        velho.sequencia_atual() >= 0 and velho.podar_antigas() == 0,
+        "podar duas vezes não apaga o que já respeita a retenção",
+    )
+    # A sequência de estudo é medida em anos e NÃO acompanha a poda das
+    # conversas: apagá-la junto tiraria a única constância que o programa mede.
+    with velho._lock:
+        dias_marcados = velho._connection.execute("SELECT COUNT(*) FROM atividade").fetchone()[0]
+    checar(int(dias_marcados) == 1, "o dia de estudo de 400 dias atrás sobrevive à poda")
+
+
+def teste_banco() -> None:
+    """Modo de diário das conexões.
+
+    O WAL não é ajuste fino: cada frase transcrita vira um commit na thread da
+    interface, e no modo padrão cada commit é um fsync no meio do laço de
+    eventos do Qt.
+    """
+    print("banco")
+    from pipboy.banco import conectar
+    from pipboy.historico import HistoricoStore
+
+    conexao = conectar(Path(tempfile.mkdtemp()) / "b.sqlite3")
+    modo = str(conexao.execute("PRAGMA journal_mode").fetchone()[0]).lower()
+    checar(modo == "wal", f"conexão nova abre em WAL ({modo})")
+    checar(
+        int(conexao.execute("PRAGMA synchronous").fetchone()[0]) == 1,
+        "synchronous=NORMAL acompanha o WAL",
+    )
+    conexao.execute("CREATE TABLE t (v TEXT)")
+    conexao.execute("INSERT INTO t VALUES ('ok')")
+    conexao.commit()
+    checar(conexao.execute("SELECT v FROM t").fetchone()["v"] == "ok", "row_factory é Row")
+    conexao.close()
+
+    # Os dois stores passam por ele; o caderno tem teste de backup próprio, e
+    # a cópia precisa continuar íntegra com o banco de origem em WAL.
+    vocab = VocabularyStore(Path(tempfile.mkdtemp()) / "wal.sqlite3")
+    vocab.registrar("wasteland", "terra devastada", jogo="Fallout")
+    pasta = Path(tempfile.mkdtemp()) / "backups"
+    copia = vocab.criar_backup(pasta)
+    checar(copia is not None and copia.exists(), "backup sai com o banco em WAL")
+    if copia is not None:
+        lida = VocabularyStore(copia)
+        checar(lida.total() == 1, "a cópia feita a partir de um banco WAL é legível")
+        lida.close()
+    vocab.close()
+
+    hist = HistoricoStore(Path(tempfile.mkdtemp()) / "hwal.sqlite3")
+    with hist._lock:
+        chaves = int(hist._connection.execute("PRAGMA foreign_keys").fetchone()[0])
+    checar(chaves == 1, "o WAL não atropelou o PRAGMA foreign_keys do histórico")
+    hist.close()
+
 
 def teste_deteccao() -> None:
     """Reconhecimento do jogo pela lista de processos.
@@ -1455,6 +1564,7 @@ def main() -> int:
         teste_backup,
         teste_regressoes,
         teste_sons,
+        teste_banco,
         teste_historico,
         teste_deteccao,
         teste_crash,
