@@ -53,6 +53,7 @@ public class PipBoyWin {
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+    [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint flags);
     public struct RECT { public int Left, Top, Right, Bottom; }
 }
 "@
@@ -137,6 +138,11 @@ function Save-Janela {
 
     $h = $Proc.MainWindowHandle
     if ([PipBoyWin]::IsIconic($h)) { [void][PipBoyWin]::ShowWindow($h, 9) }  # 9 = SW_RESTORE
+
+    # A tentativa de trazer para a frente fica, mas NÃO se confia nela: o
+    # Windows ignora SetForegroundWindow quando quem chama não é o processo em
+    # primeiro plano — o retorno é falso e nada acontece. É por isso que a
+    # captura abaixo usa PrintWindow (veja lá).
     [void][PipBoyWin]::SetForegroundWindow($h)
     Start-Sleep -Milliseconds $EsperaMs
 
@@ -151,13 +157,39 @@ function Save-Janela {
 
     $bmp = New-Object System.Drawing.Bitmap $w, $alt
     try {
+        # PrintWindow pede o conteúdo À PRÓPRIA JANELA; CopyFromScreen raspa os
+        # pixels da tela naquelas coordenadas. A diferença aparece no único
+        # caso que importa aqui: com outra janela por cima — e sempre há, porque
+        # quem dispara isto é um agente rodando num terminal em primeiro plano.
+        # Raspando a tela, a foto sai com o terminal no lugar do app, e nenhuma
+        # medida de cor denuncia: a foto errada é rica em cores e bem iluminada,
+        # e passa por boa em qualquer heurística.
+        #
+        # Não adianta forçar o foco antes: o Windows recusa SetForegroundWindow
+        # a quem não está em primeiro plano. PrintWindow dispensa o foco, o que
+        # de quebra evita roubar a janela do usuário no meio do que ele faz.
+        #
+        # A flag 2 é PW_RENDERFULLCONTENT, necessária para janelas compostas por
+        # GPU — sem ela, um app Qt costuma render um retângulo preto.
+        $capturou = $false
         $g = [System.Drawing.Graphics]::FromImage($bmp)
-        try { $g.CopyFromScreen($r.Left, $r.Top, 0, 0, $bmp.Size) } finally { $g.Dispose() }
+        try {
+            $hdc = $g.GetHdc()
+            try { $capturou = [PipBoyWin]::PrintWindow($h, $hdc, 2) } finally { $g.ReleaseHdc($hdc) }
+        } finally { $g.Dispose() }
 
-        # Amostragem em grade: um quadro preto ou de cor única significa que o
-        # processo existe mas não desenhou. Isso passaria por sucesso em
-        # qualquer verificação que só olhe o código de saída.
         $m = Measure-Quadro -Bitmap $bmp
+
+        # Nem toda janela responde a PrintWindow. Se ela devolver falso ou um
+        # quadro morto, raspar a tela ainda é melhor que não ter foto — mas o
+        # aviso é obrigatório, porque a partir daí a oclusão volta a ser
+        # possível e quem lê precisa saber que a foto pode não ser do app.
+        if (-not $capturou -or $m.Cores -lt 6) {
+            Write-Warning "PrintWindow não funcionou; raspando a tela. A foto pode conter outra janela por cima."
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            try { $g.CopyFromScreen($r.Left, $r.Top, 0, 0, $bmp.Size) } finally { $g.Dispose() }
+            $m = Measure-Quadro -Bitmap $bmp
+        }
 
         # Trazer a janela para a frente e fotografar em seguida às vezes pega o
         # quadro ANTES do Qt repintar. Não é hipótese: medindo a mesma janela

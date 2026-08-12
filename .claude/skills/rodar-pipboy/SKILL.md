@@ -77,9 +77,18 @@ passos extras. Leve o app até onde um usuário veria alguma coisa:
 powershell -File .claude\skills\rodar-pipboy\scripts\janela.ps1 -Acao teclas -Teclas "^b" -Saida %TEMP%\caderno.png
 ```
 
-Depois **abra o PNG e olhe**. Isso não é formalidade: o script detecta quadro
-morto (preto, cor única), mas não sabe distinguir um layout quebrado de um
-layout certo. Quem faz isso são seus olhos.
+Depois **abra o PNG e olhe**. Isso não é formalidade, e não basta ler os
+números que o script imprime. Duas falhas reais já passaram por eles:
+
+- Uma foto tirada com **outra janela por cima** do app. Ela é rica em cores e
+  bem iluminada — passa por boa em qualquer heurística, e mostra o terminal no
+  lugar do programa. (O script agora usa `PrintWindow`, que pede o conteúdo à
+  própria janela e é imune a isso; o aviso fica porque a saída de emergência,
+  raspar a tela, não é.)
+- Um **layout quebrado**, que nenhuma medida de cor distingue de um layout
+  certo.
+
+Quem pega essas coisas são seus olhos.
 
 Escolha o que dirigir pelo que você mexeu. Se foi no caderno, abra o caderno e
 confira os números do cabeçalho contra o que o rodapé da janela principal diz.
