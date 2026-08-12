@@ -385,8 +385,28 @@ class VocabularyStore:
     # nele. Os métodos abaixo servem ao JOGADOR, que quer ver o caderno inteiro
     # e procurar dentro dele — requisitos opostos, e por isso métodos separados.
 
+    def jogos(self) -> list[str]:
+        """Jogos presentes no caderno, do que tem mais termos para o que tem menos.
+
+        Só os que REALMENTE aparecem, e não a lista de temas: um seletor com
+        dez jogos dos quais nove nunca deram uma palavra é uma lista de becos
+        sem saída. Termos sem jogo ficam de fora — eles não formam uma
+        categoria que alguém queira pedir, e continuam alcançáveis por 'Todos'.
+        """
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT jogo, COUNT(*) AS total FROM vocabulario "
+                "WHERE jogo != '' GROUP BY jogo ORDER BY total DESC, jogo ASC"
+            ).fetchall()
+        return [str(r["jogo"]) for r in rows]
+
     def listar(
-        self, *, busca: str = "", filtro: str = FILTRO_TODAS, limite: int | None = None
+        self,
+        *,
+        busca: str = "",
+        filtro: str = FILTRO_TODAS,
+        jogo: str = "",
+        limite: int | None = None,
     ) -> list[Entrada]:
         """Palavras do caderno para exibição, filtradas e ordenadas.
 
@@ -394,9 +414,19 @@ class VocabularyStore:
         stimpak" não lembra necessariamente do termo em inglês. O ``LIKE`` do
         SQLite já ignora maiúsculas em ASCII; ``ESCAPE`` impede que um ``%``
         digitado vire curinga e traga o caderno inteiro.
+
+        ``jogo`` é uma dimensão SEPARADA de ``filtro``, e não mais um valor
+        dele: "difíceis" e "do Cyberpunk" são perguntas independentes, e quem
+        quer as duas ao mesmo tempo — que é o pedido natural de quem acabou de
+        trocar de jogo — não teria como fazê-lo se elas disputassem o mesmo
+        controle.
         """
         condicoes: list[str] = []
         params: list[object] = []
+
+        if jogo:
+            condicoes.append("jogo = ?")
+            params.append(jogo)
 
         alvo = " ".join(busca.split()).strip()
         if alvo:

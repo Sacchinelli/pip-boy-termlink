@@ -534,6 +534,31 @@ def teste_caderno_navegavel() -> None:
     checar(termos(filtro=FILTRO_DIFICEIS) == ["ghoul"], "erros repetidos marcam como difícil")
     checar("thane" not in termos(filtro=FILTRO_DIFICEIS), "palavra nunca revisada não é difícil")
 
+    # --- Jogo: uma dimensão SEPARADA do estado de revisão ---
+    checar(store.jogos() == ["Fallout", "Skyrim"], "os jogos vêm do caderno, do maior para o menor")
+    checar(sorted(termos(jogo="Fallout")) == ["ghoul", "wasteland"], "filtra por jogo")
+    checar(termos(jogo="Skyrim") == ["thane"], "e por outro jogo")
+    checar(termos(jogo="Cyberpunk 2077") == [], "jogo sem palavras devolve vazio")
+    # O ponto do recorte ser em dois eixos: as duas perguntas ao mesmo tempo.
+    checar(
+        termos(filtro=FILTRO_DIFICEIS, jogo="Fallout") == ["ghoul"],
+        "'difíceis' E 'do Fallout' se combinam",
+    )
+    checar(
+        termos(filtro=FILTRO_DIFICEIS, jogo="Skyrim") == [],
+        "e a combinação exclui de verdade",
+    )
+    checar(termos(busca="ghoul", jogo="Skyrim") == [], "o jogo também recorta a busca")
+    checar(termos(busca="ghoul", jogo="Fallout") == ["ghoul"], "e a deixa passar no jogo certo")
+
+    store.registrar("perk", "vantagem")  # sem jogo
+    checar(
+        "" not in store.jogos() and len(store.jogos()) == 2,
+        "palavra sem jogo não vira uma opção de seletor",
+    )
+    checar("perk" in termos(), "mas continua alcançável por 'todas'")
+    store.remover("perk")
+
     entrada = store.listar(busca="wasteland")[0]
     checar(entrada.dias_ate_revisao > 1 and not entrada.vencida, "palavra agendada não está vencida")
     checar(entrada.dominada, "intervalo longo conta como dominada")

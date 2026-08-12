@@ -110,6 +110,33 @@ def main() -> int:
     checar(janela._caderno.isVisible(), "caderno abre")
     checar(not janela._caderno.grab().isNull(), "caderno desenha")
 
+    # -- Filtro por jogo: uma dimensão separada dos chips de estado.
+    from pipboy.interface.caderno import TODOS_OS_JOGOS
+
+    caderno = janela._caderno
+    caderno.atualizar()
+    aplicacao.processEvents()
+    opcoes = [caderno.campo_jogo.itemText(i) for i in range(caderno.campo_jogo.count())]
+    checar(opcoes == [TODOS_OS_JOGOS, "Elden Ring", "Fallout"], f"seletor lista os jogos ({opcoes})")
+    checar(caderno.campo_jogo.isVisible(), "com dois jogos, o seletor aparece")
+
+    caderno.campo_jogo.setCurrentText("Fallout")
+    aplicacao.processEvents()
+    mostrados = [c._entrada.termo for c in caderno._cartoes]
+    checar(mostrados == ["wasteland"], f"escolher o jogo recorta a lista ({mostrados})")
+    checar("1 resultado" in caderno.contagem.text(), "e a contagem do rodapé acompanha")
+
+    # Os chips continuam mandando no estado, e os dois eixos se somam.
+    caderno._escolher_filtro("dominadas")
+    aplicacao.processEvents()
+    checar(caderno._cartoes == [], "'dominadas' + 'Fallout' não devolve nada ainda")
+    checar("Fallout" in caderno.vazio.text(), "e o vazio diz de que jogo está falando")
+
+    caderno._escolher_filtro("todas")
+    caderno.campo_jogo.setCurrentText(TODOS_OS_JOGOS)
+    aplicacao.processEvents()
+    checar(len(caderno._cartoes) == 2, "voltar para 'todos os jogos' devolve a lista")
+
     from pipboy.interface.progresso import JanelaProgresso
 
     progresso = JanelaProgresso(janela, store, parent=janela)

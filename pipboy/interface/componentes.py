@@ -401,6 +401,82 @@ class CampoSelecao(QComboBox):
         pintor.end()
 
 
+def css_campo_selecao(tema: Any, raio: int, rgba: Callable[[str, float], str]) -> str:
+    """Folha de estilo do ``CampoSelecao``, para quem hospedar um.
+
+    Mora ao lado do widget porque a pele é dele, não da janela. Ela nasceu
+    dentro da folha da janela principal, e quando o caderno passou a ter um
+    seletor a alternativa era copiar quarenta linhas de CSS — com os
+    comentários que explicam cada armadilha — para uma segunda folha, onde
+    envelheceriam separadas.
+
+    ``rgba`` é injetado porque a translucidez das superfícies serve à
+    atmosfera pintada atrás delas, e quem sabe se há atmosfera atrás é o
+    hospedeiro: a janela principal tem cenário vivo, um diálogo pode não ter.
+    """
+    return f"""
+        QComboBox {{
+            background: {rgba(tema.surface_alta, 0.92)}; color: {tema.primary};
+            border: 1px solid transparent; border-radius: {raio}px;
+            padding: 6px 30px 6px 12px;
+        }}
+        QComboBox:hover, QComboBox:focus {{ border-color: {tema.border_forte}; }}
+        /* Travado, não apagado: o texto continua legível (é o que diz o que
+           está valendo na sessão) e quem comunica o travamento é a superfície,
+           que perde o preenchimento e passa a mostrar só o contorno. Meia dúzia
+           de contornos tracejados empilhados numa coluna lê como formulário
+           quebrado; o traço contínuo diz a mesma coisa sem o ruído. */
+        QComboBox:disabled {{
+            color: {tema.text_disabled};
+            background: {rgba(tema.surface_alta, 0.30)};
+            border: 1px solid {tema.border};
+        }}
+        QComboBox::drop-down {{ border: none; width: 28px; }}
+        QComboBox QAbstractItemView {{
+            background: {tema.surface_alta}; color: {tema.primary};
+            border: 1px solid {tema.border}; border-radius: {raio}px;
+            outline: none; padding: 4px;
+        }}
+        /* O item precisa ser estilizado NOMINALMENTE. Declarar apenas
+           'selection-background-color' na lista não basta: o popup não detém o
+           foco de teclado enquanto é desenhado, e nesse estado o Qt resolve o
+           destaque pelo grupo de paleta *Inactive* — que no Windows é um cinza
+           do sistema. A linha escolhida saía lavada, com o cinza por baixo de
+           um texto pensado para o realce do tema. Com a regra ::item o estado
+           é nosso, ativo ou não. */
+        /* ESCOLHIDO e SOB O CURSOR são coisas diferentes e precisam parecer
+           diferentes. Estavam com o mesmo preenchimento cheio de acento, então
+           a lista mostrava dois blocos amarelos idênticos e não dizia qual era
+           o valor atual. Além disso, uma faixa sólida de ponta a ponta é o
+           tratamento de lista do Windows 95.
+
+           Agora: o cursor apenas ELEVA a linha, em cinza, sem cor nenhuma —
+           passar o mouse não é uma decisão. O valor escolhido ganha uma barra
+           de acento na margem e o texto na cor do acento, com só um véu de
+           fundo. A barra transparente em TODOS os itens reserva o espaço, para
+           que a linha escolhida não pule 3 px para o lado. */
+        QComboBox QAbstractItemView::item {{
+            padding: 7px 10px; border-radius: {max(2, raio - 2)}px;
+            color: {tema.primary}; background: transparent;
+            border-left: 3px solid transparent;
+        }}
+        QComboBox QAbstractItemView::item:hover {{
+            background: {design.elevar(tema.screen, 0.18, tema.primary)};
+        }}
+        QComboBox QAbstractItemView::item:selected {{
+            background: {design.misturar(tema.surface_alta, tema.accent, 0.13)};
+            color: {design.garantir_contraste(
+                tema.accent, design.misturar(tema.surface_alta, tema.accent, 0.13))};
+            border-left: 3px solid {tema.accent};
+        }}
+        QComboBox QAbstractItemView::item:selected:hover {{
+            background: {design.misturar(tema.surface_alta, tema.accent, 0.22)};
+            color: {design.garantir_contraste(
+                tema.accent, design.misturar(tema.surface_alta, tema.accent, 0.22))};
+        }}
+    """
+
+
 # ------------------------------------------------------------------- Medidor
 class Medidor(QWidget):
     """Medidor de nível com balística de VU e brilho aditivo nas barras vivas."""
