@@ -1674,6 +1674,54 @@ def teste_palavra_ate_a_conversa() -> None:
     hist.close()
 
 
+def teste_busca_entre_conversas() -> None:
+    """Achar a conversa quando não se sabe qual é.
+
+    A busca que existia era DENTRO da transcrição aberta, o que só serve a
+    quem já sabe em qual conversa procurar — e ninguém sabe. A contagem por
+    sessão é parte da resposta: quatro conversas com uma menção e uma com
+    dezessete não são a mesma coisa, e sem o número o jogador abre as cinco
+    para descobrir isso.
+    """
+    print("busca entre conversas")
+    from pipboy.historico import HistoricoStore
+
+    hist = HistoricoStore(Path(tempfile.mkdtemp()) / "busca.sqlite3")
+    a = hist.iniciar_sessao(jogo="Fallout")
+    hist.registrar_fala(a, autor="VOCÊ", tag="usuario", texto="o que é wasteland?")
+    hist.registrar_fala(a, autor="PIP-BOY", tag="assistente", texto="Wasteland é terra devastada.")
+    hist.registrar_fala(a, autor="", tag="vocab", texto="＋ wasteland — terra devastada")
+    b = hist.iniciar_sessao(jogo="Elden Ring")
+    hist.registrar_fala(b, autor="VOCÊ", tag="usuario", texto="e bonfire?")
+    hist.registrar_fala(b, autor="MENSAGEIRO", tag="assistente", texto="Fogueira, para descansar.")
+
+    achados = hist.buscar_sessoes("wasteland")
+    checar(len(achados) == 1 and achados[0][0].id == a, "só a conversa que menciona aparece")
+    checar(achados[0][1] == 3, f"conta as falas que casam, não as da sessão ({achados[0][1]})")
+    checar(achados[0][0].falas == 3, "e o total da sessão continua ali, para comparar")
+
+    checar(hist.buscar_sessoes("WASTELAND")[0][0].id == a, "a busca ignora maiúsculas")
+    checar(len(hist.buscar_sessoes("fogueira")) == 1, "acha pelo texto do assistente")
+    checar(len(hist.buscar_sessoes("MENSAGEIRO")) == 1, "e também pelo autor")
+    checar(hist.buscar_sessoes("nada disso") == [], "termo ausente não devolve conversa")
+    checar(hist.buscar_sessoes("") == [] and hist.buscar_sessoes("   ") == [], "busca vazia é vazia")
+
+    # Curinga digitado não pode escancarar o histórico: '%' é o LIKE do
+    # SQLite, e sem ESCAPE ele casaria com absolutamente tudo.
+    checar(hist.buscar_sessoes("%") == [], "'%' é procurado ao pé da letra, não como curinga")
+    checar(hist.buscar_sessoes("_") == [], "'_' também")
+    hist.registrar_fala(a, autor="VOCÊ", tag="usuario", texto="isto tem 100% de certeza")
+    checar(len(hist.buscar_sessoes("100%")) == 1, "e um '%' literal continua sendo encontrado")
+
+    # Uma conversa mencionada em duas sessões aparece nas duas, ordenada da
+    # mais recente para a mais antiga.
+    hist.registrar_fala(b, autor="VOCÊ", tag="usuario", texto="lembra do wasteland?")
+    ordenados = hist.buscar_sessoes("wasteland")
+    checar(len(ordenados) == 2, "as duas conversas que mencionam aparecem")
+    checar(ordenados[0][0].id >= ordenados[1][0].id, "a mais recente vem primeiro")
+    hist.close()
+
+
 def teste_banco() -> None:
     """Modo de diário das conexões.
 
@@ -1830,6 +1878,7 @@ def main() -> int:
         teste_banco,
         teste_historico,
         teste_palavra_ate_a_conversa,
+        teste_busca_entre_conversas,
         teste_deteccao,
         teste_crash,
     ):

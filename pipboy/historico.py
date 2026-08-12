@@ -308,6 +308,51 @@ class HistoricoStore:
             ).fetchall()
         return [(int(r["id"]), str(r["iniciada_em"]), str(r["fim"])) for r in rows]
 
+    def buscar_sessoes(
+        self, texto: str, limite: int = 60
+    ) -> list[tuple[ResumoDeSessao, int]]:
+        """Sessões que contêm ``texto``, cada uma com quantas falas casam.
+
+        A busca que já existia era DENTRO da conversa aberta, o que só serve a
+        quem já sabe em qual conversa procurar — e ninguém sabe. "Onde foi
+        mesmo que ele explicou isso?" é a pergunta que se faz, e ela varre o
+        histórico inteiro.
+
+        A contagem viaja junto do resumo porque é ela que diz onde vale
+        entrar: quatro conversas com uma menção cada e uma com dezessete não
+        são a mesma resposta, e uma lista sem o número faz o jogador abrir as
+        cinco para descobrir isso.
+
+        Como no caderno, o ``LIKE`` do SQLite ignora maiúsculas apenas em
+        ASCII, e o ``ESCAPE`` impede que um ``%`` digitado vire curinga e
+        devolva o histórico inteiro.
+        """
+        alvo = " ".join(texto.split()).strip()
+        if not alvo:
+            return []
+        padrao = "%" + alvo.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT s.id, s.iniciada_em, s.jogo, s.modo, s.nivel, "
+                "COUNT(f.id) AS falas, "
+                "SUM(CASE WHEN f.texto LIKE ? ESCAPE '\\' "
+                "         OR f.autor LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END) AS casam "
+                "FROM sessoes s LEFT JOIN falas f ON f.sessao_id = s.id "
+                "GROUP BY s.id HAVING casam > 0 "
+                "ORDER BY s.iniciada_em DESC, s.id DESC LIMIT ?",
+                (padrao, padrao, max(1, limite)),
+            ).fetchall()
+        return [
+            (
+                ResumoDeSessao(
+                    int(r["id"]), str(r["iniciada_em"]), str(r["jogo"]),
+                    str(r["modo"]), str(r["nivel"]), int(r["falas"]),
+                ),
+                int(r["casam"] or 0),
+            )
+            for r in rows
+        ]
+
     def falas_de(self, sessao_id: int) -> list[Fala]:
         with self._lock:
             rows = self._connection.execute(

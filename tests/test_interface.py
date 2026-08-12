@@ -203,6 +203,52 @@ def main() -> int:
         "não está no histórico" in cartoes["wasteland"].botao_conversa.toolTip(),
         "e o botão desabilitado diz por quê",
     )
+
+    # -- Busca entre TODAS as conversas, na coluna da esquerda.
+    outra_sessao = historico.iniciar_sessao(jogo="Elden Ring")
+    historico.registrar_fala(
+        outra_sessao, autor="VOCÊ", tag="usuario", texto="o que é bonfire?"
+    )
+    janela.abrir_historico()
+    aplicacao.processEvents()
+    visor = janela._visor_historico
+
+    def buscar_sessoes(texto: str) -> None:
+        visor._busca_sessoes.setText(texto)
+        visor._espera_sessoes.stop()  # o amortecedor de 180 ms não espera aqui
+        visor._recarregar()
+        aplicacao.processEvents()
+
+    buscar_sessoes("bonfire")
+    checar(visor._sessao_aberta == outra_sessao, "a busca abre a conversa que casa")
+    checar(visor._destaque == "bonfire", "e leva o termo procurado até a transcrição")
+    checar(not visor.grab().isNull(), "a lista filtrada desenha")
+
+    buscar_sessoes("ghoul")
+    checar(visor._sessao_aberta == sessao, "outro termo leva a outra conversa")
+
+    buscar_sessoes("zzzznadadisso")
+    checar(visor._sessao_aberta is None, "termo sem resultado não deixa conversa aberta")
+    checar("Nenhuma conversa contém" in visor._cabecalho.text(), "e explica o vazio")
+    checar(visor._destaque == "", "o destaque some junto com o resultado")
+
+    buscar_sessoes("")
+    checar(visor._sessao_aberta is not None, "limpar a busca devolve a lista inteira")
+
+    # Vindo do caderno com um filtro ativo, o filtro é de quem estava aqui
+    # antes — e esconderia da lista justamente a conversa pedida.
+    buscar_sessoes("bonfire")
+    janela.abrir_conversa(sessao, "ghoul")
+    aplicacao.processEvents()
+    checar(
+        janela._visor_historico._busca_sessoes.text() == "",
+        "o salto pelo caderno limpa o filtro de conversas",
+    )
+    checar(
+        janela._visor_historico._sessao_aberta == sessao,
+        "e abre a conversa pedida, não a que o filtro deixara aberta",
+    )
+    janela._visor_historico.close()
     visor.close()
 
     print("atalhos diretos")
