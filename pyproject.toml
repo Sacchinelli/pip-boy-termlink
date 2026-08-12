@@ -23,6 +23,11 @@ dev = [
     "ruff>=0.16",
     "mypy>=1.14",
     "pyinstaller>=6.11",
+    # Lê a tabela cmap dos arquivos de fonte. Serve a uma pergunta que o Qt não
+    # responde: o glifo está NA FONTE, ou o Windows o está emprestando de outra?
+    # O verificar_glifos.py mede pelo Qt e portanto aceita o empréstimo; o
+    # cobertura_de_glifos.py usa isto para medir o arquivo.
+    "fonttools>=4.0",
 ]
 
 # ------------------------------------------------------------------ Ruff
@@ -76,6 +81,9 @@ module = [
     "pyaudiowpatch.*",
     "pyaudio.*",
     "keyboard.*",
+    # Sem py.typed. Só a ferramenta de cobertura o importa, e o que ela pede
+    # dele é uma tabela e um dicionário — não vale um arquivo de stubs.
+    "fontTools.*",
 ]
 ignore_missing_imports = true
 
