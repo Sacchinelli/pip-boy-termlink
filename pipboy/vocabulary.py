@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from .banco import conectar
+from .banco import agora, conectar, padrao_de_busca, texto_de_busca
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS vocabulario (
@@ -37,9 +37,17 @@ CREATE TABLE IF NOT EXISTS vocabulario (
     intervalo_dias  INTEGER NOT NULL DEFAULT 0,
     proxima_revisao TEXT    NOT NULL DEFAULT '',
     acertos         INTEGER NOT NULL DEFAULT 0,
-    erros           INTEGER NOT NULL DEFAULT 0
+    erros           INTEGER NOT NULL DEFAULT 0,
+    -- Termo, tradução e exemplo dobrados (sem acento, sem caixa) para a busca
+    -- do visualizador. Ver banco.dobrar: sem esta coluna, procurar "ação" não
+    -- encontrava "AÇÃO", porque o LIKE do SQLite só ignora caixa em ASCII.
+    busca           TEXT    NOT NULL DEFAULT ''
 );
 """
+
+# Colunas de texto cujo conteúdo alimenta a coluna ``busca``, na ordem em que
+# são concatenadas. Fonte única: a gravação e a recarga usam esta mesma tupla.
+CAMPOS_DE_BUSCA = ("termo", "traducao", "exemplo")
 
 # Índices ficam separados do CREATE TABLE de propósito: num banco antigo, o
 # índice de revisão referencia uma coluna que só passa a existir depois da
@@ -59,6 +67,7 @@ _MIGRACOES: tuple[tuple[str, str], ...] = (
     ("proxima_revisao", "TEXT NOT NULL DEFAULT ''"),
     ("acertos", "INTEGER NOT NULL DEFAULT 0"),
     ("erros", "INTEGER NOT NULL DEFAULT 0"),
+    ("busca", "TEXT NOT NULL DEFAULT ''"),
 )
 
 
@@ -140,10 +149,6 @@ class Estatisticas:
         """Fração de acertos nas revisões; 0.0 quando nunca houve revisão."""
         tentativas = self.acertos + self.erros
         return self.acertos / tentativas if tentativas else 0.0
-
-
-def _agora() -> str:
-    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
 # Teto de linhas lidas numa importação. Um arquivo trocado por engano — um log,
@@ -248,13 +253,36 @@ class VocabularyStore:
                 linha[1]
                 for linha in self._connection.execute("PRAGMA table_info(vocabulario)")
             }
+            nasceram = []
             for coluna, definicao in _MIGRACOES:
                 if coluna not in existentes:
                     self._connection.execute(
                         f"ALTER TABLE vocabulario ADD COLUMN {coluna} {definicao}"
                     )
+                    nasceram.append(coluna)
             self._connection.executescript(_INDICES)
             self._connection.commit()
+            if "busca" in nasceram:
+                self._recarregar_busca()
+
+    def _recarregar_busca(self) -> None:
+        """Preenche a coluna de busca de um caderno criado antes dela existir.
+
+        Roda uma vez só, no ALTER TABLE que a criou — o caderno tem centenas
+        de linhas, não milhares, e a alternativa (procurar linhas vazias a
+        cada abertura) seria varrer a tabela toda para não achar nada, todo
+        dia, pelo resto da vida do programa.
+        """
+        campos = ", ".join(CAMPOS_DE_BUSCA)
+        linhas = self._connection.execute(f"SELECT id, {campos} FROM vocabulario").fetchall()
+        self._connection.executemany(
+            "UPDATE vocabulario SET busca = ? WHERE id = ?",
+            [
+                (texto_de_busca(*(str(linha[c]) for c in CAMPOS_DE_BUSCA)), linha["id"])
+                for linha in linhas
+            ],
+        )
+        self._connection.commit()
 
     def close(self) -> None:
         with self._lock:
@@ -272,7 +300,7 @@ class VocabularyStore:
         if not termo:
             raise ValueError("termo vazio")
         traducao = " ".join(traducao.split()).strip()
-        agora = _agora()
+        momento = agora()
 
         with self._lock:
             cursor = self._connection.execute(
@@ -283,12 +311,18 @@ class VocabularyStore:
             if existente is None:
                 self._connection.execute(
                     "INSERT INTO vocabulario "
-                    "(termo, traducao, exemplo, jogo, criado_em, visto_em, encontros) "
-                    "VALUES (?, ?, ?, ?, ?, ?, 1)",
-                    (termo, traducao, exemplo, jogo, agora, agora),
+                    "(termo, traducao, exemplo, jogo, criado_em, visto_em, encontros, busca) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 1, ?)",
+                    (
+                        termo, traducao, exemplo, jogo, momento, momento,
+                        texto_de_busca(termo, traducao, exemplo),
+                    ),
                 )
                 self._connection.commit()
-                return Entrada(termo, traducao, exemplo, jogo, 1, agora, criado_em=agora), True
+                return (
+                    Entrada(termo, traducao, exemplo, jogo, 1, momento, criado_em=momento),
+                    True,
+                )
 
             encontros = int(existente["encontros"]) + 1
             # Só sobrescreve exemplo/tradução quando o novo dado tem conteúdo.
@@ -296,13 +330,16 @@ class VocabularyStore:
             novo_exemplo = exemplo or existente["exemplo"]
             self._connection.execute(
                 "UPDATE vocabulario SET traducao = ?, exemplo = ?, jogo = ?, "
-                "visto_em = ?, encontros = ? WHERE id = ?",
+                "visto_em = ?, encontros = ?, busca = ? WHERE id = ?",
                 (
                     nova_traducao,
                     novo_exemplo,
                     jogo or existente["jogo"],
-                    agora,
+                    momento,
                     encontros,
+                    # A dobra acompanha o texto: um reencontro que traz tradução
+                    # ou exemplo novos precisa ficar buscável por eles.
+                    texto_de_busca(str(existente["termo"]), nova_traducao, novo_exemplo),
                     existente["id"],
                 ),
             )
@@ -317,7 +354,7 @@ class VocabularyStore:
                     novo_exemplo,
                     jogo or existente["jogo"],
                     encontros,
-                    agora,
+                    momento,
                     # O nascimento é o da PRIMEIRA vez, e o reencontro não o
                     # move: é ele que aponta para a conversa em que a palavra
                     # foi ensinada.
@@ -377,7 +414,7 @@ class VocabularyStore:
                 "SELECT * FROM vocabulario WHERE "
                 + self._VENCIDAS_WHERE
                 + " ORDER BY proxima_revisao ASC, visto_em ASC LIMIT ?",
-                (_agora(), max(1, min(limite, 50))),
+                (agora(), max(1, min(limite, 50))),
             ).fetchall()
         return [self._linha_para_entrada(r) for r in rows]
 
@@ -387,7 +424,7 @@ class VocabularyStore:
             return int(
                 self._connection.execute(
                     "SELECT COUNT(*) FROM vocabulario WHERE " + self._VENCIDAS_WHERE,
-                    (_agora(),),
+                    (agora(),),
                 ).fetchone()[0]
             )
 
@@ -431,7 +468,7 @@ class VocabularyStore:
             self._connection.execute(
                 "UPDATE vocabulario SET facilidade = ?, intervalo_dias = ?, "
                 "proxima_revisao = ?, acertos = ?, erros = ?, visto_em = ? WHERE id = ?",
-                (facilidade, intervalo, proxima, acertos, erros, _agora(), row["id"]),
+                (facilidade, intervalo, proxima, acertos, erros, agora(), row["id"]),
             )
             self._connection.commit()
 
@@ -479,9 +516,13 @@ class VocabularyStore:
         """Palavras do caderno para exibição, filtradas e ordenadas.
 
         A busca casa termo, tradução e exemplo — quem lembra "aquela do
-        stimpak" não lembra necessariamente do termo em inglês. O ``LIKE`` do
-        SQLite já ignora maiúsculas em ASCII; ``ESCAPE`` impede que um ``%``
-        digitado vire curinga e traga o caderno inteiro.
+        stimpak" não lembra necessariamente do termo em inglês. Os três moram
+        numa coluna só, já DOBRADA (ver ``banco.dobrar``): o ``LIKE`` do SQLite
+        só ignora maiúsculas em ASCII, e por isso procurar "ação" não achava
+        "AÇÃO" — falha muda, num programa cujo caderno é metade em português.
+        Dobrados, os dois lados chegam na mesma forma, e quem digita sem acento
+        também encontra. O ``ESCAPE`` impede que um ``%`` digitado vire curinga
+        e traga o caderno inteiro.
 
         ``jogo`` é uma dimensão SEPARADA de ``filtro``, e não mais um valor
         dele: "difíceis" e "do Cyberpunk" são perguntas independentes, e quem
@@ -496,18 +537,14 @@ class VocabularyStore:
             condicoes.append("jogo = ?")
             params.append(jogo)
 
-        alvo = " ".join(busca.split()).strip()
-        if alvo:
-            padrao = "%" + alvo.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-            condicoes.append(
-                "(termo LIKE ? ESCAPE '\\' OR traducao LIKE ? ESCAPE '\\' "
-                "OR exemplo LIKE ? ESCAPE '\\')"
-            )
-            params += [padrao, padrao, padrao]
+        padrao = padrao_de_busca(busca)
+        if padrao:
+            condicoes.append("busca LIKE ? ESCAPE '\\'")
+            params.append(padrao)
 
         if filtro == FILTRO_REVISAR:
             condicoes.append(self._VENCIDAS_WHERE)
-            params.append(_agora())
+            params.append(agora())
             ordem = "proxima_revisao ASC, visto_em ASC"
         elif filtro == FILTRO_DOMINADAS:
             condicoes.append("intervalo_dias >= ?")
@@ -551,7 +588,7 @@ class VocabularyStore:
                 "COALESCE(SUM(acertos), 0) AS acertos, "
                 "COALESCE(SUM(erros), 0) AS erros "
                 "FROM vocabulario",
-                (_agora(), DIAS_PARA_DOMINIO),
+                (agora(), DIAS_PARA_DOMINIO),
             ).fetchone()
         return Estatisticas(
             total=int(linha["total"] or 0),
@@ -687,7 +724,7 @@ class VocabularyStore:
         coloca no próximo quiz, que é o motivo de importá-los.
         """
         novos = existentes = ignorados = 0
-        agora = _agora()
+        momento = agora()
         with origem.open("r", encoding="utf-8", errors="replace", newline="") as handle:
             leitor = csv.reader(handle, delimiter="\t")
             with self._lock:
@@ -706,9 +743,12 @@ class VocabularyStore:
                     termo, traducao, exemplo, jogo = campos
                     cursor = self._connection.execute(
                         "INSERT OR IGNORE INTO vocabulario "
-                        "(termo, traducao, exemplo, jogo, criado_em, visto_em, encontros) "
-                        "VALUES (?, ?, ?, ?, ?, ?, 1)",
-                        (termo, traducao, exemplo, jogo, agora, agora),
+                        "(termo, traducao, exemplo, jogo, criado_em, visto_em, encontros, busca) "
+                        "VALUES (?, ?, ?, ?, ?, ?, 1, ?)",
+                        (
+                            termo, traducao, exemplo, jogo, momento, momento,
+                            texto_de_busca(termo, traducao, exemplo),
+                        ),
                     )
                     # O índice único em `termo COLLATE NOCASE` é quem decide o
                     # que é repetido; o INSERT OR IGNORE apenas não reclama.

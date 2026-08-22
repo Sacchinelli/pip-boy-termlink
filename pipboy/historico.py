@@ -16,13 +16,16 @@ tudo fica em ``%LOCALAPPDATA%``, nada sai da máquina.
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from .banco import conectar
+from .banco import agora, conectar, padrao_de_busca, texto_de_busca
+
+LOGGER = logging.getLogger("pip_boy.historico")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessoes (
@@ -38,7 +41,10 @@ CREATE TABLE IF NOT EXISTS falas (
     quando    TEXT NOT NULL,
     autor     TEXT NOT NULL DEFAULT '',
     tag       TEXT NOT NULL DEFAULT '',
-    texto     TEXT NOT NULL
+    texto     TEXT NOT NULL,
+    -- Autor e texto dobrados (sem acento, sem caixa) para a busca entre
+    -- conversas. Ver banco.dobrar.
+    busca     TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_falas_sessao ON falas (sessao_id, id);
 CREATE INDEX IF NOT EXISTS idx_sessoes_inicio ON sessoes (iniciada_em DESC);
@@ -46,6 +52,10 @@ CREATE TABLE IF NOT EXISTS atividade (
     dia TEXT PRIMARY KEY  -- AAAA-MM-DD, no fuso local de quem estuda
 );
 """
+
+# Colunas acrescentadas depois da primeira versão, como no caderno: um banco
+# antigo é atualizado no lugar em vez de descartado.
+_MIGRACOES: tuple[tuple[str, str, str], ...] = (("falas", "busca", "TEXT NOT NULL DEFAULT ''"),)
 
 
 # Por quantos dias uma conversa fica guardada.
@@ -61,10 +71,6 @@ CREATE TABLE IF NOT EXISTS atividade (
 # subir para sempre. Quem quiser guardar menos apaga à mão; quem quiser
 # guardar mais tem aqui a única linha a mudar.
 RETENCAO_DIAS: int = 365
-
-
-def _agora() -> str:
-    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +136,37 @@ class HistoricoStore:
             self._connection.execute("PRAGMA foreign_keys = ON")
             self._connection.executescript(_SCHEMA)
             self._connection.commit()
+            for tabela, coluna, definicao in _MIGRACOES:
+                existentes = {
+                    linha[1]
+                    for linha in self._connection.execute(f"PRAGMA table_info({tabela})")
+                }
+                if coluna not in existentes:
+                    self._connection.execute(
+                        f"ALTER TABLE {tabela} ADD COLUMN {coluna} {definicao}"
+                    )
+                    self._connection.commit()
+                    if (tabela, coluna) == ("falas", "busca"):
+                        self._recarregar_busca()
+
+    def _recarregar_busca(self) -> None:
+        """Dobra as falas de um histórico gravado antes da coluna de busca existir.
+
+        Um ano de conversas são dezenas de milhares de linhas, e isto roda no
+        arranque — por isso vai em UMA transação, e por isso roda uma vez só,
+        no ALTER TABLE que criou a coluna.
+        """
+        linhas = self._connection.execute("SELECT id, autor, texto FROM falas").fetchall()
+        self._connection.executemany(
+            "UPDATE falas SET busca = ? WHERE id = ?",
+            [
+                (texto_de_busca(str(linha["autor"]), str(linha["texto"])), linha["id"])
+                for linha in linhas
+            ],
+        )
+        self._connection.commit()
+        if linhas:
+            LOGGER.info("Busca do histórico preparada para %s fala(s).", len(linhas))
 
     def close(self) -> None:
         with self._lock:
@@ -140,7 +177,7 @@ class HistoricoStore:
         with self._lock:
             cursor = self._connection.execute(
                 "INSERT INTO sessoes (iniciada_em, jogo, modo, nivel) VALUES (?, ?, ?, ?)",
-                (_agora(), jogo, modo, nivel),
+                (agora(), jogo, modo, nivel),
             )
             self._connection.commit()
             return int(cursor.lastrowid or 0)
@@ -151,9 +188,9 @@ class HistoricoStore:
             return
         with self._lock:
             self._connection.execute(
-                "INSERT INTO falas (sessao_id, quando, autor, tag, texto) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (sessao_id, _agora(), autor, tag, texto),
+                "INSERT INTO falas (sessao_id, quando, autor, tag, texto, busca) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (sessao_id, agora(), autor, tag, texto, texto_de_busca(autor, texto)),
             )
             self._connection.commit()
 
@@ -323,24 +360,36 @@ class HistoricoStore:
         são a mesma resposta, e uma lista sem o número faz o jogador abrir as
         cinco para descobrir isso.
 
-        Como no caderno, o ``LIKE`` do SQLite ignora maiúsculas apenas em
-        ASCII, e o ``ESCAPE`` impede que um ``%`` digitado vire curinga e
+        A comparação é feita na coluna DOBRADA (ver ``banco.dobrar``): o
+        ``LIKE`` do SQLite só ignora maiúsculas em ASCII, e sem a dobra
+        procurar "missão" não encontrava a fala em que estava escrito "MISSÃO"
+        — uma busca que falha em silêncio, no idioma em que a conversa
+        acontece. O ``ESCAPE`` impede que um ``%`` digitado vire curinga e
         devolva o histórico inteiro.
+
+        **Primeiro as falas que casam, depois as sessões delas.** A consulta
+        anterior juntava TODAS as falas com TODAS as sessões, agrupava o
+        histórico inteiro e só então descartava, no ``HAVING``, as sessões sem
+        nenhuma coincidência: contava as falas de um ano de conversas para
+        devolver três. Varrer as falas uma vez é inevitável (é o preço de
+        procurar trecho no meio de palavra), mas contar só as sessões que
+        sobreviveram é a diferença entre trabalho proporcional ao histórico e
+        trabalho proporcional à resposta.
         """
-        alvo = " ".join(texto.split()).strip()
-        if not alvo:
+        padrao = padrao_de_busca(texto)
+        if not padrao:
             return []
-        padrao = "%" + alvo.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
         with self._lock:
             rows = self._connection.execute(
-                "SELECT s.id, s.iniciada_em, s.jogo, s.modo, s.nivel, "
-                "COUNT(f.id) AS falas, "
-                "SUM(CASE WHEN f.texto LIKE ? ESCAPE '\\' "
-                "         OR f.autor LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END) AS casam "
-                "FROM sessoes s LEFT JOIN falas f ON f.sessao_id = s.id "
-                "GROUP BY s.id HAVING casam > 0 "
+                "WITH casados AS ("
+                "  SELECT sessao_id, COUNT(*) AS casam FROM falas "
+                "  WHERE busca LIKE ? ESCAPE '\\' GROUP BY sessao_id"
+                ") "
+                "SELECT s.id, s.iniciada_em, s.jogo, s.modo, s.nivel, c.casam, "
+                "(SELECT COUNT(*) FROM falas f WHERE f.sessao_id = s.id) AS falas "
+                "FROM casados c JOIN sessoes s ON s.id = c.sessao_id "
                 "ORDER BY s.iniciada_em DESC, s.id DESC LIMIT ?",
-                (padrao, padrao, max(1, limite)),
+                (padrao, max(1, limite)),
             ).fetchall()
         return [
             (
