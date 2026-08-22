@@ -119,7 +119,7 @@ Para conferir o estado da máquina:
 
 Os caminhos possíveis, do mais simples ao mais caro:
 
-1. **Rodar pelo código-fonte** (`py pip_boy.py`). O Smart App Control não se aplica, e é o modo em que o projeto é desenvolvido.
+1. **Rodar pelo código-fonte** (`py pip_boy.py`). O Smart App Control não se aplica, e é o modo em que o projeto é desenvolvido. Para não digitar isso toda vez, `py ferramentas/criar_atalho.py` põe o ícone na área de trabalho apontando para o Python do projeto — mesmo programa, um duplo-clique.
 2. **Assinar o executável** com um certificado de code signing. É o que faz o `.exe` ser aceito de saída em qualquer máquina — e o único caminho se você pretende distribuir para outras pessoas.
 3. **Desligar o Smart App Control.** Funciona, mas leia antes: **essa mudança é de mão única.** Uma vez desligado, ele só volta a ser ligado com uma reinstalação limpa do Windows. Não é uma troca que valha a pena por causa de um programa que já roda pelo código-fonte.
 
@@ -154,6 +154,24 @@ Para iniciar:
 ```powershell
 py pip_boy.py
 ```
+
+### Abrir pela área de trabalho
+
+Um programa que só abre digitando um comando não é bem um aplicativo. Para ter o ícone lá fora:
+
+```powershell
+py ferramentas/criar_atalho.py
+```
+
+A ferramenta cria (ou atualiza) o atalho **Pip-Boy TermLink** na área de trabalho — na de verdade, inclusive quando o OneDrive a sincroniza e ela vira `OneDrive\Área de Trabalho`: quem diz onde ela fica é o shell do Windows, e não `%USERPROFILE%\Desktop`, que nesse caso é uma pasta fantasma que ninguém vê.
+
+O atalho aponta para o `pythonw.exe` do `.venv`, o interpretador **sem console**. O duplo-clique abre a janela do programa e nada mais: sem terminal preto atrás dela, e sem uma segunda entrada na barra de tarefas que derrubaria o Pip-Boy junto se alguém a fechasse.
+
+O ícone é desenhado antes de o atalho ser escrito, e isso não é ordem casual: quem não consegue desenhar o ícone não consegue desenhar a janela. Se faltar dependência naquele ambiente, a ferramenta diz o que falta e **não cria atalho nenhum** — um ícone bonito que não abre nada é pior do que atalho nenhum.
+
+O preço do interpretador sem console é que `sys.stderr` vale `None`: erro nenhum tem para onde ir. Por isso as mensagens de arranque do `pip_boy.py` (estrutura de pastas errada, dependência ausente, Python velho demais) aparecem numa **caixa do Windows** quando não há console. Sem isso, um duplo-clique numa instalação quebrada não faria absolutamente nada — a pior mensagem de erro possível.
+
+Para fixar na barra de tarefas, **arraste o atalho até ela**. Fixar pela janela já aberta guarda o `pythonw.exe` sozinho, sem o argumento, e o que fica fixado não abre coisa alguma.
 
 Para conferir se o núcleo está saudável (não precisa de chave, microfone nem internet — e roda inteiramente numa pasta temporária, sem tocar no seu caderno nem nas suas preferências):
 
@@ -209,6 +227,7 @@ pip-boy-termlink/
 ├── pip_boy.spec          # Receita do executável (PyInstaller)
 ├── pyproject.toml        # Metadados, ruff e mypy
 ├── ferramentas/
+│   ├── criar_atalho.py   # Põe o atalho do programa na área de trabalho
 │   ├── gerar_icone.py    # Renderiza o .ico do build (nenhum binário no repo)
 │   ├── verificar_glifos.py    # Todo símbolo do código existe nas fontes?
 │   └── verificar_segredos.py  # Nada de segredo entre os arquivos rastreados
@@ -295,6 +314,7 @@ As respostas de ferramenta também emagreceram: `consultar_vocabulario` devolvia
 - **`py` não é reconhecido:** instale o Python 3.10+ marcando "Add to PATH".
 - **A barra de tarefas mostra o ícone do Python:** era assim até a identidade do processo (AppUserModelID) ser declarada no arranque. Se ainda acontecer, o Windows está com o ícone em cache: feche o programa, aguarde alguns segundos e abra de novo.
 - **A janela não abre e o console fala em `PySide6`:** rode `py -m pip install -r requirements.txt`. A interface depende do Qt.
+- **O atalho da área de trabalho parou de abrir:** ele guarda o caminho da pasta do projeto e do `.venv`. Se você moveu ou renomeou qualquer um dos dois, rode `py ferramentas/criar_atalho.py` de novo. Se o duplo-clique mostrar uma caixa de erro, ela diz o que falta — é a mesma mensagem que apareceria no terminal.
 - **A atmosfera atrapalha a leitura:** troque **Atmosfera do jogo** para *Discreta* ou *Desligada* na coluna lateral. *Discreta* reduz varredura, grão e a quantidade de partículas; *Desligada* para a animação por completo e devolve a CPU ao jogo.
 - **Uma palavra foi salva errada:** abra o caderno com `Ctrl+B`, busque por ela e clique no `✕` do cartão.
 - **O PowerShell bloqueia a ativação do ambiente:** rode `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` e tente de novo. Vale só para a janela atual.

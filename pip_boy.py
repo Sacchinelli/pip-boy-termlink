@@ -127,6 +127,46 @@ def _traduzir_import_error(error: ImportError) -> SystemExit:
     )
 
 
+def _sem_console() -> bool:
+    """Não há para onde escrever: lançado pelo ``pythonw.exe`` ou já congelado.
+
+    É o caso do atalho da área de trabalho, que usa o interpretador sem console
+    para não abrir uma janela preta atrás da interface. O preço é este:
+    ``sys.stderr`` vale ``None``, e toda a explicação que este arquivo existe
+    para dar cairia no vazio.
+    """
+    return sys.platform == "win32" and getattr(sys, "stderr", None) is None
+
+
+def _texto_de_caixa(mensagem: str) -> str:
+    """A mesma mensagem, sem as réguas que só fazem sentido em monoespaçado.
+
+    Na fonte proporcional de uma caixa do Windows elas viram um risco largo que
+    estica o diálogo e não separa coisa nenhuma.
+    """
+    return "\n".join(linha for linha in mensagem.splitlines() if linha.strip("─ ")).strip()
+
+
+def _avisar_sem_console(mensagem: str) -> None:
+    """Mostra o erro numa caixa do Windows quando não há console para lê-lo.
+
+    Sem isto, um duplo-clique no atalho de uma instalação quebrada não faria
+    absolutamente nada — a pior mensagem de erro possível. Com console, esta
+    função não faz nada: a mensagem já vai para o terminal, onde dá para
+    copiar e colar, e uma caixa modal só atrapalharia.
+    """
+    if not _sem_console():
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.user32.MessageBoxW(
+            0, _texto_de_caixa(mensagem), "Pip-Boy TermLink", 0x10
+        )
+    except (OSError, AttributeError):  # pragma: no cover - depende do Windows
+        pass
+
+
 def main() -> int:
     # O linter marca esta checagem como "obsoleta" porque o projeto exige
     # 3.10+, mas ela existe exatamente para quem roda num Python mais velho.
@@ -155,4 +195,21 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # O contrato deste arquivo é que nenhuma falha do arranque termine em
+    # silêncio. Sem console — o caso do atalho da área de trabalho — o silêncio
+    # é justamente o padrão, e é aqui que ele é quebrado.
+    try:
+        _saida = main()
+    except SystemExit as parada:
+        if isinstance(parada.code, str):
+            _avisar_sem_console(parada.code)
+        raise
+    except Exception as erro:
+        _avisar_sem_console(
+            "O programa não conseguiu abrir.\n\n"
+            f"{type(erro).__name__}: {erro}\n\n"
+            "Para ver o traço completo, rode 'py pip_boy.py' numa janela do "
+            "PowerShell, na pasta do projeto."
+        )
+        raise
+    raise SystemExit(_saida)
