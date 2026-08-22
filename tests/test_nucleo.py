@@ -2116,6 +2116,49 @@ def teste_crash() -> None:
         crash.registrar_janela(None)
 
 
+def teste_busca_dobrada() -> None:
+    """Procurar "missão" tem de achar "MISSÃO" — e "missao" também.
+
+    O ``LIKE`` do SQLite só ignora maiúsculas em ASCII: ``'AÇÃO' LIKE
+    '%ação%'`` responde FALSO. Num programa cujo caderno é metade em
+    português e cujo histórico é conversa em português, isso é uma busca que
+    falha em silêncio — e silêncio é o que a torna pior que um erro.
+    """
+    print("busca dobrada (acento e caixa)")
+    from pipboy.banco import dobrar, padrao_de_busca
+    from pipboy.historico import HistoricoStore
+
+    checar(dobrar("AÇÃO") == dobrar("ação") == "acao", "a dobra iguala as três formas")
+    checar(padrao_de_busca("   ") == "", "busca vazia não vira padrão")
+    checar(padrao_de_busca("50%") == "%50\\%%", f"o curinga é escapado ({padrao_de_busca('50%')})")
+
+    loja = VocabularyStore(Path(tempfile.mkdtemp()) / "dobra.sqlite3")
+    loja.registrar("wasteland", "ERMO devastado", "A MISSÃO no ermo é longa.", "Fallout")
+    loja.registrar("quest", "missão", "Accept the quest.", "Skyrim")
+    checar(len(loja.listar(busca="missão")) == 2, "'missão' acha MISSÃO e missão")
+    checar(len(loja.listar(busca="MISSAO")) == 2, "'MISSAO' sem acento acha as duas")
+    checar(len(loja.listar(busca="ermo")) == 1, "a tradução em caixa alta é encontrada")
+    checar(len(loja.listar(busca="wastel")) == 1, "trecho no meio da palavra continua casando")
+    checar(len(loja.listar(busca="%")) == 0, "'%' digitado continua literal, não curinga")
+    # Um reencontro que traz tradução nova precisa deixá-la buscável.
+    loja.registrar("quest", "MISSÃO ou incumbência", "", "Skyrim")
+    checar(len(loja.listar(busca="incumbencia")) == 1, "a dobra acompanha o reencontro")
+
+    historico = HistoricoStore(Path(tempfile.mkdtemp()) / "dobra-h.sqlite3")
+    sessao = historico.iniciar_sessao(jogo="Fallout")
+    historico.registrar_fala(sessao, autor="PIP-BOY", tag="assistente", texto="A MISSÃO exige calma.")
+    historico.registrar_fala(sessao, autor="VOCÊ", tag="usuario", texto="qual missão?")
+    outra = historico.iniciar_sessao(jogo="Skyrim")
+    historico.registrar_fala(outra, autor="ESCRIBA", tag="assistente", texto="Nada a ver.")
+    achados = historico.buscar_sessoes("missao")
+    checar(len(achados) == 1, f"a busca entre conversas acha uma sessão ({len(achados)})")
+    checar(achados[0][1] == 2, f"e conta as duas falas que casam ({achados[0][1]})")
+    checar(achados[0][0].falas == 2, "o total de falas da sessão continua certo")
+    checar(not historico.buscar_sessoes("inexistente"), "termo ausente não devolve nada")
+    loja.close()
+    historico.close()
+
+
 def teste_lancamento_sem_console() -> None:
     """O atalho da área de trabalho lança pelo ``pythonw.exe``, que não tem stderr.
 
@@ -2206,6 +2249,7 @@ def main() -> int:
         teste_busca_entre_conversas,
         teste_deteccao,
         teste_crash,
+        teste_busca_dobrada,
         teste_lancamento_sem_console,
     ):
         try:
