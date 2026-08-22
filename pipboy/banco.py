@@ -34,14 +34,32 @@ from pathlib import Path
 
 LOGGER = logging.getLogger("pip_boy.banco")
 
+# Versão do formato dos carimbos de tempo. 0 (ausente) é o formato antigo: ISO
+# com o fuso LOCAL de quem gravou. 1 é ISO em UTC. Ver ``migrar_para_utc``.
+VERSAO_UTC = 1
+
+
 def agora() -> str:
     """O instante atual, no formato que os dois bancos gravam.
 
-    Estava duplicado letra por letra em ``vocabulary.py`` e ``historico.py``.
-    São duas cópias de uma decisão só — como o programa carimba o tempo — e o
-    tipo de código em que uma correção num lado não chega ao outro.
+    **Em UTC, e não no fuso local.** O programa gravava
+    ``2026-08-22T14:03:00-03:00`` e comparava esses carimbos como TEXTO — é
+    assim que o SQL responde "esta palavra venceu?" e "esta fala está dentro
+    daquela conversa?". A comparação textual só é verdadeira enquanto o
+    deslocamento nunca muda: entra o horário de verão, ou a pessoa viaja, e
+    duas datas do mesmo instante passam a ordenar errado por uma hora inteira.
+    O sintoma é discreto e o diagnóstico é impossível — uma revisão que vence
+    cedo demais, uma palavra que aponta para a conversa vizinha.
+
+    Em UTC o deslocamento é sempre o mesmo, e a ordem textual volta a ser a
+    ordem do tempo. O fuso local continua existindo onde ele importa, que é na
+    tela: quem exibe faz ``.astimezone()``, como o histórico já fazia.
+
+    Duas datas ficam deliberadamente LOCAIS, e não passam por aqui: o dia da
+    tabela ``atividade`` (a sequência de estudo é medida nos dias de quem
+    estuda, não nos de Greenwich) e o nome do arquivo de backup diário.
     """
-    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def dobrar(texto: str) -> str:
@@ -86,6 +104,37 @@ def texto_de_busca(*campos: str) -> str:
     somado ao começo do seguinte.
     """
     return dobrar("\n".join(campos))
+
+
+def migrar_para_utc(
+    conexao: sqlite3.Connection, tabelas: tuple[tuple[str, tuple[str, ...]], ...]
+) -> bool:
+    """Reescreve em UTC os carimbos gravados no fuso local. Uma vez por banco.
+
+    O trabalho é feito pelo próprio SQLite: as funções de data dele entendem
+    ISO 8601 com deslocamento e sabem normalizá-lo. É uma passada por tabela,
+    em vez de uma volta ao Python por linha — o histórico de um ano tem
+    dezenas de milhares de falas, e isto roda no arranque.
+
+    Campo vazio fica vazio: ``proxima_revisao = ''`` é o sentinela de "vencida
+    agora" e não é data nenhuma, e o ``strftime`` devolveria NULL para ele.
+    """
+    versao = int(conexao.execute("PRAGMA user_version").fetchone()[0] or 0)
+    if versao >= VERSAO_UTC:
+        return False
+    for tabela, colunas in tabelas:
+        for coluna in colunas:
+            # Interpolação de nome de tabela/coluna, e não de valor: os nomes
+            # vêm das constantes deste programa, nunca de entrada de fora.
+            conexao.execute(
+                f"UPDATE {tabela} SET {coluna} = "
+                f"COALESCE(strftime('%Y-%m-%dT%H:%M:%S+00:00', {coluna}), {coluna}) "
+                f"WHERE {coluna} != ''"
+            )
+    conexao.execute(f"PRAGMA user_version = {VERSAO_UTC}")
+    conexao.commit()
+    LOGGER.info("Carimbos de tempo convertidos para UTC (versão %s).", VERSAO_UTC)
+    return True
 
 
 def conectar(path: Path) -> sqlite3.Connection:

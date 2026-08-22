@@ -2159,6 +2159,75 @@ def teste_busca_dobrada() -> None:
     historico.close()
 
 
+def teste_carimbos_em_utc() -> None:
+    """Os dois bancos gravam em UTC — e convertem o que foi gravado no fuso local.
+
+    Os carimbos são comparados como TEXTO no SQL (é assim que se responde
+    "esta palavra venceu?"), e comparação textual só é verdadeira enquanto o
+    deslocamento não muda. Com horário de verão ou uma viagem, o mesmo
+    instante passava a ordenar uma hora fora do lugar.
+    """
+    print("carimbos em UTC")
+    import sqlite3
+
+    from pipboy.banco import agora
+    from pipboy.historico import HistoricoStore, sessao_em
+
+    checar(agora().endswith("+00:00"), f"o instante nasce em UTC ({agora()})")
+
+    pasta = Path(tempfile.mkdtemp())
+    loja = VocabularyStore(pasta / "utc.sqlite3")
+    entrada, _ = loja.registrar("dragon", "dragão", "", "Skyrim")
+    checar(entrada.criado_em.endswith("+00:00"), "o caderno grava em UTC")
+    historico = HistoricoStore(pasta / "utc-h.sqlite3")
+    sessao = historico.iniciar_sessao(jogo="Skyrim")
+    historico.registrar_fala(sessao, autor="X", tag="vocab", texto="dragão")
+    checar(
+        all(inicio.endswith("+00:00") for _, inicio, _ in historico.periodos()),
+        "o histórico grava em UTC",
+    )
+    # O elo entre os dois bancos é a comparação desses carimbos: os dois
+    # formatos precisam continuar sendo o mesmo formato.
+    nova, _ = loja.registrar("shout", "grito", "", "Skyrim")
+    checar(
+        sessao_em(historico.periodos(), nova.criado_em) == sessao,
+        "a palavra continua encontrando a conversa em que nasceu",
+    )
+    loja.close()
+    historico.close()
+
+    # Um caderno gravado pela versão anterior, no fuso local.
+    antigo = pasta / "antigo.sqlite3"
+    conexao = sqlite3.connect(antigo)
+    conexao.executescript(
+        "CREATE TABLE vocabulario (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "termo TEXT NOT NULL COLLATE NOCASE, traducao TEXT NOT NULL, "
+        "exemplo TEXT NOT NULL DEFAULT '', jogo TEXT NOT NULL DEFAULT '', "
+        "criado_em TEXT NOT NULL, visto_em TEXT NOT NULL, "
+        "encontros INTEGER NOT NULL DEFAULT 1);"
+        "INSERT INTO vocabulario (termo, traducao, exemplo, jogo, criado_em, visto_em) "
+        "VALUES ('settler','COLONO','Um colono da MISSÃO.','Fallout',"
+        "'2026-08-22T14:03:00-03:00','2026-08-22T14:03:00-03:00');"
+    )
+    conexao.commit()
+    conexao.close()
+
+    migrado = VocabularyStore(antigo)
+    lida = migrado.listar()[0]
+    checar(
+        lida.criado_em == "2026-08-22T17:03:00+00:00",
+        f"o carimbo do fuso local virou UTC ({lida.criado_em})",
+    )
+    checar(len(migrado.listar(busca="missão")) == 1, "e a linha antiga ficou buscável")
+    migrado.close()
+    reaberto = VocabularyStore(antigo)
+    checar(
+        reaberto.listar()[0].criado_em == "2026-08-22T17:03:00+00:00",
+        "reabrir não converte de novo o que já está em UTC",
+    )
+    reaberto.close()
+
+
 def teste_lancamento_sem_console() -> None:
     """O atalho da área de trabalho lança pelo ``pythonw.exe``, que não tem stderr.
 
@@ -2250,6 +2319,7 @@ def main() -> int:
         teste_deteccao,
         teste_crash,
         teste_busca_dobrada,
+        teste_carimbos_em_utc,
         teste_lancamento_sem_console,
     ):
         try:
