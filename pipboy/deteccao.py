@@ -68,10 +68,24 @@ def processos_em_execucao() -> set[str]:
             ["tasklist", "/fo", "csv", "/nh"],
             capture_output=True,
             text=True,
+            # O tasklist escreve na página de código OEM (850 no Brasil); sem
+            # dizer isto, o Python decodifica na ANSI (1252) e um nome de
+            # processo acentuado sai trocado — ou, se cair num dos bytes que a
+            # 1252 não define, levanta UnicodeDecodeError. Nenhum dos dois é
+            # pego pelo except abaixo: o erro sobe até o `except Exception` da
+            # thread que sondou, que RETORNA SEM NADA. Ou seja, um processo
+            # alheio com acento no nome desligava a detecção inteira, calada,
+            # até o programa ser reiniciado. O `errors` é cinto de segurança:
+            # nome ilegível vira caractere de substituição e não casa com jogo
+            # nenhum, que é infinitamente melhor que não ler a lista.
+            encoding="oem",
+            errors="replace",
             timeout=10,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, LookupError):
+        # LookupError: 'oem' é apelido só do Windows. Fora dele nunca chegamos
+        # aqui, mas um Python que não o conheça não pode derrubar a sonda.
         return set()
     if resultado.returncode != 0:
         return set()

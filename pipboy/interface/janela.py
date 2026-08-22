@@ -198,6 +198,8 @@ class Janela(QWidget):
         self._encerrando = False
         self._prazo_encerramento = 0.0
         self._atalhos_globais: list[Any] = []
+        # Falhas de escrita já anunciadas nesta execução. Ver _falha_de_gravacao.
+        self._falhas_anunciadas: set[str] = set()
         self._inicio_sessao = 0.0
         self._mudo = False
         self._tokens = 0
@@ -1244,10 +1246,40 @@ class Janela(QWidget):
         if self._sessao_historico is not None and tag in (
             Tag.USUARIO, Tag.ASSISTENTE, Tag.VOCAB
         ):
-            with contextlib.suppress(Exception):
+            try:
                 self._historico.registrar_fala(
                     self._sessao_historico, autor=autor, tag=tag.value, texto=texto
                 )
+            except Exception as erro:
+                self._falha_de_gravacao(
+                    "historico",
+                    "A conversa desta sessão NÃO está sendo gravada no histórico.",
+                    erro,
+                )
+
+    def _falha_de_gravacao(self, chave: str, aviso: str, erro: Exception) -> None:
+        """Anuncia uma falha de escrita — uma vez, e nunca em silêncio.
+
+        Estas duas gravações (a fala no histórico, o dia no contador de
+        sequência) eram engolidas por um ``suppress(Exception)`` mudo. Disco
+        cheio, banco travado por um antivírus ou arquivo corrompido faziam o
+        programa parar de guardar o que ele promete guardar para sempre — sem
+        uma linha na tela, sem uma linha no log, e sem nenhuma diferença
+        visível até o jogador procurar a conversa de ontem e não achar.
+
+        Avisar UMA vez é o essencial: um banco que recusa uma escrita recusa
+        todas, e um aviso por frase falada transformaria a conversa num muro
+        de erros. A primeira aparição fala; as repetições ficam no log, em
+        nível de depuração, para o caso de alguém investigar.
+        """
+        if chave in self._falhas_anunciadas:
+            LOGGER.debug("Falha de gravação repetida (%s): %s", chave, erro)
+            return
+        self._falhas_anunciadas.add(chave)
+        LOGGER.exception("Falha de gravação (%s).", chave, exc_info=erro)
+        # Tag.SISTEMA de propósito: é a única que não volta para o histórico,
+        # e portanto a única que não pode reentrar nesta mesma falha.
+        self._registrar(f"{aviso} Detalhe no pipboy.log: {erro}", Tag.SISTEMA)
 
     # --------------------------------------------------------------- Estado
 
@@ -1591,8 +1623,14 @@ class Janela(QWidget):
 
     def marcar_estudo(self) -> None:
         """Ponto único de 'hoje houve estudo' — sessão ou revisão offline."""
-        with contextlib.suppress(Exception):
+        try:
             self._historico.marcar_atividade()
+        except Exception as erro:
+            self._falha_de_gravacao(
+                "atividade",
+                "A sequência de estudo não está sendo contada.",
+                erro,
+            )
 
     def sequencia_de_estudo(self) -> int:
         try:
