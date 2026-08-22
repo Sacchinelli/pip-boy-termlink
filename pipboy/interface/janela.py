@@ -38,13 +38,6 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QFileDialog,
-    QFrame,
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
-    QScrollArea,
-    QSizePolicy,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -56,7 +49,6 @@ from ..config import (
     movimento_reduzido,
 )
 from ..constants import (
-    DEFAULT_GAME_AUDIO_GAIN,
     SHUTDOWN_TIMEOUT_SECONDS,
     UI_POLL_INTERVAL_MS,
 )
@@ -68,32 +60,36 @@ from ..profiles import (
     DEFAULT_NIVEL,
     DEFAULT_PERSONA,
     DEFAULT_VOZ,
-    MODOS,
-    NIVEIS,
     VOZES,
     SessionSettings,
     personas_for,
 )
-from ..themes import TEMAS, GameTheme, paleta_de, theme_for
+from ..themes import GameTheme, paleta_de, theme_for
 from ..vocabulary import VocabularyStore
+from . import montagem
 from .atmosfera import Cenario, atmosfera_de
 from .caderno import JanelaCaderno
 from .componentes import (
-    Botao,
     CampoSelecao,
     Desvanecer,
-    Medidor,
-    Pilula,
-    RotuloElidido,
     TransicaoDeTema,
 )
-from .conversa import Conversa
 from .dialogo import avisar
 from .estilo import folha_da_janela
 from .moldura import (
-    BarraDeTitulo,
     GripsRedimensionamento,
     aplicar_cantos_do_sistema,
+)
+from .montagem import (
+    DICA_OUVIR_O_JOGO,
+    DICA_SEM_LOOPBACK,
+    ESCALA_TEXTO_PADRAO,
+    ESCALAS_TEXTO,
+    GANHO_JOGO_PADRAO,
+    GLIFO_MIC_ATIVO,
+    GLIFO_MIC_MUDO,
+    NIVEIS_ATMOSFERA,
+    NIVEIS_GANHO_JOGO,
 )
 from .preferencias import Escolha, Marca, VinculoDePreferencias
 
@@ -106,14 +102,6 @@ if TYPE_CHECKING:  # pragma: no cover
 
 LOGGER = logging.getLogger("pip_boy.interface")
 
-# Dicas do chip 'Ouvir o jogo'. Ele nasce sem saber se existe loopback — a
-# enumeração de dispositivos roda numa thread — e troca de dica quando sabe.
-DICA_OUVIR_O_JOGO = (
-    "Envia também o áudio que sai do seu computador, para você poder perguntar "
-    "“o que ele acabou de dizer?”. Precisa ser marcado ANTES de iniciar. "
-    "A voz do próprio assistente é descartada dessa captura automaticamente."
-)
-DICA_SEM_LOOPBACK = "Indisponível: exige Windows com WASAPI e o pacote PyAudioWPatch."
 
 try:
     import keyboard
@@ -121,35 +109,7 @@ except ImportError:  # pragma: no cover
     keyboard = None
 
 
-# Símbolos restritos ao bloco Geometric Shapes e às setas básicas, que toda
-# fonte de texto do Windows possui. Emoji está fora de propósito: o Windows os
-# desenha SEMPRE coloridos, com fonte própria, e um microfone amarelo no meio
-# de um terminal de fósforo verde denuncia que aquele pixel é de outro desenho.
-GLIFO_MIC_ATIVO = "○"
-GLIFO_MIC_MUDO = "●"
-GLIFO_CADERNO = "◫"
-
 FONTES_MONO: tuple[str, ...] = ("Cascadia Mono", "Consolas", "Courier New", "Courier")
-
-NIVEIS_ATMOSFERA: dict[str, float] = {"Completa": 1.0, "Discreta": 0.45, "Desligada": 0.0}
-
-# Fator aplicado à rampa tipográfica inteira e às medidas que confinam texto.
-# Os saltos são de 15%: menos que isso não se percebe, e mais que isso pula o
-# tamanho que resolveria o problema de alguém.
-ESCALAS_TEXTO: dict[str, float] = {"Padrão": 1.0, "Grande": 1.15, "Maior": 1.30}
-ESCALA_TEXTO_PADRAO = "Padrão"
-
-# Quanto do som do jogo entra na mistura enviada ao modelo. A preferência
-# ``ganho_jogo`` existia, era lida na abertura da sessão e validada por teste —
-# mas nenhum controle a escrevia: só se mudava editando o JSON à mão. O valor
-# do meio É o padrão do programa, para que a escolha de fábrica volte igual ao
-# arquivo em vez de virar um número solto ligeiramente diferente.
-NIVEIS_GANHO_JOGO: dict[str, float] = {
-    "Alto": 0.70,
-    "Médio": DEFAULT_GAME_AUDIO_GAIN,
-    "Baixo": 0.25,
-}
-GANHO_JOGO_PADRAO = "Médio"
 
 
 class Sobreposicao(QWidget):
@@ -485,326 +445,57 @@ class Janela(QWidget):
         self.setGeometry(max(tela.x(), x), max(tela.y(), y), largura, altura)
 
     def _montar(self) -> None:
-        # A moldura é nossa: a barra de título temática ocupa a primeira faixa
-        # e o conteúdo de sempre — lateral e palco — divide o resto.
-        moldura = QVBoxLayout(self)
-        moldura.setContentsMargins(0, 0, 0, 0)
-        moldura.setSpacing(0)
-        self.barra_titulo = BarraDeTitulo(
-            self, botoes=("compacto", "minimizar", "maximizar", "fechar")
-        )
-        moldura.addWidget(self.barra_titulo)
+        """Constrói os widgets e adota as peças que a montagem devolveu.
 
-        raiz = QHBoxLayout()
-        raiz.setContentsMargins(0, 0, 0, 0)
-        raiz.setSpacing(0)
-        moldura.addLayout(raiz, 1)
-
-        # A coluna da esquerda tem duas faixas: os ajustes ROLAM, o caderno
-        # FICA. Antes tudo era um bloco só dentro da rolagem, e com 1002 px de
-        # conteúdo contra 760 px de janela o botão do caderno e o controle de
-        # atmosfera nasciam abaixo da dobra — as duas coisas que o usuário mais
-        # procura ficavam invisíveis até alguém pensar em rolar uma coluna que
-        # não parece rolável. Um destino permanente não é um ajuste; ancorá-lo
-        # no rodapé o torna independente da altura da janela.
-        self.coluna_lateral = QWidget(objectName="colunaLateral")
-        self.coluna_lateral.setFixedWidth(self.largura_lateral)
-        pilha = QVBoxLayout(self.coluna_lateral)
-        pilha.setContentsMargins(0, 0, 0, 0)
-        pilha.setSpacing(0)
-
-        self.lateral = QWidget(objectName="lateral")
-        self.rolagem_lateral = QScrollArea(objectName="rolagemLateral")
-        self.rolagem_lateral.setWidget(self.lateral)
-        self.rolagem_lateral.setWidgetResizable(True)
-        self.rolagem_lateral.setFrameShape(QFrame.Shape.NoFrame)
-        self.rolagem_lateral.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
-        pilha.addWidget(self.rolagem_lateral, 1)
-
-        self._veu = Desvanecer(self.rolagem_lateral, lambda: self._tema.surface)
-        barra_lateral = self.rolagem_lateral.verticalScrollBar()
-        barra_lateral.valueChanged.connect(self._posicionar_veu)
-        barra_lateral.rangeChanged.connect(self._posicionar_veu)
-
-        self.rodape_lateral = QWidget(objectName="rodapeLateral")
-        pilha.addWidget(self.rodape_lateral)
-        raiz.addWidget(self.coluna_lateral)
-
-        self.palco = QWidget(objectName="palco")
-        raiz.addWidget(self.palco, 1)
-
-        self._montar_lateral()
-        self._montar_rodape_lateral()
-        self._montar_palco()
-
-    def _montar_lateral(self) -> None:
-        coluna = QVBoxLayout(self.lateral)
-        coluna.setContentsMargins(24, 22, 24, 16)
-        coluna.setSpacing(0)
-
-        self.marca = QLabel(objectName="marca")
-        coluna.addWidget(self.marca)
-        self.submarca = QLabel(objectName="submarca")
-        self.submarca.setWordWrap(True)
-        coluna.addWidget(self.submarca)
-        coluna.addSpacing(16)
-
-        self.campos: dict[str, CampoSelecao] = {}
-        # Estes dois recebiam fonte uma vez só, dentro das funções locais
-        # abaixo, e ficavam fora do alcance de qualquer repintura. Enquanto a
-        # rampa era fixa isso nunca apareceu; com o tamanho do texto ajustável,
-        # seriam os únicos rótulos da coluna a não crescer.
-        self._rotulos_secao: list[QLabel] = []
-        self._rotulos_campo: list[QLabel] = []
-
-        def secao(titulo: str) -> None:
-            # Título e fio na MESMA linha, o fio começando onde o texto acaba.
-            # Empilhados, viravam duas faixas horizontais por seção, e a coluna
-            # ganhava quatro divisórias de largura total competindo com os
-            # próprios campos. Ao lado, o fio lê como prolongamento do rótulo:
-            # delimita igual e ocupa uma linha em vez de duas.
-            linha = QHBoxLayout()
-            linha.setContentsMargins(0, 0, 0, 0)
-            linha.setSpacing(10)
-            rotulo = QLabel(titulo.upper(), objectName="secao")
-            rotulo.setFont(self.fonte("secao"))
-            self._rotulos_secao.append(rotulo)
-            linha.addWidget(rotulo)
-            regua = QFrame(objectName="regua")
-            regua.setFixedHeight(1)
-            regua.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            linha.addWidget(regua, 1)
-            coluna.addLayout(linha)
-            coluna.addSpacing(9)
-
-        def campo(nome: str, rotulo: str, valores: list[str], dica: str = "") -> CampoSelecao:
-            etiqueta = QLabel(rotulo, objectName="rotuloCampo")
-            etiqueta.setFont(self.fonte("rotulo"))
-            self._rotulos_campo.append(etiqueta)
-            coluna.addWidget(etiqueta)
-            coluna.addSpacing(4)
-            seletor = CampoSelecao()
-            seletor.addItems(valores)
-            # Sem isto, um microfone chamado 'Microfone (2- Realtek(R) Audio)'
-            # dá 431 px de sizeHint contra 285 px de coluna, e o QComboBox
-            # arrasta o layout inteiro para fora da área visível. Com um
-            # comprimento mínimo declarado, o Qt encolhe o campo e elide o
-            # texto — a lista aberta continua mostrando o nome inteiro.
-            seletor.setSizeAdjustPolicy(
-                CampoSelecao.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
-            )
-            seletor.setMinimumContentsLength(12)
-            seletor.setFont(self.fonte("aux"))
-            seletor.setAccessibleName(rotulo)
-            if dica:
-                seletor.setToolTip(dica)
-                etiqueta.setToolTip(dica)
-            coluna.addWidget(seletor)
-            coluna.addSpacing(9)
-            self.campos[nome] = seletor
-            return seletor
-
-        secao("Ambiente")
-        self.campo_jogo = campo(
-            "jogo", "Jogo", list(TEMAS),
-            "Muda a aparência da janela e o contexto de inglês enviado ao modelo. "
-            "Só pode ser trocado com a sessão parada — o contexto vai na abertura "
-            "da conexão.",
-        )
-        self.campo_jogo.currentTextChanged.connect(self._trocar_jogo)
-        self.campo_persona = campo(
-            "persona", "Personalidade", personas_for(self._tema),
-            "O tom das respostas. A primeira da lista é a personagem do jogo escolhido.",
+        A construção mora em ``montagem.py``; o que sobra aqui é a adoção. As
+        atribuições são uma a uma, e não um laço sobre os campos do dataclass,
+        porque é este bloco que declara ao mypy — e a quem lê — que a janela
+        tem cada uma dessas peças.
+        """
+        pecas = montagem.montar(self)
+        moldura, lateral, rodape, palco = (
+            pecas.moldura, pecas.lateral, pecas.rodape, pecas.palco
         )
 
-        coluna.addSpacing(4)
-        secao("Ensino")
-        self.campo_nivel = campo(
-            "nivel", "Seu nível", list(NIVEIS),
-            "Define o quanto o assistente fala em português e o que corrige.",
-        )
-        self.campo_modo = campo(
-            "modo", "Modo", list(MODOS),
-            "Como ele ensina: tradução rápida, conversa, pronúncia, quiz das palavras "
-            "vencidas ou imersão só em inglês.",
-        )
-        self.campo_voz = campo("voz", "Voz", list(VOZES), "Timbre da voz sintetizada.")
+        self.barra_titulo = moldura.barra_titulo
+        self.coluna_lateral = moldura.coluna_lateral
+        self.lateral = moldura.lateral
+        self.rolagem_lateral = moldura.rolagem_lateral
+        self.rodape_lateral = moldura.rodape_lateral
+        self.palco = moldura.palco
+        self._veu = moldura.veu
 
-        coluna.addSpacing(4)
-        secao("Áudio")
-        # As duas listas chegam pela thread de enumeração (ver
-        # _carregar_dispositivos); "Padrão do sistema" já é resposta completa
-        # para quem não quer escolher aparelho nenhum.
-        self.campo_entrada = campo(
-            "entrada", "Microfone", ["Padrão do sistema"] + [d.label for d in self._entradas],
-            "Só pode ser trocado com a sessão parada.",
-        )
-        self.campo_saida = campo(
-            "saida", "Saída", ["Padrão do sistema"] + [d.label for d in self._saidas],
-            "Onde o assistente fala. Só pode ser trocado com a sessão parada.",
-        )
+        self.marca = lateral.marca
+        self.submarca = lateral.submarca
+        self.campos = lateral.campos
+        self._rotulos_secao = lateral.rotulos_secao
+        self._rotulos_campo = lateral.rotulos_campo
+        self.campo_jogo = lateral.campo_jogo
+        self.campo_persona = lateral.campo_persona
+        self.campo_nivel = lateral.campo_nivel
+        self.campo_modo = lateral.campo_modo
+        self.campo_voz = lateral.campo_voz
+        self.campo_entrada = lateral.campo_entrada
+        self.campo_saida = lateral.campo_saida
+        self.campo_ganho_jogo = lateral.campo_ganho_jogo
+        self.campo_atmosfera = lateral.campo_atmosfera
+        self.campo_tamanho_texto = lateral.campo_tamanho_texto
+        self.chip_alto_falante = lateral.chip_alto_falante
+        self.chip_jogo = lateral.chip_jogo
+        self.chip_busca = lateral.chip_busca
 
-        self.chip_alto_falante = Botao(
-            "Alto-falante (anti-eco)", variante="chip", paleta=self.paleta,
-            forma=self._atmosfera.forma, alinhamento_esquerdo=True,
-        )
-        self.chip_jogo = Botao(
-            "Ouvir o jogo", variante="chip", paleta=self.paleta,
-            forma=self._atmosfera.forma, alinhamento_esquerdo=True,
-        )
-        self.chip_busca = Botao(
-            "Busca na web", variante="chip", paleta=self.paleta,
-            forma=self._atmosfera.forma, alinhamento_esquerdo=True,
-        )
-        self.chip_alto_falante.setToolTip(
-            "Marque se você NÃO usa fone. Sem isso o assistente ouve a própria voz "
-            "pelo alto-falante e se interrompe num laço."
-        )
-        self.chip_busca.setToolTip(
-            "Deixa o modelo consultar a web antes de responder. Reduz invenção sobre "
-            "lore e patches, ao custo de latência."
-        )
-        # A lista de dispositivos ainda não voltou da thread; até ela chegar, o
-        # chip diz o que é verdade agora — não há loopback conhecido.
-        self.chip_jogo.setToolTip(DICA_SEM_LOOPBACK)
-        for chip in (self.chip_alto_falante, self.chip_jogo, self.chip_busca):
-            chip.setCheckable(True)
-            chip.setFont(self.fonte("legenda"))
-            # Um interruptor não precisa da altura de um botão de ação; a
-            # hierarquia da coluna depende dessa diferença.
-            chip.setFixedHeight(33)
-            coluna.addWidget(chip)
-            coluna.addSpacing(5)
-        self.chip_jogo.setEnabled(self._loopback is not None)
-        self.chip_jogo.toggled.connect(self._alternar_audio_do_jogo)
+        self.rotulo_caderno = rodape.rotulo_caderno
+        self.botao_caderno = rodape.botao_caderno
+        self.botao_historico = rodape.botao_historico
 
-        coluna.addSpacing(4)
-        # Fica habilitado mesmo com 'Ouvir o jogo' desmarcado: é uma preferência,
-        # e a dica já diz quando ela passa a valer. Amarrá-lo à caixa criaria
-        # dois donos do mesmo `setEnabled` — a caixa e o travamento de sessão —
-        # disputando o campo.
-        self.campo_ganho_jogo = campo(
-            "ganho_jogo", "Volume do jogo na mistura", list(NIVEIS_GANHO_JOGO),
-            "Quanto do som do jogo entra junto da sua voz. Baixe se o jogo estiver "
-            "abafando a pergunta. Vale para 'Ouvir o jogo' e só na próxima sessão.",
-        )
-
-        coluna.addSpacing(4)
-        secao("Apresentação")
-        self.campo_atmosfera = campo(
-            "atmosfera", "Atmosfera do jogo", list(NIVEIS_ATMOSFERA),
-            "Intensidade da varredura, do grão e das partículas. Reduza ou desligue "
-            "se o efeito atrapalhar a leitura.",
-        )
-        self.campo_atmosfera.currentTextChanged.connect(self._ajustar_atmosfera)
-        self.campo_tamanho_texto = campo(
-            "tamanho_texto", "Tamanho do texto", list(ESCALAS_TEXTO),
-            "Aumenta a letra na janela inteira, inclusive no caderno e no histórico. "
-            "Este programa costuma ficar ao lado do jogo, às vezes numa TV.",
-        )
-        self.campo_tamanho_texto.currentTextChanged.connect(self._ajustar_tamanho_texto)
-
-        coluna.addStretch(1)
-
-    def _montar_rodape_lateral(self) -> None:
-        """Bloco do caderno, ancorado ao pé da coluna e fora da rolagem."""
-        caixa = QVBoxLayout(self.rodape_lateral)
-        caixa.setContentsMargins(24, 14, 24, 18)
-        caixa.setSpacing(8)
-
-        self.rotulo_caderno = QLabel(objectName="caderno")
-        self.rotulo_caderno.setFont(self.fonte("micro"))
-        caixa.addWidget(self.rotulo_caderno)
-
-        # Uma porta só para o caderno. A exportação morava aqui e era a única
-        # coisa que se podia fazer com o vocabulário salvo; agora ela é uma das
-        # ações lá dentro, ao lado de ver, buscar e apagar.
-        self.botao_caderno = Botao(
-            f"{GLIFO_CADERNO}   Abrir caderno", variante="sutil",
-            paleta=self.paleta, forma=self._atmosfera.forma,
-        )
-        self.botao_caderno.setFont(self.fonte("corpo_forte"))
-        self.botao_caderno.setToolTip(
-            "Ver, buscar e exportar o vocabulário salvo (Ctrl+B)"
-        )
-        self.botao_caderno.clicked.connect(self.abrir_caderno)
-        caixa.addWidget(self.botao_caderno)
-
-        self.botao_historico = Botao(
-            "◷   Histórico", variante="sutil",
-            paleta=self.paleta, forma=self._atmosfera.forma,
-        )
-        self.botao_historico.setFont(self.fonte("corpo_forte"))
-        self.botao_historico.setToolTip(
-            "Reler as conversas de sessões anteriores — tudo fica só neste computador"
-        )
-        self.botao_historico.clicked.connect(self.abrir_historico)
-        caixa.addWidget(self.botao_historico)
-
-    def _montar_palco(self) -> None:
-        coluna = QVBoxLayout(self.palco)
-        coluna.setContentsMargins(24, 24, 24, 24)
-        coluna.setSpacing(16)
-
-        barra = QHBoxLayout()
-        barra.setSpacing(16)
-        self.pilula = Pilula()
-        self.pilula.setFont(self.fonte("micro"))
-        barra.addWidget(self.pilula)
-        self.medidor = Medidor()
-        self.medidor.setToolTip(
-            "Nível do seu microfone. O risco marca onde o portão de voz abre: "
-            "à esquerda dele nada é transmitido. Parado = microfone errado ou bloqueado."
-        )
-        barra.addWidget(self.medidor)
-        # Numa barra apertada é ESTE texto que cede — os botões ao lado não
-        # têm como se abreviar.
-        self.rotulo_meta = RotuloElidido(objectName="meta")
-        self.rotulo_meta.setFont(self._fonte_mono("micro"))
-        barra.addWidget(self.rotulo_meta)
-        barra.addStretch(1)
-
-        self.botao_mudo = Botao(
-            f"{GLIFO_MIC_ATIVO}   Mudo", variante="acento", paleta=self.paleta,
-            forma=self._atmosfera.forma,
-        )
-        self.botao_mudo.setFont(self.fonte("corpo_forte"))
-        self.botao_mudo.clicked.connect(self.alternar_mudo)
-        self.botao_mudo.setToolTip("Corta o envio do microfone. Nada é transmitido enquanto mudo.")
-        self.botao_mudo.setEnabled(False)
-        barra.addWidget(self.botao_mudo)
-
-        self.botao_acao = Botao(
-            variante="primario", paleta=self.paleta, forma=self._atmosfera.forma,
-            largura_min=150,
-        )
-        self.botao_acao.setFont(self.fonte("corpo_forte"))
-        self.botao_acao.clicked.connect(self.alternar_sessao)
-        self.botao_acao.setToolTip("Iniciar ou encerrar a sessão de voz (F12)")
-        barra.addWidget(self.botao_acao)
-        coluna.addLayout(barra)
-
-        self.conversa = Conversa(self)
-        coluna.addWidget(self.conversa, 1)
-
-        linha = QHBoxLayout()
-        linha.setSpacing(8)
-        self.entrada_texto = QLineEdit(objectName="entrada")
-        self.entrada_texto.setPlaceholderText("Perguntar por texto…")
-        self.entrada_texto.setFont(self.fonte("corpo"))
-        self.entrada_texto.setToolTip("Perguntar sem falar. Ctrl+L traz o cursor para cá.")
-        self.entrada_texto.setAccessibleName("Perguntar por texto")
-        self.entrada_texto.returnPressed.connect(self.enviar_texto)
-        linha.addWidget(self.entrada_texto, 1)
-        self.botao_enviar = Botao(
-            "Enviar", variante="sutil", paleta=self.paleta, forma=self._atmosfera.forma
-        )
-        self.botao_enviar.setFont(self.fonte("corpo_forte"))
-        self.botao_enviar.clicked.connect(self.enviar_texto)
-        linha.addWidget(self.botao_enviar)
-        coluna.addLayout(linha)
+        self.pilula = palco.pilula
+        self.medidor = palco.medidor
+        self.rotulo_meta = palco.rotulo_meta
+        self.botao_mudo = palco.botao_mudo
+        self.botao_acao = palco.botao_acao
+        self.conversa = palco.conversa
+        self.entrada_texto = palco.entrada_texto
+        self.botao_enviar = palco.botao_enviar
 
     # ------------------------------------------------------------- Aparência
 
@@ -1424,10 +1115,14 @@ class Janela(QWidget):
         QShortcut(QKeySequence("Ctrl+H"), self, activated=self.abrir_historico)
         QShortcut(QKeySequence("Ctrl+R"), self, activated=self.revisar_agora)
         QShortcut(QKeySequence("Ctrl+M"), self, activated=self.entrar_modo_compacto)
-        QShortcut(
-            QKeySequence("Ctrl+L"), self,
-            activated=lambda: (self.entrada_texto.setFocus(), self.entrada_texto.selectAll()),
-        )
+        # Uma função, e não uma lambda devolvendo tupla: aquela existia só para
+        # espremer dois efeitos numa expressão, e o mypy passou a reclamar dela
+        # assim que a montagem deu tipo declarado ao campo de texto.
+        def focar_entrada() -> None:
+            self.entrada_texto.setFocus()
+            self.entrada_texto.selectAll()
+
+        QShortcut(QKeySequence("Ctrl+L"), self, activated=focar_entrada)
 
         if keyboard is None or not self._configuration.global_hotkeys_enabled:
             self._registrar(
