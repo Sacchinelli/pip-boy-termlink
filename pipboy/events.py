@@ -28,6 +28,11 @@ class UiEventKind(str, Enum):
     # A sessão desistiu da busca na web para conseguir conectar. O chip
     # precisa saber: marcado enquanto a sessão roda sem busca, ele mente.
     WEB_SEARCH_DISABLED = "web_search_disabled"
+    # A lista de dispositivos de áudio ficou pronta. Ela é levantada numa
+    # thread porque abrir o PyAudio e enumerar custa perto de trezentos
+    # milissegundos — tempo que a janela passaria em branco. O payload é a
+    # tripla (entradas, saídas, loopback) que ``audio.list_devices`` devolve.
+    DEVICES_READY = "devices_ready"
 
 
 class Tag(str, Enum):

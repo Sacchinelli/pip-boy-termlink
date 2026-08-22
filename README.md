@@ -230,13 +230,14 @@ pip-boy-termlink/
 ├── pyproject.toml        # Metadados, ruff e mypy
 ├── ferramentas/
 │   ├── criar_atalho.py   # Põe o atalho do programa na área de trabalho
+│   ├── cobertura_de_glifos.py # Quanto da tipografia é da fonte do tema
 │   ├── gerar_icone.py    # Renderiza o .ico do build (nenhum binário no repo)
 │   ├── verificar_glifos.py    # Todo símbolo do código existe nas fontes?
 │   └── verificar_segredos.py  # Nada de segredo entre os arquivos rastreados
 ├── pipboy/
 │   ├── __init__.py       # Logging, abertura e ponto de entrada
 │   ├── constants.py      # Taxas de amostragem e temporizações
-│   ├── banco.py          # Conexões SQLite (WAL), instante e dobra da busca
+│   ├── banco.py          # Conexões SQLite (WAL), carimbos em UTC, dobra da busca
 │   ├── crash.py          # Rede de segurança: exceção vira log + aviso
 │   ├── deteccao.py       # Reconhece o jogo aberto pela lista de processos
 │   ├── historico.py      # Banco de transcrições de sessões
@@ -257,6 +258,8 @@ pip-boy-termlink/
 │       ├── moldura.py    # Barra de título temática e redimensionamento
 │       ├── abertura.py   # Cartão de arranque no tema do último jogo
 │       ├── icone.py      # Ícone do app, desenhado por código
+│       ├── estilo.py     # Folha de estilo derivada do tema (função pura)
+│       ├── preferencias.py# Vínculo entre a coluna lateral e o arquivo
 │       ├── conversa.py   # O diálogo em bolhas
 │       ├── caderno.py    # Visualizador do vocabulário salvo
 │       ├── revisao.py    # Cartões de revisão offline
@@ -317,7 +320,7 @@ As respostas de ferramenta também emagreceram: `consultar_vocabulario` devolvia
 - **A barra de tarefas mostra o ícone do Python:** era assim até a identidade do processo (AppUserModelID) ser declarada no arranque. Se ainda acontecer, o Windows está com o ícone em cache: feche o programa, aguarde alguns segundos e abra de novo.
 - **A janela não abre e o console fala em `PySide6`:** rode `py -m pip install -r requirements.txt`. A interface depende do Qt.
 - **O atalho da área de trabalho parou de abrir:** ele guarda o caminho da pasta do projeto e do `.venv`. Se você moveu ou renomeou qualquer um dos dois, rode `py ferramentas/criar_atalho.py` de novo. Se o duplo-clique mostrar uma caixa de erro, ela diz o que falta — é a mesma mensagem que apareceria no terminal.
-- **A atmosfera atrapalha a leitura:** troque **Atmosfera do jogo** para *Discreta* ou *Desligada* na coluna lateral. *Discreta* reduz varredura, grão e a quantidade de partículas; *Desligada* para a animação por completo e devolve a CPU ao jogo.
+- **A atmosfera atrapalha a leitura:** troque **Atmosfera do jogo** para *Discreta* ou *Desligada* na coluna lateral. *Discreta* reduz varredura, grão e a quantidade de partículas; *Desligada* para a animação por completo e devolve a CPU ao jogo. Mesmo *Completa* custa pouco: a sobreposição repinta só a região das partículas (2,4% da janela, medido pela suíte de interface) em vez da janela inteira, e nos dois ambientes sem camada viva o relógio de quadros nem chega a correr.
 - **Uma palavra foi salva errada:** abra o caderno com `Ctrl+B`, busque por ela e clique no `✕` do cartão.
 - **O PowerShell bloqueia a ativação do ambiente:** rode `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` e tente de novo. Vale só para a janela atual.
 - **"Ouvir o jogo" está desabilitado:** exige Windows com WASAPI e o pacote `PyAudioWPatch`. A opção precisa ser marcada *antes* de iniciar a sessão.
