@@ -14,6 +14,7 @@ import itertools
 import os
 import sys
 import tempfile
+import traceback
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -690,7 +691,29 @@ def teste_config() -> None:
     checar(Preferences._compativel(1, 0.5), "int serve num campo float")
     checar(not Preferences._compativel(True, 0.5), "bool NÃO serve num campo float")
     checar(not Preferences._compativel(1, False), "int NÃO serve num campo bool")
+
+    # BOM. O arquivo é editável à mão e vários editores do Windows gravam com
+    # ele; lido como utf-8 puro, o BOM entra como caractere invisível, o JSON
+    # inteiro é reprovado e TODAS as preferências voltam ao padrão em silêncio.
+    alvo.write_text(
+        "﻿" + _json.dumps({"jogo": "Red Dead"}), encoding="utf-8"
+    )
+    checar(Preferences.load().jogo == "Red Dead", "arquivo com BOM continua sendo lido")
     alvo.unlink(missing_ok=True)
+
+    # Gravação atômica: o arquivo nunca existe pela metade, e o temporário não
+    # fica para trás sujando a pasta de dados.
+    from pipboy.config import escrever_atomico
+
+    destino = Path(tempfile.mkdtemp()) / "sub" / "arquivo.json"
+    escrever_atomico(destino, '{"a": 1}')
+    checar(destino.read_text(encoding="utf-8") == '{"a": 1}', "escrita atômica grava o conteúdo")
+    escrever_atomico(destino, '{"a": 2}')
+    checar(destino.read_text(encoding="utf-8") == '{"a": 2}', "e sobrescreve o anterior inteiro")
+    checar(
+        list(destino.parent.iterdir()) == [destino],
+        f"sem sobras ao lado ({[p.name for p in destino.parent.iterdir()]})",
+    )
 
     # Gravação da chave pela tela de primeira execução.
     from pipboy.config import data_directory, salvar_chave
@@ -2153,6 +2176,7 @@ def teste_lancamento_sem_console() -> None:
 
 
 def main() -> int:
+    global _falhas
     for teste in (
         teste_dsp,
         teste_vocabulario,
@@ -2184,7 +2208,17 @@ def main() -> int:
         teste_crash,
         teste_lancamento_sem_console,
     ):
-        teste()
+        try:
+            teste()
+        except Exception:
+            # Um teste que ESTOURA — e não apenas reprova um `checar` — matava
+            # a execução inteira: os seguintes nunca rodavam, e no lugar do
+            # relatório sobrava um traço de pilha. Justo quando saber o que
+            # MAIS quebrou é o que orienta o conserto, a suíte contava um
+            # defeito e escondia os outros vinte e nove.
+            _falhas += 1
+            print(f"  ERRO {teste.__name__} estourou — os demais seguem:")
+            traceback.print_exc(file=sys.stdout)
     print()
     if _falhas:
         print(f"{_falhas} falha(s).")

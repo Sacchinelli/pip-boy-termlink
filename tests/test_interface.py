@@ -611,6 +611,10 @@ def main() -> int:
     store.close()
     historico.close()
 
+    return relatar()
+
+
+def relatar() -> int:
     print()
     if _falhas:
         print(f"{_falhas} falha(s).")
@@ -620,7 +624,18 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    codigo = main()
+    try:
+        codigo = main()
+    except Exception:
+        # Esta suíte é um roteiro linear: uma exceção no meio dele levava
+        # embora o relatório inteiro, e o que sobrava era um traço de pilha
+        # sem dizer quantas checagens tinham passado até ali. O traço continua
+        # (é ele que aponta o defeito), mas agora acompanhado da conta.
+        import traceback
+
+        traceback.print_exc(file=sys.stdout)
+        _falhas += 1
+        codigo = relatar()
     # Saída dura, de propósito.
     #
     # Este arreio deixa vivos, por necessidade, vários diálogos de topo e o
