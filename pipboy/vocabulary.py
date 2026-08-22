@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from .banco import agora, conectar, padrao_de_busca, texto_de_busca
+from .banco import agora, conectar, migrar_para_utc, padrao_de_busca, texto_de_busca
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS vocabulario (
@@ -264,6 +264,10 @@ class VocabularyStore:
             self._connection.commit()
             if "busca" in nasceram:
                 self._recarregar_busca()
+            migrar_para_utc(
+                self._connection,
+                (("vocabulario", ("criado_em", "visto_em", "proxima_revisao")),),
+            )
 
     def _recarregar_busca(self) -> None:
         """Preenche a coluna de busca de um caderno criado antes dela existir.

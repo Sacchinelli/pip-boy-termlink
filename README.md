@@ -219,6 +219,8 @@ sons\                   Blips sintetizados, em cache por tema
 
 Os dois bancos abrem em **WAL** (`pipboy/banco.py`). Não é ajuste fino: cada frase transcrita do assistente vira um commit na thread da interface, e no modo padrão do SQLite todo commit paga um `fsync` — uma ida ao disco por frase falada, no meio do laço de eventos do Qt. Junto do WAL vai `synchronous=NORMAL`, que abre mão de durabilidade contra queda de energia (os commits dos últimos instantes), não contra queda do programa. Você vai ver arquivos `-wal` e `-shm` ao lado dos bancos enquanto o programa estiver aberto; eles somem no fechamento. Um disco que recuse o WAL — pasta de rede, por exemplo — apenas continua no modo antigo.
 
+**Os carimbos de tempo são gravados em UTC.** O SQL compara essas datas como TEXTO — é assim que se responde "esta palavra venceu?" e "em que conversa esta palavra nasceu?" — e comparação textual só é verdadeira enquanto o deslocamento do fuso não muda. Gravado no fuso local, o mesmo instante passava a ordenar uma hora fora do lugar depois de uma virada de horário de verão ou de uma viagem, com sintomas discretos demais para alguém desconfiar: uma revisão vencendo cedo, uma palavra apontando para a conversa vizinha. Bancos criados por versões anteriores são convertidos na primeira abertura, uma vez só (`PRAGMA user_version`). O fuso local continua onde ele importa — na tela, e no dia da sequência de estudo, que conta os dias de quem estuda e não os de Greenwich.
+
 ## Estrutura do projeto
 
 ```text

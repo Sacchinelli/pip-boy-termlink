@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from .banco import agora, conectar, padrao_de_busca, texto_de_busca
+from .banco import agora, conectar, migrar_para_utc, padrao_de_busca, texto_de_busca
 
 LOGGER = logging.getLogger("pip_boy.historico")
 
@@ -148,6 +148,10 @@ class HistoricoStore:
                     self._connection.commit()
                     if (tabela, coluna) == ("falas", "busca"):
                         self._recarregar_busca()
+            migrar_para_utc(
+                self._connection,
+                (("sessoes", ("iniciada_em",)), ("falas", ("quando",))),
+            )
 
     def _recarregar_busca(self) -> None:
         """Dobra as falas de um histórico gravado antes da coluna de busca existir.
@@ -219,9 +223,11 @@ class HistoricoStore:
         """
         if dias <= 0:
             return 0
-        limite = (
-            datetime.now(timezone.utc).astimezone() - timedelta(days=dias)
-        ).isoformat(timespec="seconds")
+        # Em UTC, como os carimbos gravados: comparar uma data local com uma
+        # coluna em UTC erraria a poda pelo tamanho do deslocamento.
+        limite = (datetime.now(timezone.utc) - timedelta(days=dias)).isoformat(
+            timespec="seconds"
+        )
         with self._lock:
             cursor = self._connection.execute(
                 "DELETE FROM sessoes WHERE iniciada_em < ?", (limite,)
@@ -252,7 +258,13 @@ class HistoricoStore:
     # quantos dias seguidos eu não deixo isto morrer?"
 
     def marcar_atividade(self, dia: str | None = None) -> None:
-        """Registra que hoje (ou o dia dado, AAAA-MM-DD) teve estudo."""
+        """Registra que hoje (ou o dia dado, AAAA-MM-DD) teve estudo.
+
+        O dia é LOCAL, e é a única data do programa que não virou UTC: a
+        sequência conta os dias de quem estuda, não os de Greenwich. Quem
+        estuda às 22h de um sábado em São Paulo estudou no sábado, e não no
+        domingo que já começou em Londres.
+        """
         alvo = dia or datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d")
         with self._lock:
             self._connection.execute(
