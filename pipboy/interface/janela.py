@@ -22,7 +22,6 @@ from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import (
     QEasingCurve,
-    QElapsedTimer,
     QEvent,
     QPropertyAnimation,
     Qt,
@@ -32,9 +31,7 @@ from PySide6.QtGui import (
     QFont,
     QFontDatabase,
     QFontMetrics,
-    QKeySequence,
     QPainter,
-    QShortcut,
 )
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -50,7 +47,6 @@ from ..config import (
 )
 from ..constants import (
     SHUTDOWN_TIMEOUT_SECONDS,
-    UI_POLL_INTERVAL_MS,
 )
 from ..events import Tag, UiEvent, UiEventKind
 from ..historico import HistoricoStore
@@ -67,6 +63,7 @@ from ..profiles import (
 from ..themes import GameTheme, paleta_de, theme_for
 from ..vocabulary import VocabularyStore
 from . import montagem
+from .atalhos import Atalhos, globais_disponiveis
 from .atmosfera import Cenario, atmosfera_de
 from .caderno import JanelaCaderno
 from .componentes import (
@@ -92,6 +89,7 @@ from .montagem import (
     NIVEIS_GANHO_JOGO,
 )
 from .preferencias import Escolha, Marca, VinculoDePreferencias
+from .relogios import Batidas, Relogios
 
 if TYPE_CHECKING:  # pragma: no cover
     # O módulo de áudio puxa o PyAudio, que custa 175 ms para importar. Ele não
@@ -101,12 +99,6 @@ if TYPE_CHECKING:  # pragma: no cover
     from ..session import LiveSessionWorker
 
 LOGGER = logging.getLogger("pip_boy.interface")
-
-
-try:
-    import keyboard
-except ImportError:  # pragma: no cover
-    keyboard = None
 
 
 FONTES_MONO: tuple[str, ...] = ("Cascadia Mono", "Consolas", "Courier New", "Courier")
@@ -159,7 +151,6 @@ class Janela(QWidget):
         self._contador_sessoes = 0
         self._encerrando = False
         self._prazo_encerramento = 0.0
-        self._atalhos_globais: list[Any] = []
         # Falhas de escrita já anunciadas nesta execução. Ver _falha_de_gravacao.
         self._falhas_anunciadas: set[str] = set()
         self._inicio_sessao = 0.0
@@ -189,9 +180,6 @@ class Janela(QWidget):
         self._mono = self._primeira_instalada(FONTES_MONO)
 
         self._cenario = Cenario()
-        self._cronometro = QElapsedTimer()
-        self._cronometro.start()
-        self._ultimo_quadro = 0.0
 
         self._entradas: list[Device] = []
         self._saidas: list[Device] = []
@@ -212,7 +200,18 @@ class Janela(QWidget):
         self._campainha = Campainha(self)
         # Os relógios vêm antes das preferências: aplicar a preferência de
         # atmosfera já mexe no relógio de quadros.
-        self._iniciar_relogios()
+        self._relogios = Relogios(
+            self,
+            Batidas(
+                drenar_eventos=self._drenar_eventos,
+                atualizar_medidor=self._atualizar_medidor,
+                atualizar_meta=self._atualizar_meta,
+                avancar_cenario=self._avancar_cenario,
+                sondar_jogo=self._sondar_jogo,
+                deve_animar=self._deve_animar,
+            ),
+        )
+        self._relogios.iniciar()
         self._aplicar_preferencias()
         self._aplicar_tema()
         self._registrar_atalhos()
@@ -240,7 +239,7 @@ class Janela(QWidget):
                 "jogo' na coluna ao lado — a escolha fica gravada.",
                 Tag.SISTEMA,
             )
-        if keyboard is not None and configuration.global_hotkeys_enabled:
+        if globais_disponiveis() and configuration.global_hotkeys_enabled:
             self._registrar(
                 f"Atalhos globais: {configuration.hotkey_toggle} iniciar/parar · "
                 f"{configuration.hotkey_mute} mudo · "
@@ -578,7 +577,7 @@ class Janela(QWidget):
             self._sobreposicao.update()
         # O ambiente novo pode ter camadas vivas onde o anterior não tinha (ou
         # o contrário): o relógio de quadros precisa ser reavaliado na troca.
-        self._sincronizar_animacao()
+        self._relogios.sincronizar_animacao()
         self.update()
 
     def _aplicar_fontes(self) -> None:
@@ -634,7 +633,7 @@ class Janela(QWidget):
         self._intensidade_atmosfera = NIVEIS_ATMOSFERA.get(escolha, 1.0)
         self._cenario.definir_intensidade(self._intensidade_atmosfera)
         self._cenario.movimento = self._intensidade_atmosfera > 0.0
-        self._sincronizar_animacao()
+        self._relogios.sincronizar_animacao()
         # O controle é de ACESSIBILIDADE, não de gosto: quem o baixa por causa
         # de cintilação ou baixa visão precisa que ele valha em toda superfície
         # do programa. O caderno tem cenário próprio (sem relógio de quadros) e
@@ -669,38 +668,10 @@ class Janela(QWidget):
 
         threading.Thread(target=carregar, name="preload-sdk", daemon=True).start()
 
-    def _sincronizar_animacao(self) -> None:
-        """Liga o relógio de quadros só quando ele tem para quem desenhar.
-
-        Este programa foi feito para ficar aberto ATRÁS de um jogo, e o relógio
-        nunca olhava se a janela estava visível: minimizado, ele seguia
-        repintando a sobreposição — grão, varredura e partículas sobre a área
-        inteira — trinta vezes por segundo, disputando CPU justamente com o
-        jogo que o usuário está jogando. A atmosfera é enfeite; quadro que
-        ninguém vê é só calor.
-        """
-        deve_animar = (
-            self._intensidade_atmosfera > 0.0
-            # Dois dos dez ambientes não têm partícula, tremulação nem
-            # interferência: para eles o relógio repintava a mesma imagem
-            # trinta vezes por segundo, para sempre, sem um pixel de diferença.
-            and self._cenario.tem_camada_viva
-            and self.isVisible()
-            and not self.isMinimized()
-        )
-        if deve_animar:
-            if not self._quadros.isActive():
-                # Recomeça o relógio do zero: sem isto o primeiro dt depois de
-                # restaurar a janela seria o tempo inteiro que ela passou oculta.
-                self._ultimo_quadro = self._cronometro.elapsed() / 1000.0
-                self._quadros.start(33)
-        else:
-            self._quadros.stop()
-
     def changeEvent(self, evento: Any) -> None:
         super().changeEvent(evento)
         if evento.type() == QEvent.Type.WindowStateChange:
-            self._sincronizar_animacao()
+            self._relogios.sincronizar_animacao()
             if hasattr(self, "barra_titulo"):
                 self.barra_titulo.sincronizar_estado()
             if hasattr(self, "_grips"):
@@ -712,11 +683,11 @@ class Janela(QWidget):
 
     def hideEvent(self, evento: Any) -> None:
         super().hideEvent(evento)
-        self._sincronizar_animacao()
+        self._relogios.sincronizar_animacao()
 
     def showEvent(self, evento: Any) -> None:
         super().showEvent(evento)
-        self._sincronizar_animacao()
+        self._relogios.sincronizar_animacao()
         # Cantos arredondados e sombra do Windows 11: o DWM precisa do winId,
         # que só existe com a janela criada — daí ficar aqui e não no arranque.
         aplicar_cantos_do_sistema(self)
@@ -767,47 +738,32 @@ class Janela(QWidget):
 
     # --------------------------------------------------------------- Relógios
 
-    def _iniciar_relogios(self) -> None:
-        # Fila de eventos da sessão. Mesmo intervalo da versão anterior.
-        self._bomba = QTimer(self)
-        self._bomba.timeout.connect(self._drenar_eventos)
-        self._bomba.start(UI_POLL_INTERVAL_MS)
+    def _deve_animar(self) -> bool:
+        """A atmosfera tem para quem desenhar agora?
 
-        # Medidor de nível: precisa acompanhar a fala, não o relógio. Só corre
-        # durante a sessão — fora dela leria zero dezesseis vezes por segundo.
-        self._pulso = QTimer(self)
-        self._pulso.timeout.connect(self._atualizar_medidor)
+        A política de parada mora aqui, e não em ``relogios.py``, porque as
+        três razões para parar são estado DESTA janela: o jogador desligou a
+        atmosfera, o ambiente escolhido não tem camada viva alguma (dois dos
+        dez não têm), ou a janela não está à vista — minimizada, o relógio
+        repintava trinta vezes por segundo disputando CPU com o jogo.
+        """
+        return (
+            self._intensidade_atmosfera > 0.0
+            and self._cenario.tem_camada_viva
+            and self.isVisible()
+            and not self.isMinimized()
+        )
 
-        # Relógio e consumo da sessão.
-        self._tique = QTimer(self)
-        self._tique.timeout.connect(self._atualizar_meta)
-        self._tique.start(500)
+    def _avancar_cenario(self, passo: float) -> None:
+        """Avança a animação e pede de volta só o que mudou.
 
-        # Animação do cenário. 33 ms ≈ 30 quadros por segundo, que basta para
-        # partícula e tremulação e deixa folga de CPU para o áudio.
-        self._quadros = QTimer(self)
-        self._quadros.timeout.connect(self._quadro_cenario)
-        self._quadros.start(33)
-
-        # Sonda de jogo: meio minuto entre olhadas é rápido o bastante para
-        # quem acabou de abrir o jogo e lento o bastante para ninguém notar.
-        self._sonda_jogo = QTimer(self)
-        self._sonda_jogo.timeout.connect(self._sondar_jogo)
-        self._sonda_jogo.start(30_000)
-        QTimer.singleShot(1_500, self._sondar_jogo)  # e uma olhada logo ao abrir
-
-    def _quadro_cenario(self) -> None:
-        agora = self._cronometro.elapsed() / 1000.0
-        # O passo é limitado: se a janela ficou minimizada por um minuto, a
-        # diferença acumulada teleportaria toda partícula para fora da tela.
-        dt = min(0.1, max(0.0, agora - self._ultimo_quadro))
-        self._ultimo_quadro = agora
-        self._cenario.avancar(dt)
-        # Só o que mudou. Repintar a janela inteira para mexer alguns pontos de
-        # luz custava, medido em 1920×1032, entre 1,8 e 2,2 ms por quadro — de
-        # 5 a 7% de um núcleo, permanentes, num programa feito para ficar
-        # aberto atrás de um jogo. ``None`` é o pedido explícito do quadro
-        # cheio, que a tremulação do tubo continua fazendo.
+        Repintar a janela inteira para mexer alguns pontos de luz custava,
+        medido em 1920×1032, entre 1,8 e 2,2 ms por quadro — de 5 a 7% de um
+        núcleo, permanentes, num programa feito para ficar aberto atrás de um
+        jogo. ``None`` é o pedido explícito do quadro cheio, que a tremulação
+        do tubo continua fazendo.
+        """
+        self._cenario.avancar(passo)
         regiao = self._cenario.regiao_suja()
         if regiao is None:
             self._sobreposicao.update()
@@ -1037,10 +993,7 @@ class Janela(QWidget):
         )
         self.botao_acao.setEnabled(not (ativa and not pode_parar))
         self.botao_mudo.setEnabled(ativa)
-        if ativa and not self._pulso.isActive():
-            self._pulso.start(60)
-        elif not ativa and self._pulso.isActive():
-            self._pulso.stop()
+        self._relogios.medir_entrada(ativa)
         self._atualizar_medidor()
 
     # ----------------------------------------------------------- Preferências
@@ -1108,69 +1061,40 @@ class Janela(QWidget):
     # --------------------------------------------------------------- Atalhos
 
     def _registrar_atalhos(self) -> None:
-        # Atalhos locais (janela em foco). F12/Esc só valem aqui.
-        QShortcut(QKeySequence("F12"), self, activated=self.alternar_sessao)
-        QShortcut(QKeySequence("Escape"), self, activated=self.encerrar_sessao)
-        QShortcut(QKeySequence("Ctrl+B"), self, activated=self.abrir_caderno)
-        QShortcut(QKeySequence("Ctrl+H"), self, activated=self.abrir_historico)
-        QShortcut(QKeySequence("Ctrl+R"), self, activated=self.revisar_agora)
-        QShortcut(QKeySequence("Ctrl+M"), self, activated=self.entrar_modo_compacto)
-        # Uma função, e não uma lambda devolvendo tupla: aquela existia só para
-        # espremer dois efeitos numa expressão, e o mypy passou a reclamar dela
-        # assim que a montagem deu tipo declarado ao campo de texto.
+        """Monta a tabela de atalhos e manda instalar.
+
+        Esc e F12 ficam de fora dos globais de propósito: sequestrá-las no
+        sistema inteiro quebraria o menu de pausa do jogo, que é exatamente
+        onde este programa é usado.
+        """
         def focar_entrada() -> None:
             self.entrada_texto.setFocus()
             self.entrada_texto.selectAll()
 
-        QShortcut(QKeySequence("Ctrl+L"), self, activated=focar_entrada)
-
-        if keyboard is None or not self._configuration.global_hotkeys_enabled:
-            self._registrar(
-                "Atalhos globais desativados; use F12/Esc com a janela em foco.", Tag.SISTEMA
-            )
-            return
-
-        # Deliberadamente NÃO registramos Esc nem F12 globalmente: sequestrar
-        # essas teclas no sistema inteiro quebra o menu de pausa do jogo — o
-        # exato contexto em que este programa é usado.
-        # Lista de pares, não dicionário. Chaveado pela COMBINAÇÃO, dois atalhos
-        # configurados com a mesma tecla no .env colapsavam em um só antes de
-        # qualquer código rodar — o segundo simplesmente não existia, sem erro,
-        # sem aviso, e a tecla fazia a coisa errada para sempre.
-        mapa = (
-            (self._configuration.hotkey_toggle, UiEventKind.START_REQUEST),
-            (self._configuration.hotkey_mute, UiEventKind.TOGGLE_MUTE_REQUEST),
-            (self._configuration.hotkey_game_audio, UiEventKind.TOGGLE_GAME_AUDIO_REQUEST),
+        self._atalhos = Atalhos(
+            self,
+            locais={
+                "F12": self.alternar_sessao,
+                "Escape": self.encerrar_sessao,
+                "Ctrl+B": self.abrir_caderno,
+                "Ctrl+H": self.abrir_historico,
+                "Ctrl+R": self.revisar_agora,
+                "Ctrl+M": self.entrar_modo_compacto,
+                "Ctrl+L": focar_entrada,
+            },
+            # Pares, e não um dicionário: chaveado pela combinação, dois
+            # atalhos com a mesma tecla no .env colapsariam num só antes de
+            # qualquer código rodar. Ver atalhos.resolver_globais.
+            globais=(
+                (self._configuration.hotkey_toggle, UiEventKind.START_REQUEST),
+                (self._configuration.hotkey_mute, UiEventKind.TOGGLE_MUTE_REQUEST),
+                (self._configuration.hotkey_game_audio, UiEventKind.TOGGLE_GAME_AUDIO_REQUEST),
+            ),
+            globais_ligados=self._configuration.global_hotkeys_enabled,
+            publicar=self._eventos.put,
+            avisar=lambda texto: self._registrar(texto, Tag.SISTEMA),
         )
-        ja_usadas: set[str] = set()
-        for combinacao, tipo in mapa:
-            if not combinacao:
-                continue
-            if combinacao in ja_usadas:
-                self._registrar(
-                    f"Atalho global {combinacao} está repetido no .env; a segunda "
-                    "atribuição foi ignorada.",
-                    Tag.SISTEMA,
-                )
-                continue
-            ja_usadas.add(combinacao)
-            try:
-                self._atalhos_globais.append(
-                    keyboard.add_hotkey(
-                        combinacao, lambda t=tipo: self._eventos.put(UiEvent(t))
-                    )
-                )
-            except Exception:
-                LOGGER.warning("Não foi possível registrar %s.", combinacao, exc_info=True)
-                self._registrar(f"Atalho global {combinacao} indisponível.", Tag.SISTEMA)
-
-    def _remover_atalhos(self) -> None:
-        if keyboard is None:
-            return
-        for handle in self._atalhos_globais:
-            with contextlib.suppress(Exception):
-                keyboard.remove_hotkey(handle)
-        self._atalhos_globais.clear()
+        self._atalhos.instalar()
 
     # ----------------------------------------------------------------- Ações
 
@@ -1516,7 +1440,7 @@ class Janela(QWidget):
         if not self._encerrando:
             self._preferencias.salvar()
         self._encerrando = True
-        self._remover_atalhos()
+        self._atalhos.remover()
         # O visualizador do caderno consulta o banco a cada repintura. Fechá-lo
         # ANTES de fechar a conexão evita que uma janela sobrevivente tente ler
         # de um sqlite3 já encerrado.

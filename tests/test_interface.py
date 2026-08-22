@@ -152,11 +152,11 @@ def main() -> int:
     janela._trocar_jogo("Genérico / Outro")
     aplicacao.processEvents()
     checar(not janela._cenario.tem_camada_viva, "ambiente sem partícula não tem camada viva")
-    checar(not janela._quadros.isActive(), "e o relógio de quadros nem corre")
+    checar(not janela._relogios.animando, "e o relógio de quadros nem corre")
     janela._trocar_jogo("Elden Ring")
     aplicacao.processEvents()
     checar(janela._cenario.tem_camada_viva, "ambiente com partículas tem camada viva")
-    checar(janela._quadros.isActive(), "e o relógio volta a correr")
+    checar(janela._relogios.animando, "e o relógio volta a correr")
     janela._cenario.avancar(1 / 30)
     regiao = janela._cenario.regiao_suja()
     checar(regiao is not None and not regiao.isEmpty(), "as partículas pedem uma região")
@@ -421,6 +421,35 @@ def main() -> int:
     QTimer.singleShot(120, _fechar_modal)
     janela.revisar_agora()
     checar(True, "Ctrl+R abre a revisão direto, sem passar pelo caderno")
+
+    # O que a chamada direta acima NÃO prova é que a TECLA chega ao método. Os
+    # QShortcut nascem em atalhos.py e ficam presos à janela; aqui se pergunta
+    # à própria janela quais ela tem, e se um deles de fato dispara a ação.
+    # Só filhos DIRETOS: as janelas satélites têm atalhos próprios, e eles não
+    # são desta lista.
+    from PySide6.QtGui import QShortcut
+
+    instalados = {
+        a.key().toString()
+        for a in janela.findChildren(QShortcut, options=Qt.FindChildOption.FindDirectChildrenOnly)
+    }
+    checar(
+        instalados == {"F12", "Esc", "Ctrl+B", "Ctrl+H", "Ctrl+R", "Ctrl+M", "Ctrl+L"},
+        f"os sete atalhos locais estão instalados ({sorted(instalados)})",
+    )
+    janela.conversa.setFocus()
+    aplicacao.processEvents()
+    atalho_l = next(
+        a
+        for a in janela.findChildren(QShortcut, options=Qt.FindChildOption.FindDirectChildrenOnly)
+        if a.key().toString() == "Ctrl+L"
+    )
+    atalho_l.activated.emit()
+    aplicacao.processEvents()
+    checar(
+        janela.focusWidget() is janela.entrada_texto,
+        "e disparar Ctrl+L leva mesmo o cursor ao campo de texto",
+    )
 
     print("modo compacto")
     janela.entrar_modo_compacto()
