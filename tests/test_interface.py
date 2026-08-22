@@ -16,6 +16,7 @@ defeito que os testes do núcleo, de propósito, nunca veem.
 from __future__ import annotations
 
 import os
+import queue
 import sys
 import tempfile
 from pathlib import Path
@@ -88,6 +89,94 @@ def main() -> int:
     aplicacao.processEvents()
     checar(janela.isVisible(), "a janela principal constrói e aparece")
     checar(janela.barra_titulo.height() > 0, "a barra de título tem altura")
+
+    print("dispositivos por thread")
+    # A enumeração de áudio saiu do construtor (custava ~300 ms com a tela em
+    # branco) e volta pela fila de eventos. O que se testa aqui é o RETORNO:
+    # dispositivos sintéticos, sem tocar no hardware de quem roda a suíte.
+    #
+    # E a thread REAL continua correndo enquanto isto roda. Ela entrega a lista
+    # desta máquina quando ficar pronta — inclusive no meio deste bloco, por
+    # cima da lista sintética. Não é hipótese: o mesmo commit passou numa
+    # execução do CI e reprovou na seguinte, e a diferença foi o instante em
+    # que a thread respondeu. Por isso a fila é esvaziada, o estado é forçado
+    # ao conhecido, e o laço de eventos não roda até a última pergunta — um
+    # evento que chegue atrasado fica na fila sem atrapalhar ninguém.
+    from pipboy.audio import Device
+
+    while True:
+        try:
+            janela._eventos.get_nowait()
+        except queue.Empty:
+            break
+    janela._dispositivos_prontos(([], [], None))
+
+    checar(
+        janela.campo_entrada.count() == 1 and janela.campo_entrada.itemText(0).startswith("Padrão"),
+        "sem lista, a caixa oferece só 'Padrão do sistema' — que já é resposta completa",
+    )
+    checar(not janela.chip_jogo.isEnabled(), "e sem loopback conhecido 'Ouvir o jogo' fica inerte")
+    janela._prefs.dispositivo_entrada = "9: Microfone de Teste"
+    janela._dispositivos_prontos(
+        (
+            [Device(9, "Microfone de Teste", 1, 48_000)],
+            [Device(4, "Saída de Teste", 2, 48_000)],
+            Device(7, "Loopback de Teste", 2, 48_000, is_loopback=True),
+        )
+    )
+    checar(janela.campo_entrada.count() == 2, "a lista de microfones chega depois e entra na caixa")
+    checar(
+        janela.campo_entrada.currentText() == "9: Microfone de Teste",
+        f"e a preferência gravada é reoferecida ({janela.campo_entrada.currentText()})",
+    )
+    checar(janela.chip_jogo.isEnabled(), "com loopback, o chip do jogo é habilitado")
+    checar(
+        janela._indice_dispositivo(janela.campo_entrada, janela._entradas) == 9,
+        "e o índice do dispositivo escolhido chega à sessão",
+    )
+
+    print("relógio de quadros")
+    # Repintar a janela inteira a 30 quadros por segundo custa de 5 a 7% de um
+    # núcleo. Dois ambientes não têm camada viva alguma, e para eles o relógio
+    # não deve nem correr; nos demais, só a região das partículas é pedida.
+    #
+    # A atmosfera é FIXADA em Completa aqui, e não herdada. O padrão dela sai
+    # da preferência de animação do Windows, que numa máquina (ou num runner
+    # de CI) com "efeitos de animação" desligado nasce Desligada — e aí não há
+    # partícula, nem relógio, nem região, e estas checagens passariam a testar
+    # o computador de quem as roda em vez do código. Foi exatamente assim que
+    # elas passaram aqui e reprovaram no CI.
+    atmosfera_anterior = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    aplicacao.processEvents()
+    janela._trocar_jogo("Genérico / Outro")
+    aplicacao.processEvents()
+    checar(not janela._cenario.tem_camada_viva, "ambiente sem partícula não tem camada viva")
+    checar(not janela._quadros.isActive(), "e o relógio de quadros nem corre")
+    janela._trocar_jogo("Elden Ring")
+    aplicacao.processEvents()
+    checar(janela._cenario.tem_camada_viva, "ambiente com partículas tem camada viva")
+    checar(janela._quadros.isActive(), "e o relógio volta a correr")
+    janela._cenario.avancar(1 / 30)
+    regiao = janela._cenario.regiao_suja()
+    checar(regiao is not None and not regiao.isEmpty(), "as partículas pedem uma região")
+    assert regiao is not None
+    # A QRegion do PySide6 não expõe rects(), mas é percorrível.
+    area_regiao = sum(r.width() * r.height() for r in regiao)
+    area_janela = janela.width() * janela.height()
+    checar(
+        area_regiao < area_janela * 0.5,
+        f"e ela é MENOR que a janela ({area_regiao} de {area_janela} pixels)",
+    )
+    janela._trocar_jogo("Fallout")
+    aplicacao.processEvents()
+    janela._cenario.avancar(1 / 30)
+    checar(
+        janela._cenario.regiao_suja() is None,
+        "a tremulação do tubo continua pedindo o quadro cheio",
+    )
+    janela.campo_atmosfera.setCurrentText(atmosfera_anterior)
+    aplicacao.processEvents()
 
     print("os dez temas")
     for nome in TEMAS:
@@ -420,7 +509,7 @@ def main() -> int:
     janela.campo_tamanho_texto.setCurrentText(ESCALA_TEXTO_PADRAO)
     aplicacao.processEvents()
     checar(janela.fonte("corpo").pointSize() == antes_corpo, "e volta ao padrão")
-    janela._salvar_preferencias()
+    janela._preferencias.salvar()
     checar(
         janela._prefs.extras.get("tamanho_texto") == ESCALA_TEXTO_PADRAO,
         "a escolha é persistida junto das outras preferências",

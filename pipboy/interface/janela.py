@@ -49,7 +49,6 @@ from PySide6.QtWidgets import (
 )
 
 from .. import design
-from ..audio import HAS_LOOPBACK_SUPPORT, Device, list_devices
 from ..config import (
     AppConfiguration,
     Preferences,
@@ -87,20 +86,34 @@ from .componentes import (
     Pilula,
     RotuloElidido,
     TransicaoDeTema,
-    css_campo_selecao,
 )
 from .conversa import Conversa
 from .dialogo import avisar
+from .estilo import folha_da_janela
 from .moldura import (
     BarraDeTitulo,
     GripsRedimensionamento,
     aplicar_cantos_do_sistema,
 )
+from .preferencias import Escolha, Marca, VinculoDePreferencias
 
 if TYPE_CHECKING:  # pragma: no cover
+    # O módulo de áudio puxa o PyAudio, que custa 175 ms para importar. Ele não
+    # entra no caminho da abertura: só o nome do tipo é preciso aqui, e com
+    # ``from __future__ import annotations`` isso não custa import nenhum.
+    from ..audio import Device
     from ..session import LiveSessionWorker
 
 LOGGER = logging.getLogger("pip_boy.interface")
+
+# Dicas do chip 'Ouvir o jogo'. Ele nasce sem saber se existe loopback — a
+# enumeração de dispositivos roda numa thread — e troca de dica quando sabe.
+DICA_OUVIR_O_JOGO = (
+    "Envia também o áudio que sai do seu computador, para você poder perguntar "
+    "“o que ele acabou de dizer?”. Precisa ser marcado ANTES de iniciar. "
+    "A voz do próprio assistente é descartada dessa captura automaticamente."
+)
+DICA_SEM_LOOPBACK = "Indisponível: exige Windows com WASAPI e o pacote PyAudioWPatch."
 
 try:
     import keyboard
@@ -137,17 +150,6 @@ NIVEIS_GANHO_JOGO: dict[str, float] = {
     "Baixo": 0.25,
 }
 GANHO_JOGO_PADRAO = "Médio"
-
-
-def _rgba(cor: str, alfa: float) -> str:
-    """Converte '#rrggbb' na notação rgba() do Qt, com opacidade.
-
-    A folha de estilo precisa disto para que as superfícies deixem o cenário
-    aparecer por trás — sem opacidade não há atmosfera, só um fundo tapado.
-    """
-    valor = cor.lstrip("#")
-    r, g, b = (int(valor[i : i + 2], 16) for i in (0, 2, 4))
-    return f"rgba({r}, {g}, {b}, {alfa:.3f})"
 
 
 class Sobreposicao(QWidget):
@@ -289,11 +291,54 @@ class Janela(QWidget):
     # ------------------------------------------------------------ Dispositivos
 
     def _carregar_dispositivos(self) -> None:
-        try:
-            self._entradas, self._saidas, self._loopback = list_devices()
-        except Exception:
-            LOGGER.exception("Falha ao listar dispositivos de áudio.")
-            self._entradas, self._saidas, self._loopback = [], [], None
+        """Enumera os dispositivos de áudio numa thread, fora do arranque.
+
+        Medido nesta máquina, com cache quente: importar o módulo de áudio
+        (que puxa o PyAudio) custa 175 ms e enumerar custa outros 122 ms —
+        praticamente trezentos milissegundos com a tela em branco, antes de a
+        janela existir. É o mesmo problema que o SDK do Gemini já teve, e a
+        resposta é a mesma que ``_aquecer_sessao`` deu a ele: sair do caminho
+        da abertura e voltar pela fila de eventos quando estiver pronto.
+
+        As duas caixas nascem com "Padrão do sistema" — que é uma opção
+        legítima, e não um espaço reservado — e ganham o resto ao chegar. Quem
+        clicar em INICIAR antes disso abre a sessão nos aparelhos padrão do
+        Windows, exatamente como quem nunca mexeu nas caixas.
+        """
+
+        def trabalho() -> None:
+            try:
+                from ..audio import list_devices
+
+                achados = list_devices()
+            except Exception:
+                LOGGER.exception("Falha ao listar dispositivos de áudio.")
+                return
+            self._eventos.put(UiEvent(UiEventKind.DEVICES_READY, payload=achados))
+
+        threading.Thread(target=trabalho, name="listar-dispositivos", daemon=True).start()
+
+    def _dispositivos_prontos(self, achados: Any) -> None:
+        """Recebe a lista da thread e recompõe o que dependia dela."""
+        self._entradas, self._saidas, self._loopback = achados
+        for campo, lista, destino in (
+            (self.campo_entrada, self._entradas, "dispositivo_entrada"),
+            (self.campo_saida, self._saidas, "dispositivo_saida"),
+        ):
+            escolhido = campo.currentText()
+            campo.blockSignals(True)
+            campo.clear()
+            campo.addItems(["Padrão do sistema"] + [d.label for d in lista])
+            campo.setCurrentText(escolhido)
+            campo.blockSignals(False)
+            self._preferencias.reaplicar(destino)
+        tem_loopback = self._loopback is not None
+        self.chip_jogo.setEnabled(tem_loopback and self._worker is None)
+        self.chip_jogo.setToolTip(
+            DICA_OUVIR_O_JOGO if tem_loopback else DICA_SEM_LOOPBACK
+        )
+        if tem_loopback:
+            self._preferencias.reaplicar("ouvir_jogo")
 
     def _indice_dispositivo(self, campo: CampoSelecao, lista: list[Device]) -> int | None:
         rotulo = campo.currentText()
@@ -589,6 +634,9 @@ class Janela(QWidget):
 
         coluna.addSpacing(4)
         secao("Áudio")
+        # As duas listas chegam pela thread de enumeração (ver
+        # _carregar_dispositivos); "Padrão do sistema" já é resposta completa
+        # para quem não quer escolher aparelho nenhum.
         self.campo_entrada = campo(
             "entrada", "Microfone", ["Padrão do sistema"] + [d.label for d in self._entradas],
             "Só pode ser trocado com a sessão parada.",
@@ -618,13 +666,9 @@ class Janela(QWidget):
             "Deixa o modelo consultar a web antes de responder. Reduz invenção sobre "
             "lore e patches, ao custo de latência."
         )
-        self.chip_jogo.setToolTip(
-            "Envia também o áudio que sai do seu computador, para você poder perguntar "
-            "“o que ele acabou de dizer?”. Precisa ser marcado ANTES de iniciar. "
-            "A voz do próprio assistente é descartada dessa captura automaticamente."
-            if HAS_LOOPBACK_SUPPORT and self._loopback
-            else "Indisponível: exige Windows com WASAPI e o pacote PyAudioWPatch."
-        )
+        # A lista de dispositivos ainda não voltou da thread; até ela chegar, o
+        # chip diz o que é verdade agora — não há loopback conhecido.
+        self.chip_jogo.setToolTip(DICA_SEM_LOOPBACK)
         for chip in (self.chip_alto_falante, self.chip_jogo, self.chip_busca):
             chip.setCheckable(True)
             chip.setFont(self.fonte("legenda"))
@@ -633,7 +677,7 @@ class Janela(QWidget):
             chip.setFixedHeight(33)
             coluna.addWidget(chip)
             coluna.addSpacing(5)
-        self.chip_jogo.setEnabled(bool(HAS_LOOPBACK_SUPPORT and self._loopback))
+        self.chip_jogo.setEnabled(self._loopback is not None)
         self.chip_jogo.toggled.connect(self._alternar_audio_do_jogo)
 
         coluna.addSpacing(4)
@@ -826,7 +870,7 @@ class Janela(QWidget):
             # Na cor do tema competiria com as barras vivas, que são o dado.
             limiar=t.text_muted,
         )
-        self.setStyleSheet(self._folha())
+        self.setStyleSheet(folha_da_janela(self._tema, self._atmosfera.forma))
         self._posicionar_veu()
         for campo in self.campos.values():
             campo.definir_cor_seta(t.text_muted)
@@ -836,6 +880,14 @@ class Janela(QWidget):
             self._capsula.aplicar_tema()
         if hasattr(self, "_sobreposicao"):
             self._sobreposicao.raise_()
+            # O quadro cheio é obrigatório aqui: o vidro e o fundo do tema
+            # novo cobrem a janela inteira, e a repintura por região só sabe
+            # das camadas VIVAS. Sem isto, trocar de jogo deixaria a
+            # atmosfera antiga na tela até a próxima partícula passar por cima.
+            self._sobreposicao.update()
+        # O ambiente novo pode ter camadas vivas onde o anterior não tinha (ou
+        # o contrário): o relógio de quadros precisa ser reavaliado na troca.
+        self._sincronizar_animacao()
         self.update()
 
     def _aplicar_fontes(self) -> None:
@@ -886,56 +938,6 @@ class Janela(QWidget):
         for satelite in (self._caderno, self._visor_historico, self._capsula):
             if satelite is not None:
                 satelite.aplicar_tema()
-
-    def _folha(self) -> str:
-        """Folha de estilo derivada do tema — o equivalente ao repintar."""
-        t = self._tema
-        raio = {"chanfrada": 3, "reta": 2}.get(self._atmosfera.forma, 8)
-        return f"""
-        QWidget {{ color: {t.primary}; }}
-        #lateral, #rolagemLateral, #colunaLateral, #rodapeLateral {{
-            background: {_rgba(t.surface, 0.90)};
-        }}
-        #colunaLateral {{ border-right: 1px solid {t.border}; }}
-        /* O caderno é ancorado; o fio o separa dos ajustes que rolam por trás. */
-        #rodapeLateral {{ border-top: 1px solid {t.border}; }}
-        /* O palco é transparente de propósito: o que aparece atrás dele é o
-           cenário pintado por paintEvent. */
-        #palco {{ background: transparent; }}
-
-        #marca    {{ color: {t.primary}; }}
-        #submarca {{ color: {t.text_muted}; }}
-        #secao    {{ color: {t.text_muted}; letter-spacing: 1px; }}
-        #rotuloCampo, #meta {{ color: {t.text_muted}; }}
-        #regua    {{ background: {t.border}; }}
-        #caderno  {{ color: {t.info_text}; }}
-
-        {css_campo_selecao(t, raio, _rgba)}
-
-        /* Translúcido para a atmosfera atravessar a superfície da conversa —
-           é o que dá profundidade sem competir com a leitura. O raio acompanha
-           a forma do tema: um painel de canto redondo no meio de uma interface
-           chanfrada é a única peça que denuncia que o tema é uma camada de
-           tinta, e não o material da janela. */
-        #conversa, #fundoConversa {{
-            background: {_rgba(t.surface, 0.62)}; border-radius: {raio + 4}px;
-        }}
-        QScrollArea {{ border: none; }}
-        QScrollBar:vertical {{ background: transparent; width: 10px; margin: 6px 2px; }}
-        QScrollBar::handle:vertical {{
-            background: {t.border}; border-radius: 4px; min-height: 40px;
-        }}
-        QScrollBar::handle:vertical:hover {{ background: {t.border_forte}; }}
-        QScrollBar::add-line, QScrollBar::sub-line {{ height: 0px; }}
-        QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
-
-        QLineEdit#entrada {{
-            background: {_rgba(t.surface_alta, 0.92)}; color: {t.primary};
-            border: 1px solid transparent; border-radius: {raio + 2}px;
-            padding: 12px 14px; selection-background-color: {t.selection};
-        }}
-        QLineEdit#entrada:focus {{ border-color: {t.border_forte}; }}
-        """
 
     def _ajustar_atmosfera(self, escolha: str) -> None:
         self._intensidade_atmosfera = NIVEIS_ATMOSFERA.get(escolha, 1.0)
@@ -988,6 +990,10 @@ class Janela(QWidget):
         """
         deve_animar = (
             self._intensidade_atmosfera > 0.0
+            # Dois dos dez ambientes não têm partícula, tremulação nem
+            # interferência: para eles o relógio repintava a mesma imagem
+            # trinta vezes por segundo, para sempre, sem um pixel de diferença.
+            and self._cenario.tem_camada_viva
             and self.isVisible()
             and not self.isMinimized()
         )
@@ -1106,7 +1112,16 @@ class Janela(QWidget):
         dt = min(0.1, max(0.0, agora - self._ultimo_quadro))
         self._ultimo_quadro = agora
         self._cenario.avancar(dt)
-        self._sobreposicao.update()
+        # Só o que mudou. Repintar a janela inteira para mexer alguns pontos de
+        # luz custava, medido em 1920×1032, entre 1,8 e 2,2 ms por quadro — de
+        # 5 a 7% de um núcleo, permanentes, num programa feito para ficar
+        # aberto atrás de um jogo. ``None`` é o pedido explícito do quadro
+        # cheio, que a tremulação do tubo continua fazendo.
+        regiao = self._cenario.regiao_suja()
+        if regiao is None:
+            self._sobreposicao.update()
+        elif not regiao.isEmpty():
+            self._sobreposicao.update(regiao)
 
     def _atualizar_medidor(self) -> None:
         self.medidor.definir_ativo(self.sessao_ativa)
@@ -1188,6 +1203,8 @@ class Janela(QWidget):
             self._sessao_encerrada(evento.session_id)
         elif tipo is UiEventKind.GAME_DETECTED:
             self._jogo_detectado_mudou(evento.text)
+        elif tipo is UiEventKind.DEVICES_READY:
+            self._dispositivos_prontos(evento.payload)
         # A sessão seguiu sem busca; o chip marcado passaria a mentir. Ele é
         # desmarcado de verdade — e não só visualmente — para que a próxima
         # sessão não repita a recusa. A explicação já chegou ao registro pelo
@@ -1337,34 +1354,18 @@ class Janela(QWidget):
 
     # ----------------------------------------------------------- Preferências
 
-    def _aplicar_preferencias(self) -> None:
-        def selecionar(campo: CampoSelecao, valor: str, padrao: str) -> None:
-            opcoes = [campo.itemText(i) for i in range(campo.count())]
-            escolhido = valor if valor in opcoes else (padrao if padrao in opcoes else opcoes[0])
-            campo.setCurrentText(escolhido)
+    def _geometria_atual(self) -> str:
+        g = self.geometry()
+        return f"{g.width()},{g.height()},{g.x()},{g.y()}"
 
+    def _aplicar_preferencias(self) -> None:
+        """Monta a tabela de vínculo e leva o arquivo para a tela.
+
+        O espelhamento campo a campo mora em ``preferencias.py``; o que sobra
+        aqui é o que só a janela sabe — que atmosfera é padrão nesta máquina, e
+        o que fazer depois de as escolhas estarem na tela.
+        """
         p = self._prefs
-        # O jogo vem primeiro: ele determina a lista de personas.
-        selecionar(self.campo_jogo, p.jogo, DEFAULT_JOGO)
-        selecionar(self.campo_persona, p.persona, DEFAULT_PERSONA)
-        selecionar(self.campo_voz, p.voz, DEFAULT_VOZ)
-        selecionar(self.campo_nivel, p.nivel, DEFAULT_NIVEL)
-        selecionar(self.campo_modo, p.modo, DEFAULT_MODO)
-        selecionar(self.campo_entrada, p.dispositivo_entrada, "Padrão do sistema")
-        selecionar(self.campo_saida, p.dispositivo_saida, "Padrão do sistema")
-        self.chip_alto_falante.setChecked(p.saida_alto_falante)
-        self.chip_busca.setChecked(p.busca_web)
-        if HAS_LOOPBACK_SUPPORT and self._loopback:
-            self.chip_jogo.setChecked(p.ouvir_jogo)
-        # O caminho de volta é do NÚMERO para o rótulo. Um arquivo editado à mão
-        # pode trazer um ganho fora da tabela; a tolerância aceita o ruído de
-        # ponto flutuante e o resto cai no padrão em vez de deixar o campo
-        # mostrando uma opção que não corresponde ao valor em uso.
-        rotulo_ganho = next(
-            (r for r, v in NIVEIS_GANHO_JOGO.items() if abs(v - p.ganho_jogo) < 1e-6),
-            GANHO_JOGO_PADRAO,
-        )
-        selecionar(self.campo_ganho_jogo, rotulo_ganho, GANHO_JOGO_PADRAO)
         # O sistema decide só o PADRÃO, e só enquanto não houver escolha
         # gravada: a chave só falta no arquivo antes da primeira vez que o
         # jogador mexeu nela. Depois disso a escolha é dele, mesmo que
@@ -1378,37 +1379,40 @@ class Janela(QWidget):
         pediu_calma = movimento_reduzido()
         padrao_atmosfera = "Desligada" if pediu_calma else "Completa"
         self._atmosfera_veio_do_sistema = pediu_calma and "atmosfera" not in p.extras
-        atmosfera = str(p.extras.get("atmosfera", padrao_atmosfera))
-        selecionar(self.campo_atmosfera, atmosfera, padrao_atmosfera)
+
+        self._preferencias = VinculoDePreferencias(
+            p,
+            escolhas=(
+                # O jogo vem primeiro: ele determina a lista de personas.
+                Escolha("jogo", self.campo_jogo, DEFAULT_JOGO),
+                Escolha("persona", self.campo_persona, DEFAULT_PERSONA),
+                Escolha("voz", self.campo_voz, DEFAULT_VOZ),
+                Escolha("nivel", self.campo_nivel, DEFAULT_NIVEL),
+                Escolha("modo", self.campo_modo, DEFAULT_MODO),
+                Escolha("dispositivo_entrada", self.campo_entrada, "Padrão do sistema"),
+                Escolha("dispositivo_saida", self.campo_saida, "Padrão do sistema"),
+                Escolha(
+                    "ganho_jogo", self.campo_ganho_jogo, GANHO_JOGO_PADRAO, NIVEIS_GANHO_JOGO
+                ),
+                Escolha("extras:atmosfera", self.campo_atmosfera, padrao_atmosfera),
+                Escolha("extras:tamanho_texto", self.campo_tamanho_texto, ESCALA_TEXTO_PADRAO),
+            ),
+            marcas=(
+                Marca("saida_alto_falante", self.chip_alto_falante),
+                Marca("busca_web", self.chip_busca),
+                Marca("ouvir_jogo", self.chip_jogo, ativa=lambda: self._loopback is not None),
+            ),
+            geometria=self._geometria_atual,
+            pai=self,
+        )
+        self._preferencias.aplicar()
+
         self._ajustar_atmosfera(self.campo_atmosfera.currentText())
-        tamanho = str(p.extras.get("tamanho_texto", ESCALA_TEXTO_PADRAO))
-        selecionar(self.campo_tamanho_texto, tamanho, ESCALA_TEXTO_PADRAO)
         # Direto no campo, sem passar por _ajustar_tamanho_texto: aqui a janela
         # ainda está sendo montada, o _aplicar_tema logo a seguir já refaz tudo,
         # e as satélites que aquele método repinta ainda nem existem.
         self._escala_texto = ESCALAS_TEXTO.get(self.campo_tamanho_texto.currentText(), 1.0)
         self._atualizar_caderno()
-
-    def _salvar_preferencias(self) -> None:
-        p = self._prefs
-        p.persona = self.campo_persona.currentText()
-        p.jogo = self.campo_jogo.currentText()
-        p.voz = self.campo_voz.currentText()
-        p.nivel = self.campo_nivel.currentText()
-        p.modo = self.campo_modo.currentText()
-        p.dispositivo_entrada = self.campo_entrada.currentText()
-        p.dispositivo_saida = self.campo_saida.currentText()
-        p.saida_alto_falante = self.chip_alto_falante.isChecked()
-        p.ouvir_jogo = self.chip_jogo.isChecked()
-        p.busca_web = self.chip_busca.isChecked()
-        p.ganho_jogo = NIVEIS_GANHO_JOGO.get(
-            self.campo_ganho_jogo.currentText(), DEFAULT_GAME_AUDIO_GAIN
-        )
-        p.extras["atmosfera"] = self.campo_atmosfera.currentText()
-        p.extras["tamanho_texto"] = self.campo_tamanho_texto.currentText()
-        g = self.geometry()
-        p.extras["geometria"] = f"{g.width()},{g.height()},{g.x()},{g.y()}"
-        p.save()
 
     # --------------------------------------------------------------- Atalhos
 
@@ -1495,7 +1499,7 @@ class Janela(QWidget):
     def iniciar_sessao(self) -> None:
         if self._encerrando or self._worker is not None:
             return
-        self._salvar_preferencias()
+        self._preferencias.salvar()
         self._contador_sessoes += 1
         self._mudo = False
         self._tokens = 0
@@ -1805,7 +1809,7 @@ class Janela(QWidget):
         if self._worker is not None and self._worker.is_alive:
             if not self._encerrando:
                 self._encerrando = True
-                self._salvar_preferencias()
+                self._preferencias.salvar()
                 self.encerrar_sessao()
                 self._prazo_encerramento = time.monotonic() + SHUTDOWN_TIMEOUT_SECONDS
                 self._espera = QTimer(self)
@@ -1815,7 +1819,7 @@ class Janela(QWidget):
             return
 
         if not self._encerrando:
-            self._salvar_preferencias()
+            self._preferencias.salvar()
         self._encerrando = True
         self._remover_atalhos()
         # O visualizador do caderno consulta o banco a cada repintura. Fechá-lo
