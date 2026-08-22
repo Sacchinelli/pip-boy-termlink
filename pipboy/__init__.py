@@ -39,7 +39,11 @@ def configure_logging(directory: Path) -> None:
     except OSError:
         pass  # Sem permissão de escrita: o console ainda recebe os eventos.
 
-    if not getattr(sys, "frozen", False):
+    # Sem console não há StreamHandler que preste: lançado pelo pythonw.exe —
+    # o atalho da área de trabalho — o sys.stderr vale None, e um handler
+    # apontado para ele transforma cada linha de log num AttributeError que o
+    # próprio logging engole em silêncio. O arquivo acima registra tudo.
+    if not getattr(sys, "frozen", False) and getattr(sys, "stderr", None) is not None:
         console = logging.StreamHandler()
         console.setFormatter(formatter)
         LOGGER.addHandler(console)

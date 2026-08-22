@@ -2093,6 +2093,65 @@ def teste_crash() -> None:
         crash.registrar_janela(None)
 
 
+def teste_lancamento_sem_console() -> None:
+    """O atalho da área de trabalho lança pelo ``pythonw.exe``, que não tem stderr.
+
+    Duas coisas mudam quando não há console, e as duas são invisíveis para quem
+    só roda a suíte num terminal: a mensagem do arranque precisa virar caixa do
+    Windows, senão o duplo-clique numa instalação quebrada não faz nada; e o
+    log não pode instalar um StreamHandler apontado para um fluxo que vale
+    ``None``, que transformaria cada linha registrada num erro engolido.
+    """
+    print("lançamento sem console")
+    import logging
+    from logging.handlers import RotatingFileHandler
+
+    import pip_boy
+    from pipboy import LOGGER, configure_logging
+
+    # A caixa é recurso do Windows; onde ela não existe o programa continua
+    # abrindo pela linha de comando, e o aviso não teria para onde ir.
+    no_windows = sys.platform == "win32"
+
+    checar(not pip_boy._sem_console(), "com terminal, o aviso em caixa fica desligado")
+
+    texto = pip_boy._texto_de_caixa(
+        "\n──────────\nDEPENDÊNCIA DO PYTHON AUSENTE\n──────────\nFalta o módulo: PySide6\n"
+    )
+    checar("─" not in texto, "a régua monoespaçada não entra na caixa")
+    checar(
+        texto.splitlines() == ["DEPENDÊNCIA DO PYTHON AUSENTE", "Falta o módulo: PySide6"],
+        f"e o conteúdo continua inteiro ({texto.splitlines()})",
+    )
+
+    stderr_original = sys.stderr
+    handlers_originais = list(LOGGER.handlers)
+    try:
+        sys.stderr = None  # type: ignore[assignment]
+        checar(pip_boy._sem_console() == no_windows, "sem stderr, o aviso em caixa liga")
+
+        LOGGER.handlers.clear()
+        configure_logging(Path(tempfile.mkdtemp()))
+        instalados = [type(h).__name__ for h in LOGGER.handlers]
+        # `is` e não `isinstance`: o RotatingFileHandler É um StreamHandler, e
+        # um isinstance reprovaria justamente o handler que precisa ficar.
+        checar(
+            not any(type(h) is logging.StreamHandler for h in LOGGER.handlers),
+            f"sem console, nenhum StreamHandler é instalado ({instalados})",
+        )
+        checar(
+            any(isinstance(h, RotatingFileHandler) for h in LOGGER.handlers),
+            f"e o registro em arquivo continua de pé ({instalados})",
+        )
+    finally:
+        sys.stderr = stderr_original
+        for handler in LOGGER.handlers:
+            with contextlib.suppress(Exception):
+                handler.close()
+        LOGGER.handlers.clear()
+        LOGGER.handlers.extend(handlers_originais)
+
+
 def main() -> int:
     for teste in (
         teste_dsp,
@@ -2123,6 +2182,7 @@ def main() -> int:
         teste_busca_entre_conversas,
         teste_deteccao,
         teste_crash,
+        teste_lancamento_sem_console,
     ):
         teste()
     print()
