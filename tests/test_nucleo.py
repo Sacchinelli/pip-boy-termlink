@@ -2227,6 +2227,211 @@ def teste_carimbos_em_utc() -> None:
     )
     reaberto.close()
 
+    # ---------------------------------------------------------------- carimbo()
+    # O ponto único por onde todo instante gravado passa. Testá-lo com um fuso
+    # EXPLÍCITO é o que torna esta verificação honesta em qualquer máquina: o CI
+    # roda em UTC, e ali um `.astimezone()` indevido produz exatamente o mesmo
+    # texto que a conversão certa. Foi assim que a regressão abaixo passou.
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
+    from datetime import timezone as _tz
+
+    from pipboy.banco import carimbo
+
+    local = _dt(2026, 8, 22, 14, 3, 0, tzinfo=_tz(_td(hours=-3)))
+    checar(
+        carimbo(local) == "2026-08-22T17:03:00+00:00",
+        f"carimbo() converte o fuso local para UTC ({carimbo(local)})",
+    )
+    checar(
+        carimbo(local.astimezone(_tz.utc)) == carimbo(local),
+        "e o mesmo instante em UTC dá o mesmo texto",
+    )
+
+    # ------------------------------------------------- a regressão, nomeada
+    # `avaliar()` grava a PRÓXIMA revisão — um instante no futuro, e o único
+    # carimbo do programa que não é "agora". Justamente por isso ele escapou da
+    # conversão para UTC: a migração de abertura consertava a coluna e a
+    # primeira revisão a sujava de novo, com a tela e o SQL discordando sobre
+    # qual palavra estava vencida.
+    pasta2 = Path(tempfile.mkdtemp())
+    loja2 = VocabularyStore(pasta2 / "revisao.sqlite3")
+    loja2.registrar("wasteland", "terra devastada", "", "Fallout")
+    loja2.avaliar("wasteland", True)
+    guardado = loja2.listar()[0].proxima_revisao
+    checar(guardado.endswith("+00:00"), f"avaliar() agenda a revisão em UTC ({guardado})")
+    previsto = _dt.now(_tz.utc) + _td(days=1)
+    checar(
+        abs((_dt.fromisoformat(guardado) - previsto).total_seconds()) < 5,
+        "e no instante certo, não deslocado pelo fuso",
+    )
+
+    # ------------------------------------------- a invariante, para o futuro
+    # Varre TODA coluna de instante dos dois bancos em vez de uma escolhida à
+    # mão — a lista vem da mesma constante que a migração usa, então uma coluna
+    # nova nasce coberta. Conferir só `criado_em`, como se fazia, deixou passar
+    # a coluna vizinha.
+    historico2 = HistoricoStore(pasta2 / "revisao-h.sqlite3")
+    s2 = historico2.iniciar_sessao(jogo="Fallout")
+    historico2.registrar_fala(s2, autor="X", tag="vocab", texto="oi")
+
+    from pipboy.historico import CARIMBOS as CARIMBOS_HISTORICO
+    from pipboy.vocabulary import CARIMBOS as CARIMBOS_CADERNO
+
+    fora_do_padrao: list[str] = []
+    conferidas = 0
+    for loja, colunas in ((loja2, CARIMBOS_CADERNO), (historico2, CARIMBOS_HISTORICO)):
+        for tabela, nomes in colunas:
+            for nome in nomes:
+                for (valor,) in loja._connection.execute(
+                    f"SELECT {nome} FROM {tabela} WHERE {nome} != ''"
+                ):
+                    conferidas += 1
+                    if not str(valor).endswith("+00:00"):
+                        fora_do_padrao.append(f"{tabela}.{nome} = {valor}")
+    checar(conferidas >= 5, f"a varredura encontrou carimbos para conferir ({conferidas})")
+    checar(not fora_do_padrao, f"todo carimbo dos dois bancos está em UTC ({fora_do_padrao})")
+
+    # E a consequência que o usuário sentiria: as duas respostas para "esta
+    # palavra venceu?" — a da tela, que faz conta de datas, e a do SQL, que
+    # compara texto — precisam concordar.
+    vencidas_sql = {e.termo for e in loja2.para_revisar(limite=50)}
+    vencidas_tela = {e.termo for e in loja2.listar() if e.vencida}
+    checar(
+        vencidas_sql == vencidas_tela,
+        f"o SQL e a tela concordam sobre o que venceu ({vencidas_sql} vs {vencidas_tela})",
+    )
+    loja2.close()
+    historico2.close()
+
+
+def teste_correcao_de_palavra() -> None:
+    """Corrigir o texto de uma palavra não pode custar o histórico dela.
+
+    Quem escreve o caderno é o modelo, em silêncio, e às vezes ele erra a
+    tradução. Só havia ``remover``, e remover leva junto facilidade, intervalo,
+    próxima revisão, acertos e erros — meses de repetição espaçada perdidos
+    para consertar um typo.
+    """
+    print("correção de palavra")
+    pasta = Path(tempfile.mkdtemp())
+    loja = VocabularyStore(pasta / "correcao.sqlite3")
+    loja.registrar("wasteland", "ermo", "A wasteland.", "Fallout")
+    for _ in range(3):
+        loja.avaliar("wasteland", True)
+    loja.avaliar("wasteland", False)
+    loja.avaliar("wasteland", True)
+    antes = loja.listar()[0]
+
+    depois = loja.editar("wasteland", traducao="terra devastada")
+    checar(depois.traducao == "terra devastada", "a tradução muda")
+    checar(
+        (depois.intervalo_dias, depois.acertos, depois.erros, depois.proxima_revisao)
+        == (antes.intervalo_dias, antes.acertos, antes.erros, antes.proxima_revisao),
+        "e o agendamento inteiro sobrevive",
+    )
+    checar(
+        (depois.criado_em, depois.visto_em, depois.encontros)
+        == (antes.criado_em, antes.visto_em, antes.encontros),
+        "corrigir não é rever: criado_em, visto_em e encontros ficam parados",
+    )
+    checar(len(loja.listar(busca="devastada")) == 1, "a busca acha pelo texto novo")
+    checar(not loja.listar(busca="ermo"), "e não acha mais pelo antigo")
+
+    # Campo omitido (None) preserva; campo vazio limpa. É essa distinção que
+    # permite apagar um exemplo errado sem reescrever a tradução junto.
+    igual = loja.editar("wasteland", exemplo="")
+    checar(igual.exemplo == "", "exemplo vazio apaga o exemplo")
+    checar(igual.traducao == "terra devastada", "e o campo omitido fica como estava")
+
+    # Renomear o termo, que é o caso que pode colidir com o índice único.
+    renomeada = loja.editar("wasteland", novo_termo="wasteland ")
+    checar(renomeada.termo == "wasteland", "o termo é normalizado ao ser gravado")
+    loja.registrar("settler", "colono", "", "Fallout")
+    erro = ""
+    try:
+        loja.editar("settler", novo_termo="wasteland")
+    except ValueError as e:
+        erro = str(e)
+    checar("wasteland" in erro, f"renomear para uma palavra existente é recusado ({erro})")
+    checar(len(loja.listar()) == 2, "e nada foi fundido nem perdido")
+
+    for campo, valor in (("novo_termo", ""), ("traducao", "")):
+        vazio = ""
+        try:
+            loja.editar("settler", **{campo: valor})
+        except ValueError as e:
+            vazio = str(e)
+        checar(bool(vazio), f"{campo} vazio é recusado ({vazio})")
+
+    ausente = ""
+    try:
+        loja.editar("nunca visto", traducao="x")
+    except ValueError as e:
+        ausente = str(e)
+    checar("nunca visto" in ausente, "corrigir palavra que não existe é erro claro")
+    loja.close()
+
+
+def teste_teto_do_intervalo() -> None:
+    """O intervalo entre revisões para de crescer no teto, e o já crescido volta.
+
+    Sem teto o SM-2 não converge: no sétimo acerto a palavra sumia por um ano e
+    meio, no décimo segundo por 383 anos. "Dominada" virava sinônimo de "nunca
+    mais perguntada", e o esquecimento passava despercebido para sempre.
+    """
+    print("teto do intervalo")
+    from pipboy.vocabulary import MAX_INTERVALO_DIAS
+
+    pasta = Path(tempfile.mkdtemp())
+    loja = VocabularyStore(pasta / "teto.sqlite3")
+    loja.registrar("dragon", "dragão", "", "Skyrim")
+
+    # Acertos muito além do que faria o intervalo estourar sem o teto.
+    maior = 0
+    for _ in range(15):
+        resultado = loja.avaliar("dragon", True)
+        maior = max(maior, int(resultado["proxima_revisao_em_dias"]))
+    checar(maior == MAX_INTERVALO_DIAS, f"o intervalo para no teto ({maior} dias)")
+
+    # E o teto não atrapalha o caminho até ele: os primeiros passos do SM-2
+    # continuam iguais, senão a correção teria trocado um defeito por outro.
+    loja.registrar("shout", "grito", "", "Skyrim")
+    passos = [int(loja.avaliar("shout", True)["proxima_revisao_em_dias"]) for _ in range(3)]
+    checar(passos == [1, 3, 8], f"os primeiros intervalos não mudaram ({passos})")
+    loja.close()
+
+    # Uma palavra aposentada por uma versão sem teto: quarenta e dois anos.
+    aposentada = pasta / "aposentada.sqlite3"
+    antiga = VocabularyStore(aposentada)
+    antiga.registrar("settler", "colono", "", "Fallout")
+    antiga._connection.execute(
+        "UPDATE vocabulario SET intervalo_dias = 15552, visto_em = ?, proxima_revisao = ?",
+        ("2026-01-10T12:00:00+00:00", "2068-08-30T12:00:00+00:00"),
+    )
+    antiga._connection.commit()
+    antiga.close()
+
+    resgatada = VocabularyStore(aposentada)
+    entrada = resgatada.listar()[0]
+    checar(
+        entrada.intervalo_dias == MAX_INTERVALO_DIAS,
+        f"reabrir traz o intervalo para o teto ({entrada.intervalo_dias})",
+    )
+    checar(
+        entrada.proxima_revisao == "2027-01-10T12:00:00+00:00",
+        f"e reagenda a partir do último visto, não de hoje ({entrada.proxima_revisao})",
+    )
+    resgatada.close()
+
+    # Idempotente: a segunda abertura não empurra a data mais para a frente.
+    de_novo = VocabularyStore(aposentada)
+    checar(
+        de_novo.listar()[0].proxima_revisao == "2027-01-10T12:00:00+00:00",
+        "e reabrir de novo não mexe mais em nada",
+    )
+    de_novo.close()
+
 
 def teste_atalhos_globais() -> None:
     """Tecla repetida no .env não pode sumir em silêncio.
@@ -2369,6 +2574,8 @@ def main() -> int:
         teste_busca_dobrada,
         teste_carimbos_em_utc,
         teste_atalhos_globais,
+        teste_correcao_de_palavra,
+        teste_teto_do_intervalo,
         teste_lancamento_sem_console,
     ):
         try:

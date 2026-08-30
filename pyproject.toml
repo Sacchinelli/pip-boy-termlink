@@ -31,7 +31,23 @@ dev = [
 ]
 
 # ------------------------------------------------------------------ Ruff
-# Lint e formatação. `py -m ruff check .` e `py -m ruff format --check .`
+# Lint, e só o lint: `py -m ruff check .`
+#
+# Este projeto NÃO usa o `ruff format`, e a linha aqui que prometia o
+# contrário era a única coisa que fazia parecer que usava — o CI nunca o
+# rodou. Quem seguisse a promessa produziria um diff de 1.229 linhas em 30
+# dos 44 arquivos, sem uma única mudança de comportamento, e mandaria o
+# `git blame` de todas elas para um commit de formatação.
+#
+# A recusa tem motivo, e ele aparece no que o formatador faria: a tupla de
+# parâmetros de um INSERT é quebrada aqui por SIGNIFICADO — os seis campos da
+# palavra numa linha, o texto de busca derivado na seguinte —, e o formatador
+# a explode em um argumento por linha, ficando três vezes mais alta e dizendo
+# menos. O mesmo vale para as chamadas de `checar()` na suíte.
+#
+# Adotá-lo continua sendo possível, e é um comando. Mas é uma decisão sobre o
+# estilo do projeto, com custo permanente no histórico — não uma faxina que
+# alguém faz de passagem por achar que estava pendente.
 [tool.ruff]
 line-length = 100
 target-version = "py310"
