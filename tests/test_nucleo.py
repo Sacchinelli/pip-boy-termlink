@@ -2476,6 +2476,54 @@ def teste_teto_do_intervalo() -> None:
     de_novo.close()
 
 
+def teste_atalhos_globais() -> None:
+    """Tecla repetida no .env não pode sumir em silêncio.
+
+    A lista de atalhos globais era um DICIONÁRIO chaveado pela combinação:
+    duas ações configuradas com a mesma tecla colapsavam numa só antes de
+    qualquer código rodar. A segunda não existia — sem erro, sem aviso — e a
+    tecla fazia a coisa errada para sempre. A regra vive fora do Qt e fora da
+    biblioteca de teclado, e é por isso que dá para exercitá-la aqui.
+    """
+    print("atalhos globais")
+    from pipboy.events import UiEventKind
+    from pipboy.interface.atalhos import resolver_globais
+
+    registrar, repetidas = resolver_globais(
+        (
+            ("ctrl+alt+p", UiEventKind.START_REQUEST),
+            ("ctrl+alt+m", UiEventKind.TOGGLE_MUTE_REQUEST),
+            ("ctrl+alt+g", UiEventKind.TOGGLE_GAME_AUDIO_REQUEST),
+        )
+    )
+    checar(len(registrar) == 3 and not repetidas, "três teclas distintas passam inteiras")
+
+    registrar, repetidas = resolver_globais(
+        (
+            ("ctrl+alt+p", UiEventKind.START_REQUEST),
+            ("ctrl+alt+p", UiEventKind.TOGGLE_MUTE_REQUEST),
+            ("ctrl+alt+g", UiEventKind.TOGGLE_GAME_AUDIO_REQUEST),
+        )
+    )
+    checar(
+        [c for c, _ in registrar] == ["ctrl+alt+p", "ctrl+alt+g"],
+        f"a primeira atribuição da tecla repetida vence ({[c for c, _ in registrar]})",
+    )
+    checar(
+        registrar[0][1] is UiEventKind.START_REQUEST,
+        "e é a PRIMEIRA ação, não a última, que fica com a tecla",
+    )
+    checar(repetidas == ["ctrl+alt+p"], f"a repetida é denunciada ({repetidas})")
+
+    registrar, repetidas = resolver_globais(
+        (("", UiEventKind.START_REQUEST), ("", UiEventKind.TOGGLE_MUTE_REQUEST))
+    )
+    checar(
+        not registrar and not repetidas,
+        "combinação vazia é atalho desligado, não repetição",
+    )
+
+
 def teste_lancamento_sem_console() -> None:
     """O atalho da área de trabalho lança pelo ``pythonw.exe``, que não tem stderr.
 
@@ -2569,6 +2617,7 @@ def main() -> int:
         teste_crash,
         teste_busca_dobrada,
         teste_carimbos_em_utc,
+        teste_atalhos_globais,
         teste_correcao_de_palavra,
         teste_teto_do_intervalo,
         teste_lancamento_sem_console,
