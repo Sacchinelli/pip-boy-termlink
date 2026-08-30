@@ -2305,6 +2305,74 @@ def teste_carimbos_em_utc() -> None:
     historico2.close()
 
 
+def teste_correcao_de_palavra() -> None:
+    """Corrigir o texto de uma palavra não pode custar o histórico dela.
+
+    Quem escreve o caderno é o modelo, em silêncio, e às vezes ele erra a
+    tradução. Só havia ``remover``, e remover leva junto facilidade, intervalo,
+    próxima revisão, acertos e erros — meses de repetição espaçada perdidos
+    para consertar um typo.
+    """
+    print("correção de palavra")
+    pasta = Path(tempfile.mkdtemp())
+    loja = VocabularyStore(pasta / "correcao.sqlite3")
+    loja.registrar("wasteland", "ermo", "A wasteland.", "Fallout")
+    for _ in range(3):
+        loja.avaliar("wasteland", True)
+    loja.avaliar("wasteland", False)
+    loja.avaliar("wasteland", True)
+    antes = loja.listar()[0]
+
+    depois = loja.editar("wasteland", traducao="terra devastada")
+    checar(depois.traducao == "terra devastada", "a tradução muda")
+    checar(
+        (depois.intervalo_dias, depois.acertos, depois.erros, depois.proxima_revisao)
+        == (antes.intervalo_dias, antes.acertos, antes.erros, antes.proxima_revisao),
+        "e o agendamento inteiro sobrevive",
+    )
+    checar(
+        (depois.criado_em, depois.visto_em, depois.encontros)
+        == (antes.criado_em, antes.visto_em, antes.encontros),
+        "corrigir não é rever: criado_em, visto_em e encontros ficam parados",
+    )
+    checar(len(loja.listar(busca="devastada")) == 1, "a busca acha pelo texto novo")
+    checar(not loja.listar(busca="ermo"), "e não acha mais pelo antigo")
+
+    # Campo omitido (None) preserva; campo vazio limpa. É essa distinção que
+    # permite apagar um exemplo errado sem reescrever a tradução junto.
+    igual = loja.editar("wasteland", exemplo="")
+    checar(igual.exemplo == "", "exemplo vazio apaga o exemplo")
+    checar(igual.traducao == "terra devastada", "e o campo omitido fica como estava")
+
+    # Renomear o termo, que é o caso que pode colidir com o índice único.
+    renomeada = loja.editar("wasteland", novo_termo="wasteland ")
+    checar(renomeada.termo == "wasteland", "o termo é normalizado ao ser gravado")
+    loja.registrar("settler", "colono", "", "Fallout")
+    erro = ""
+    try:
+        loja.editar("settler", novo_termo="wasteland")
+    except ValueError as e:
+        erro = str(e)
+    checar("wasteland" in erro, f"renomear para uma palavra existente é recusado ({erro})")
+    checar(len(loja.listar()) == 2, "e nada foi fundido nem perdido")
+
+    for campo, valor in (("novo_termo", ""), ("traducao", "")):
+        vazio = ""
+        try:
+            loja.editar("settler", **{campo: valor})
+        except ValueError as e:
+            vazio = str(e)
+        checar(bool(vazio), f"{campo} vazio é recusado ({vazio})")
+
+    ausente = ""
+    try:
+        loja.editar("nunca visto", traducao="x")
+    except ValueError as e:
+        ausente = str(e)
+    checar("nunca visto" in ausente, "corrigir palavra que não existe é erro claro")
+    loja.close()
+
+
 def teste_teto_do_intervalo() -> None:
     """O intervalo entre revisões para de crescer no teto, e o já crescido volta.
 
@@ -2457,6 +2525,7 @@ def main() -> int:
         teste_crash,
         teste_busca_dobrada,
         teste_carimbos_em_utc,
+        teste_correcao_de_palavra,
         teste_teto_do_intervalo,
         teste_lancamento_sem_console,
     ):

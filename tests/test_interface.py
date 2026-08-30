@@ -226,6 +226,67 @@ def main() -> int:
     aplicacao.processEvents()
     checar(len(caderno._cartoes) == 2, "voltar para 'todos os jogos' devolve a lista")
 
+    # -- Correção: a borracha que faltava ao lado do "×". A caixa é
+    #    substituída pelo mesmo motivo do QFileDialog acima — ela bloqueia
+    #    esperando alguém digitar; o resto do caminho é o de produção.
+    import pipboy.interface.caderno as mod_caderno
+
+    alvo = caderno._cartoes[0]._entrada
+    original = mod_caderno.pedir_correcao
+    mod_caderno.pedir_correcao = lambda *a, **k: {  # type: ignore[assignment]
+        "termo": alvo.termo,
+        "traducao": "tradução corrigida",
+        "exemplo": alvo.exemplo,
+    }
+    try:
+        caderno._corrigir(alvo)
+        aplicacao.processEvents()
+        textos = [c._entrada.traducao for c in caderno._cartoes]
+        checar("tradução corrigida" in textos, f"corrigir troca o texto na lista ({textos})")
+
+        # E o caminho do erro: renomear para uma palavra que já existe não pode
+        # estourar na cara de quem clicou.
+        outro = next(
+            c._entrada for c in caderno._cartoes if c._entrada.termo != alvo.termo
+        )
+        mod_caderno.pedir_correcao = lambda *a, **k: {  # type: ignore[assignment]
+            "termo": outro.termo,
+            "traducao": alvo.traducao,
+            "exemplo": "",
+        }
+        avisos: list[str] = []
+        aviso_real = mod_caderno.avisar
+        mod_caderno.avisar = lambda _j, _t, m, **k: avisos.append(m)  # type: ignore[assignment]
+        try:
+            caderno._corrigir(alvo)
+        finally:
+            mod_caderno.avisar = aviso_real  # type: ignore[assignment]
+        checar(bool(avisos), f"colisão vira aviso, não exceção ({avisos})")
+        checar(len(caderno._cartoes) == 2, "e as duas palavras continuam lá")
+    finally:
+        mod_caderno.pedir_correcao = original  # type: ignore[assignment]
+
+    # A caixa com campos, construída de verdade: é ela que a correção usa.
+    from pipboy.interface.dialogo import Caixa as CaixaCampos
+
+    caixa_campos = CaixaCampos(
+        janela,
+        "Corrigir palavra",
+        "mensagem",
+        glifo="◇",
+        papel_glifo="accent",
+        confirmar="Salvar",
+        cancelar="Cancelar",
+        perigo=False,
+        campos=(("termo", "Termo", "wasteland"), ("traducao", "Tradução", "ermo")),
+    )
+    checar(
+        caixa_campos.valores() == {"termo": "wasteland", "traducao": "ermo"},
+        "a caixa de campos nasce preenchida e devolve o que está escrito",
+    )
+    checar(not caixa_campos.grab().isNull(), "e desenha no tema")
+    caixa_campos.deleteLater()
+
     # -- Importação: a porta de entrada do caderno, pelo caminho da janela.
     #    O QFileDialog é substituído porque um diálogo nativo trava a suíte
     #    esperando alguém clicar; o resto do caminho é o de produção.
