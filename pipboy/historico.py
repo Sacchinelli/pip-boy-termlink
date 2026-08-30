@@ -23,7 +23,14 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from .banco import agora, conectar, migrar_para_utc, padrao_de_busca, texto_de_busca
+from .banco import (
+    agora,
+    carimbo,
+    conectar,
+    migrar_para_utc,
+    padrao_de_busca,
+    texto_de_busca,
+)
 
 LOGGER = logging.getLogger("pip_boy.historico")
 
@@ -232,11 +239,14 @@ class HistoricoStore:
         """
         if dias <= 0:
             return 0
-        # Em UTC, como os carimbos gravados: comparar uma data local com uma
-        # coluna em UTC erraria a poda pelo tamanho do deslocamento.
-        limite = (datetime.now(timezone.utc) - timedelta(days=dias)).isoformat(
-            timespec="seconds"
-        )
+        # Pelo ``carimbo()``, e não por um isoformat próprio: este limite é
+        # comparado como TEXTO com a coluna ``iniciada_em``, então ele precisa
+        # nascer no mesmo formato que ela — e a garantia disso é passar pela
+        # mesma função, não pela intenção de quem escreve a linha. Já estava
+        # certo; o que muda é deixar de depender de continuar certo. Foi um
+        # segundo lugar formatando instante à mão que produziu a revisão
+        # vencendo três horas cedo.
+        limite = carimbo(datetime.now(timezone.utc) - timedelta(days=dias))
         with self._lock:
             cursor = self._connection.execute(
                 "DELETE FROM sessoes WHERE iniciada_em < ?", (limite,)

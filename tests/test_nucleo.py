@@ -1731,6 +1731,49 @@ def teste_sons() -> None:
         checar(True, "evento desconhecido deveria falhar")
 
 
+def teste_poda_pelo_mesmo_carimbo() -> None:
+    """A borda da retenção tem de cair no lugar certo, e não três horas ao lado.
+
+    ``podar_antigas`` compara um limite calculado contra a coluna
+    ``iniciada_em`` como TEXTO, então o limite precisa nascer no mesmo formato
+    que ela. Era um segundo lugar formatando instante à mão, e formatar
+    instante à mão foi exatamente o que fez a próxima revisão vencer cedo.
+
+    As duas sessões cercam a borda por UMA hora. O erro que este teste existe
+    para pegar desloca em TRÊS (o fuso do Brasil), então ele troca as duas de
+    lado — a de fora sobrevive, a conta dá zero, e a checagem reprova.
+
+    A limitação é a mesma que o ``carimbo()`` documenta: numa máquina já em
+    UTC, um ``.astimezone()`` indevido produz texto idêntico ao certo e passa
+    despercebido. Rodando no Brasil, este teste pega. É por isso que a defesa
+    principal é a conversão morar num ponto só, e não este teste.
+    """
+    print("poda do histórico")
+    from datetime import datetime, timedelta, timezone
+
+    from pipboy.banco import carimbo
+    from pipboy.historico import HistoricoStore
+
+    historico = HistoricoStore(Path(tempfile.mkdtemp()) / "poda.sqlite3")
+    agora_utc = datetime.now(timezone.utc)
+    borda = timedelta(days=365)
+    dentro = carimbo(agora_utc - borda + timedelta(hours=1))
+    fora = carimbo(agora_utc - borda - timedelta(hours=1))
+    for quando in (dentro, fora):
+        historico._connection.execute(
+            "INSERT INTO sessoes (iniciada_em, jogo, modo, nivel) VALUES (?, '', '', '')",
+            (quando,),
+        )
+    historico._connection.commit()
+
+    removidas = historico.podar_antigas(365)
+    checar(removidas == 1, f"a poda leva só a sessão além da borda ({removidas})")
+    restantes = [s.iniciada_em for s in historico.listar_sessoes()]
+    checar(restantes == [dentro], f"e a de dentro fica ({restantes})")
+    checar(historico.podar_antigas(0) == 0, "retenção zero não apaga nada")
+    historico.close()
+
+
 def teste_historico() -> None:
     """Histórico de sessões: gravação, leitura, descarte de vazias, remoção."""
     print("histórico")
@@ -2519,6 +2562,7 @@ def main() -> int:
         teste_sons,
         teste_banco,
         teste_historico,
+        teste_poda_pelo_mesmo_carimbo,
         teste_palavra_ate_a_conversa,
         teste_busca_entre_conversas,
         teste_deteccao,
