@@ -2227,6 +2227,83 @@ def teste_carimbos_em_utc() -> None:
     )
     reaberto.close()
 
+    # ---------------------------------------------------------------- carimbo()
+    # O ponto único por onde todo instante gravado passa. Testá-lo com um fuso
+    # EXPLÍCITO é o que torna esta verificação honesta em qualquer máquina: o CI
+    # roda em UTC, e ali um `.astimezone()` indevido produz exatamente o mesmo
+    # texto que a conversão certa. Foi assim que a regressão abaixo passou.
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
+    from datetime import timezone as _tz
+
+    from pipboy.banco import carimbo
+
+    local = _dt(2026, 8, 22, 14, 3, 0, tzinfo=_tz(_td(hours=-3)))
+    checar(
+        carimbo(local) == "2026-08-22T17:03:00+00:00",
+        f"carimbo() converte o fuso local para UTC ({carimbo(local)})",
+    )
+    checar(
+        carimbo(local.astimezone(_tz.utc)) == carimbo(local),
+        "e o mesmo instante em UTC dá o mesmo texto",
+    )
+
+    # ------------------------------------------------- a regressão, nomeada
+    # `avaliar()` grava a PRÓXIMA revisão — um instante no futuro, e o único
+    # carimbo do programa que não é "agora". Justamente por isso ele escapou da
+    # conversão para UTC: a migração de abertura consertava a coluna e a
+    # primeira revisão a sujava de novo, com a tela e o SQL discordando sobre
+    # qual palavra estava vencida.
+    pasta2 = Path(tempfile.mkdtemp())
+    loja2 = VocabularyStore(pasta2 / "revisao.sqlite3")
+    loja2.registrar("wasteland", "terra devastada", "", "Fallout")
+    loja2.avaliar("wasteland", True)
+    guardado = loja2.listar()[0].proxima_revisao
+    checar(guardado.endswith("+00:00"), f"avaliar() agenda a revisão em UTC ({guardado})")
+    previsto = _dt.now(_tz.utc) + _td(days=1)
+    checar(
+        abs((_dt.fromisoformat(guardado) - previsto).total_seconds()) < 5,
+        "e no instante certo, não deslocado pelo fuso",
+    )
+
+    # ------------------------------------------- a invariante, para o futuro
+    # Varre TODA coluna de instante dos dois bancos em vez de uma escolhida à
+    # mão — a lista vem da mesma constante que a migração usa, então uma coluna
+    # nova nasce coberta. Conferir só `criado_em`, como se fazia, deixou passar
+    # a coluna vizinha.
+    historico2 = HistoricoStore(pasta2 / "revisao-h.sqlite3")
+    s2 = historico2.iniciar_sessao(jogo="Fallout")
+    historico2.registrar_fala(s2, autor="X", tag="vocab", texto="oi")
+
+    from pipboy.historico import CARIMBOS as CARIMBOS_HISTORICO
+    from pipboy.vocabulary import CARIMBOS as CARIMBOS_CADERNO
+
+    fora_do_padrao: list[str] = []
+    conferidas = 0
+    for loja, colunas in ((loja2, CARIMBOS_CADERNO), (historico2, CARIMBOS_HISTORICO)):
+        for tabela, nomes in colunas:
+            for nome in nomes:
+                for (valor,) in loja._connection.execute(
+                    f"SELECT {nome} FROM {tabela} WHERE {nome} != ''"
+                ):
+                    conferidas += 1
+                    if not str(valor).endswith("+00:00"):
+                        fora_do_padrao.append(f"{tabela}.{nome} = {valor}")
+    checar(conferidas >= 5, f"a varredura encontrou carimbos para conferir ({conferidas})")
+    checar(not fora_do_padrao, f"todo carimbo dos dois bancos está em UTC ({fora_do_padrao})")
+
+    # E a consequência que o usuário sentiria: as duas respostas para "esta
+    # palavra venceu?" — a da tela, que faz conta de datas, e a do SQL, que
+    # compara texto — precisam concordar.
+    vencidas_sql = {e.termo for e in loja2.para_revisar(limite=50)}
+    vencidas_tela = {e.termo for e in loja2.listar() if e.vencida}
+    checar(
+        vencidas_sql == vencidas_tela,
+        f"o SQL e a tela concordam sobre o que venceu ({vencidas_sql} vs {vencidas_tela})",
+    )
+    loja2.close()
+    historico2.close()
+
 
 def teste_lancamento_sem_console() -> None:
     """O atalho da área de trabalho lança pelo ``pythonw.exe``, que não tem stderr.

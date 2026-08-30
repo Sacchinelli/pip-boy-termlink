@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from .banco import agora, conectar, migrar_para_utc, padrao_de_busca, texto_de_busca
+from .banco import agora, carimbo, conectar, migrar_para_utc, padrao_de_busca, texto_de_busca
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS vocabulario (
@@ -68,6 +68,16 @@ _MIGRACOES: tuple[tuple[str, str], ...] = (
     ("acertos", "INTEGER NOT NULL DEFAULT 0"),
     ("erros", "INTEGER NOT NULL DEFAULT 0"),
     ("busca", "TEXT NOT NULL DEFAULT ''"),
+)
+
+# Toda coluna deste banco que guarda um instante. Serve a dois leitores: a
+# migração de abertura, que reescreve em UTC o que foi gravado no fuso local, e
+# o teste que trava a invariante. Os dois lerem a MESMA lista é o ponto — a
+# regressão que motivou isto passou porque o teste conferia uma coluna
+# escolhida à mão e a que estava errada não era ela. Coluna de instante nova
+# entra aqui e nasce coberta pelos dois lados.
+CARIMBOS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("vocabulario", ("criado_em", "visto_em", "proxima_revisao")),
 )
 
 
@@ -264,10 +274,7 @@ class VocabularyStore:
             self._connection.commit()
             if "busca" in nasceram:
                 self._recarregar_busca()
-            migrar_para_utc(
-                self._connection,
-                (("vocabulario", ("criado_em", "visto_em", "proxima_revisao")),),
-            )
+            migrar_para_utc(self._connection, CARIMBOS)
 
     def _recarregar_busca(self) -> None:
         """Preenche a coluna de busca de um caderno criado antes dela existir.
@@ -460,9 +467,17 @@ class VocabularyStore:
                 else:
                     intervalo = max(intervalo + 1, round(intervalo * facilidade))
                 facilidade = min(3.0, facilidade + 0.1)
-                proxima = (
-                    datetime.now(timezone.utc).astimezone() + timedelta(days=intervalo)
-                ).isoformat(timespec="seconds")
+                # Em UTC, como todo carimbo gravado (ver banco.agora). O
+                # ``.astimezone()`` que estava aqui devolvia o fuso LOCAL, e
+                # esta é a coluna que o SQL compara como TEXTO para responder
+                # "esta palavra venceu?". Uma data local contra um `agora()` em
+                # UTC erra pelo tamanho do deslocamento — três horas no Brasil,
+                # sempre para o lado de vencer cedo —, e a tela discordava do
+                # banco: o `dias_ate_revisao` faz conta de datas de verdade e
+                # respondia "falta 1 dia" para a palavra que o quiz já estava
+                # cobrando. Pior, a migração de abertura conserta a coluna e a
+                # primeira revisão a sujava de novo.
+                proxima = carimbo(datetime.now(timezone.utc) + timedelta(days=intervalo))
             else:
                 erros += 1
                 intervalo = 0
