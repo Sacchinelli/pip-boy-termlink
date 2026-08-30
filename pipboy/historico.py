@@ -57,6 +57,18 @@ CREATE TABLE IF NOT EXISTS atividade (
 # antigo é atualizado no lugar em vez de descartado.
 _MIGRACOES: tuple[tuple[str, str, str], ...] = (("falas", "busca", "TEXT NOT NULL DEFAULT ''"),)
 
+# Toda coluna deste banco que guarda um instante — mesma função da lista de
+# mesmo nome no caderno: a migração de abertura e o teste da invariante leem
+# daqui, em vez de cada um manter a sua cópia.
+#
+# ``atividade.dia`` fica DE FORA de propósito, e não por esquecimento: a
+# sequência de estudo é medida nos dias de quem estuda, não nos de Greenwich,
+# e ali o fuso local é a resposta certa (ver banco.agora).
+CARIMBOS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("sessoes", ("iniciada_em",)),
+    ("falas", ("quando",)),
+)
+
 
 # Por quantos dias uma conversa fica guardada.
 #
@@ -148,10 +160,7 @@ class HistoricoStore:
                     self._connection.commit()
                     if (tabela, coluna) == ("falas", "busca"):
                         self._recarregar_busca()
-            migrar_para_utc(
-                self._connection,
-                (("sessoes", ("iniciada_em",)), ("falas", ("quando",))),
-            )
+            migrar_para_utc(self._connection, CARIMBOS)
 
     def _recarregar_busca(self) -> None:
         """Dobra as falas de um histórico gravado antes da coluna de busca existir.

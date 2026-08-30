@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from .banco import agora, conectar, migrar_para_utc, padrao_de_busca, texto_de_busca
+from .banco import agora, carimbo, conectar, migrar_para_utc, padrao_de_busca, texto_de_busca
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS vocabulario (
@@ -70,11 +70,34 @@ _MIGRACOES: tuple[tuple[str, str], ...] = (
     ("busca", "TEXT NOT NULL DEFAULT ''"),
 )
 
+# Toda coluna deste banco que guarda um instante. Serve a dois leitores: a
+# migração de abertura, que reescreve em UTC o que foi gravado no fuso local, e
+# o teste que trava a invariante. Os dois lerem a MESMA lista é o ponto — a
+# regressão que motivou isto passou porque o teste conferia uma coluna
+# escolhida à mão e a que estava errada não era ela. Coluna de instante nova
+# entra aqui e nasce coberta pelos dois lados.
+CARIMBOS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("vocabulario", ("criado_em", "visto_em", "proxima_revisao")),
+)
+
 
 # Intervalo a partir do qual uma palavra conta como dominada. Vinte e um dias
 # é o ponto em que o SM-2 já a promoveu várias vezes seguidas — antes disso
 # "dominada" seria só "acertei uma vez".
 DIAS_PARA_DOMINIO = 21
+
+# Teto do intervalo entre revisões. O SM-2 multiplica o intervalo pela
+# facilidade a cada acerto, e sem teto ele não converge: 1, 3, 8, 22, 64, 192,
+# 576… — no sétimo acerto a palavra some por um ano e meio, no décimo segundo
+# por 383 anos. Na prática isso é aposentar a palavra, e o banco passa a
+# guardar datas no ano 2400, que nenhuma tela consegue exibir com sentido.
+#
+# Um ano é o ponto em que confirmar ainda é barato e ainda serve para alguma
+# coisa. Palavra dominada custa uma pergunta por ano; em troca, o caderno
+# continua sendo capaz de descobrir que você esqueceu — que é a única razão de
+# existir de uma revisão espaçada. Sem teto, "dominada" viraria sinônimo de
+# "nunca mais perguntada", e o esquecimento passaria despercebido para sempre.
+MAX_INTERVALO_DIAS = 365
 
 # Filtros do caderno. Ficam aqui, e não na interface, porque quem sabe
 # traduzir "difícil" em SQL é o banco.
@@ -264,10 +287,35 @@ class VocabularyStore:
             self._connection.commit()
             if "busca" in nasceram:
                 self._recarregar_busca()
-            migrar_para_utc(
-                self._connection,
-                (("vocabulario", ("criado_em", "visto_em", "proxima_revisao")),),
-            )
+            migrar_para_utc(self._connection, CARIMBOS)
+            self._limitar_intervalos()
+
+    def _limitar_intervalos(self) -> None:
+        """Traz de volta as palavras agendadas além do teto (ver MAX_INTERVALO_DIAS).
+
+        Limitar só na escrita não bastaria, e é justamente o caso interessante:
+        uma palavra marcada para daqui a quarenta anos nunca mais é revisada, e
+        portanto nunca mais passa pela escrita que a consertaria. Quem já foi
+        aposentado pelo crescimento sem teto precisa ser resgatado aqui, ou o
+        conserto não alcança ninguém que ele deveria alcançar.
+
+        A nova data é contada a partir de ``visto_em``, a última vez que a
+        palavra foi de fato revisada — é o único instante que o banco conhece e
+        o único honesto: contar a partir de hoje daria a quem não estuda há
+        meses mais um ano de folga.
+
+        Roda a cada abertura em vez de uma vez só, com versão de esquema, e é
+        de propósito: a operação é idempotente (na segunda passada nada mais
+        casa), o caderno tem centenas de linhas, e um número a menos para
+        manter é um modo a menos de errar.
+        """
+        self._connection.execute(
+            "UPDATE vocabulario SET intervalo_dias = ?, proxima_revisao = COALESCE("
+            "strftime('%Y-%m-%dT%H:%M:%S+00:00', visto_em, ?), proxima_revisao) "
+            "WHERE intervalo_dias > ?",
+            (MAX_INTERVALO_DIAS, f"+{MAX_INTERVALO_DIAS} days", MAX_INTERVALO_DIAS),
+        )
+        self._connection.commit()
 
     def _recarregar_busca(self) -> None:
         """Preenche a coluna de busca de um caderno criado antes dela existir.
@@ -459,10 +507,19 @@ class VocabularyStore:
                     intervalo = 3
                 else:
                     intervalo = max(intervalo + 1, round(intervalo * facilidade))
+                intervalo = min(intervalo, MAX_INTERVALO_DIAS)
                 facilidade = min(3.0, facilidade + 0.1)
-                proxima = (
-                    datetime.now(timezone.utc).astimezone() + timedelta(days=intervalo)
-                ).isoformat(timespec="seconds")
+                # Em UTC, como todo carimbo gravado (ver banco.agora). O
+                # ``.astimezone()`` que estava aqui devolvia o fuso LOCAL, e
+                # esta é a coluna que o SQL compara como TEXTO para responder
+                # "esta palavra venceu?". Uma data local contra um `agora()` em
+                # UTC erra pelo tamanho do deslocamento — três horas no Brasil,
+                # sempre para o lado de vencer cedo —, e a tela discordava do
+                # banco: o `dias_ate_revisao` faz conta de datas de verdade e
+                # respondia "falta 1 dia" para a palavra que o quiz já estava
+                # cobrando. Pior, a migração de abertura conserta a coluna e a
+                # primeira revisão a sujava de novo.
+                proxima = carimbo(datetime.now(timezone.utc) + timedelta(days=intervalo))
             else:
                 erros += 1
                 intervalo = 0
@@ -581,6 +638,77 @@ class VocabularyStore:
             )
             self._connection.commit()
             return cursor.rowcount > 0
+
+    def editar(
+        self,
+        termo: str,
+        *,
+        novo_termo: str | None = None,
+        traducao: str | None = None,
+        exemplo: str | None = None,
+    ) -> Entrada:
+        """Corrige o TEXTO de uma palavra, sem tocar no que ela aprendeu.
+
+        Quem escreve o caderno é o modelo, em silêncio, no meio da conversa — e
+        de vez em quando ele erra a tradução ou grava um exemplo torto. Até
+        aqui a única saída era apagar, e apagar levava junto a facilidade, o
+        intervalo, a próxima revisão, os acertos e os erros: meses de repetição
+        espaçada perdidos para consertar um typo. O caderno tinha porta de
+        saída e não tinha borracha.
+
+        Por isso esta função mexe só em termo, tradução e exemplo (e na coluna
+        de busca, que deriva dos três). O agendamento inteiro fica intocado, e
+        também ``criado_em`` e ``visto_em``: corrigir a grafia de uma palavra
+        não é tê-la revisado, e mover ``visto_em`` mentiria para a sequência de
+        estudo e para o elo que leva de volta à conversa de origem.
+
+        Campo omitido (``None``) fica como está — diferente de campo vazio, que
+        apaga. É a distinção que permite limpar um exemplo errado sem ser
+        obrigado a reescrever a tradução junto.
+        """
+        termo = " ".join(termo.split()).strip()
+        with self._lock:
+            linha = self._connection.execute(
+                "SELECT * FROM vocabulario WHERE termo = ? COLLATE NOCASE", (termo,)
+            ).fetchone()
+            if linha is None:
+                raise ValueError(f"termo não está no caderno: {termo}")
+
+            alvo = " ".join((novo_termo if novo_termo is not None else linha["termo"]).split())
+            nova_traducao = " ".join(
+                (traducao if traducao is not None else linha["traducao"]).split()
+            )
+            novo_exemplo = " ".join((exemplo if exemplo is not None else linha["exemplo"]).split())
+            if not alvo or not nova_traducao:
+                raise ValueError("termo e tradução não podem ficar vazios")
+
+            # O índice de termo é único: renomear para uma palavra que já existe
+            # seria um IntegrityError cru subindo até a interface. Recusar aqui
+            # permite dizer QUAL palavra está no caminho — e fundir as duas seria
+            # pior, porque uma das duas fichas de repetição teria de morrer.
+            if alvo.casefold() != str(linha["termo"]).casefold():
+                colidiu = self._connection.execute(
+                    "SELECT 1 FROM vocabulario WHERE termo = ? COLLATE NOCASE", (alvo,)
+                ).fetchone()
+                if colidiu is not None:
+                    raise ValueError(f"o caderno já tem uma palavra chamada “{alvo}”")
+
+            self._connection.execute(
+                "UPDATE vocabulario SET termo = ?, traducao = ?, exemplo = ?, busca = ? "
+                "WHERE id = ?",
+                (
+                    alvo,
+                    nova_traducao,
+                    novo_exemplo,
+                    texto_de_busca(alvo, nova_traducao, novo_exemplo),
+                    linha["id"],
+                ),
+            )
+            self._connection.commit()
+            atualizada = self._connection.execute(
+                "SELECT * FROM vocabulario WHERE id = ?", (linha["id"],)
+            ).fetchone()
+        return self._linha_para_entrada(atualizada)
 
     def estatisticas(self) -> Estatisticas:
         """Resumo do caderno numa única passagem pela tabela."""

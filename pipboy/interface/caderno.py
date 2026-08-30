@@ -59,7 +59,7 @@ from .componentes import (
     caminho_forma,
     css_campo_selecao,
 )
-from .dialogo import confirmar_remocao
+from .dialogo import avisar, confirmar_remocao, pedir_correcao
 from .moldura import (
     BarraDeTitulo,
     GripsRedimensionamento,
@@ -109,6 +109,7 @@ class CartaoTermo(QFrame):
         *,
         janela: Any,
         ao_remover: Callable[[Entrada], None],
+        ao_corrigir: Callable[[Entrada], None],
         sessao: int | None = None,
         parent: QWidget | None = None,
     ) -> None:
@@ -172,6 +173,21 @@ class CartaoTermo(QFrame):
                 lambda _=False, s=sessao: janela.abrir_conversa(s, entrada.termo)
             )
         topo.addWidget(conversa)
+
+        # Quem escreve o caderno é o modelo, em silêncio, e de vez em quando
+        # ele erra a tradução. Sem esta porta a única saída era o "×" ao lado —
+        # que leva junto meses de repetição espaçada para consertar um typo.
+        #
+        # "▤" é do bloco Geometric Shapes, como todo símbolo desta interface:
+        # o lápis (U+270E) seria o desenho óbvio e é do bloco Dingbats, que
+        # Consolas e Georgia não têm — sairia como caixinha em metade dos temas.
+        corrigir = Botao("▤", variante="sutil", paleta=janela.paleta, forma=self._forma)
+        corrigir.setFont(janela.fonte("corpo_forte"))
+        corrigir.setFixedSize(28, 28)
+        corrigir.setToolTip(f"Corrigir o texto de “{entrada.termo}” sem perder a revisão")
+        corrigir.setAccessibleName(f"Corrigir {entrada.termo}")
+        corrigir.clicked.connect(lambda: ao_corrigir(entrada))
+        topo.addWidget(corrigir)
 
         # "×" (U+00D7, Latin-1) e não "✕" (U+2715, Dingbats): o segundo não
         # existe em Consolas nem em Georgia — as fontes de metade dos temas —
@@ -647,12 +663,38 @@ class JanelaCaderno(QDialog):
                 entrada,
                 janela=self._janela,
                 ao_remover=self._remover,
+                ao_corrigir=self._corrigir,
                 sessao=sessao_em(periodos, entrada.criado_em) if entrada.criado_em else None,
             )
             self._fluxo.insertWidget(self._fluxo.count() - 1, cartao)
             self._cartoes.append(cartao)
         self.rolagem.verticalScrollBar().setValue(0)
         self._posicionar_veu()
+
+    def _corrigir(self, entrada: Entrada) -> None:
+        novos = pedir_correcao(
+            self._janela,
+            termo=entrada.termo,
+            traducao=entrada.traducao,
+            exemplo=entrada.exemplo,
+        )
+        if novos is None:
+            return
+        try:
+            atualizada = self._store.editar(
+                entrada.termo,
+                novo_termo=novos["termo"],
+                traducao=novos["traducao"],
+                exemplo=novos["exemplo"],
+            )
+        except ValueError as erro:
+            # Campo vazio ou nome já usado por outra palavra. O texto do erro
+            # já diz qual das duas coisas foi, e a correção não se perde: a
+            # lista continua como estava, para tentar de novo.
+            avisar(self._janela, "Não deu para corrigir", str(erro), erro=True)
+            return
+        self.atualizar()
+        self._janela.caderno_mudou(f"“{atualizada.termo}” corrigido no caderno.")
 
     def _remover(self, entrada: Entrada) -> None:
         if not confirmar_remocao(self._janela, entrada.termo):

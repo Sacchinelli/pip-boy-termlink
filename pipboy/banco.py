@@ -39,6 +39,27 @@ LOGGER = logging.getLogger("pip_boy.banco")
 VERSAO_UTC = 1
 
 
+def carimbo(momento: datetime) -> str:
+    """Um instante no formato que os dois bancos gravam: ISO, em UTC.
+
+    Existe como função separada — e não embutida no ``agora()`` — porque nem
+    todo carimbo gravado é "agora": a próxima revisão de uma palavra é um
+    instante no FUTURO, e era exatamente ela que escapava. A conversão para UTC
+    mora aqui, num ponto só, de modo que gravar um instante e gravar o instante
+    atual passem pela mesma regra em vez de por duas cópias dela.
+
+    Converter antes de formatar é o serviço: receber um ``datetime`` no fuso
+    local produz o mesmo texto que receber o equivalente em UTC. É isso que
+    torna a invariante testável numa máquina em UTC — o CI roda assim, e nela
+    um ``.astimezone()`` indevido sairia idêntico ao certo e não seria pego.
+    Passando um fuso explícito, o defeito aparece em qualquer máquina.
+
+    Um ``datetime`` ingênuo é lido como local, que é o que ``astimezone`` já
+    faz e o que ``dias_ate_revisao`` presume do outro lado.
+    """
+    return momento.astimezone(timezone.utc).isoformat(timespec="seconds")
+
+
 def agora() -> str:
     """O instante atual, no formato que os dois bancos gravam.
 
@@ -59,7 +80,7 @@ def agora() -> str:
     tabela ``atividade`` (a sequência de estudo é medida nos dias de quem
     estuda, não nos de Greenwich) e o nome do arquivo de backup diário.
     """
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return carimbo(datetime.now(timezone.utc))
 
 
 def dobrar(texto: str) -> str:
