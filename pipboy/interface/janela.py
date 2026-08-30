@@ -29,8 +29,6 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QFont,
-    QFontDatabase,
-    QFontMetrics,
     QPainter,
 )
 from PySide6.QtWidgets import (
@@ -90,6 +88,7 @@ from .montagem import (
 )
 from .preferencias import Escolha, Marca, VinculoDePreferencias
 from .relogios import Batidas, Relogios
+from .tipografia import Tipografia
 
 if TYPE_CHECKING:  # pragma: no cover
     # O módulo de áudio puxa o PyAudio, que custa 175 ms para importar. Ele não
@@ -100,8 +99,6 @@ if TYPE_CHECKING:  # pragma: no cover
 
 LOGGER = logging.getLogger("pip_boy.interface")
 
-
-FONTES_MONO: tuple[str, ...] = ("Cascadia Mono", "Consolas", "Courier New", "Courier")
 
 
 class Sobreposicao(QWidget):
@@ -167,17 +164,15 @@ class Janela(QWidget):
         # meia dúzia de leitores usavam getattr com padrão para contornar a
         # janela em que ela não existia.
         self._intensidade_atmosfera = 1.0
-        # Nasce antes de qualquer widget: `fonte()` é chamada durante a
-        # montagem, e ela lê este fator.
-        self._escala_texto = 1.0
         # A atmosfera nasceu desligada por causa do Windows, e não por escolha?
         # Só para poder dizer isso ao jogador uma vez, no registro.
         self._atmosfera_veio_do_sistema = False
 
         self._tema: GameTheme = theme_for(self._prefs.jogo)
         self._atmosfera = atmosfera_de(self._tema.name)
-        self._instaladas = set(QFontDatabase.families())
-        self._mono = self._primeira_instalada(FONTES_MONO)
+        # Nasce antes de qualquer widget: `fonte()` é chamada durante a
+        # montagem, e a rampa inteira sai daqui.
+        self._tipografia = Tipografia(self._tema)
 
         self._cenario = Cenario()
 
@@ -368,51 +363,25 @@ class Janela(QWidget):
         """Cores do tema num dicionário simples, para os componentes pintados."""
         return paleta_de(self._tema)
 
-    def _primeira_instalada(self, candidatas: tuple[str, ...]) -> str:
-        for nome in candidatas:
-            if nome in self._instaladas:
-                return nome
-        return candidatas[-1]
-
     def fonte(self, papel: str, *, ui: bool = True) -> QFont:
         """Fonte para um degrau da rampa tipográfica.
 
-        ``ui=True`` usa a família neutra dos controles; ``ui=False`` usa a
-        fonte do tema, reservada à marca e à fala do assistente.
-
-        Ponto de estrangulamento de TODA a tipografia do programa — inclusive
-        das janelas satélites, que recebem a janela como provedor. É por isso
-        que o tamanho do texto é um fator aplicado aqui, e não uma rampa
-        alternativa a manter em paralelo.
+        Método da janela, e não do objeto de tipografia, porque é ele que as
+        janelas satélites recebem como PROVEDOR — junto de ``tema``,
+        ``atmosfera`` e ``paleta``. O contrato delas não muda de forma por
+        causa de uma extração interna.
         """
-        tipo = design.TIPO[papel]
-        familia = self._primeira_instalada(
-            self._tema.ui_font_candidates if ui else self._tema.font_candidates
-        )
-        fonte = QFont(familia, design.escalar(tipo.tamanho, self._escala_texto))
-        fonte.setBold(tipo.peso == "bold")
-        fonte.setItalic(tipo.estilo == "italic")
-        return fonte
+        return self._tipografia.fonte(papel, ui=ui)
 
     def _fonte_mono(self, papel: str) -> QFont:
-        tipo = design.TIPO[papel]
-        return QFont(self._mono, design.escalar(tipo.tamanho, self._escala_texto))
+        return self._tipografia.mono(papel)
 
     @property
     def largura_lateral(self) -> int:
-        """A coluna de ajustes é uma coluna de TEXTO, e acompanha o tamanho dele."""
-        return design.escalar(design.LARGURA_LATERAL, self._escala_texto)
+        return self._tipografia.largura_lateral
 
     def _ajustar_marca(self, texto: str) -> QFont:
-        """Encolhe o nome do ambiente até ele caber na largura da coluna."""
-        fonte = self.fonte("display", ui=False)
-        maximo = fonte.pointSize()
-        limite = design.escalar(design.CABECALHO_LARGURA_MAX, self._escala_texto)
-        for tamanho in range(maximo, maximo - 10, -1):
-            fonte.setPointSize(tamanho)
-            if QFontMetrics(fonte).horizontalAdvance(texto) <= limite:
-                break
-        return fonte
+        return self._tipografia.marca(texto)
 
     # ----------------------------------------------------------------- Janela
 
@@ -531,6 +500,7 @@ class Janela(QWidget):
 
     def _aplicar_tema(self) -> None:
         t = self._tema
+        self._tipografia.definir_tema(t)
         self.setWindowTitle(t.window_title)
         self.barra_titulo.aplicar_tema()
         # Só os TEXTOS aqui; as fontes de todos eles saem de _aplicar_fontes,
@@ -618,10 +588,8 @@ class Janela(QWidget):
         satélites pegam a rampa nova pelo ``aplicar_tema`` delas, que é o
         mesmo caminho por onde já pegam a paleta.
         """
-        nova = ESCALAS_TEXTO.get(escolha, 1.0)
-        if nova == self._escala_texto:
+        if not self._tipografia.definir_escala(ESCALAS_TEXTO.get(escolha, 1.0)):
             return
-        self._escala_texto = nova
         self._aplicar_tema()
         # As bolhas guardam a fonte capturada na construção; só refazendo.
         self.conversa.repintar()
@@ -1055,7 +1023,9 @@ class Janela(QWidget):
         # Direto no campo, sem passar por _ajustar_tamanho_texto: aqui a janela
         # ainda está sendo montada, o _aplicar_tema logo a seguir já refaz tudo,
         # e as satélites que aquele método repinta ainda nem existem.
-        self._escala_texto = ESCALAS_TEXTO.get(self.campo_tamanho_texto.currentText(), 1.0)
+        self._tipografia.definir_escala(
+            ESCALAS_TEXTO.get(self.campo_tamanho_texto.currentText(), 1.0)
+        )
         self._atualizar_caderno()
 
     # --------------------------------------------------------------- Atalhos

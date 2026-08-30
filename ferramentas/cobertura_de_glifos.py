@@ -142,7 +142,7 @@ def main() -> int:
 
     from verificar_glifos import simbolos_no_codigo
 
-    from pipboy.interface.janela import FONTES_MONO
+    from pipboy.interface.tipografia import FONTES_MONO
     from pipboy.themes import TEMAS
 
     def primeira(candidatas: tuple[str, ...]) -> str:

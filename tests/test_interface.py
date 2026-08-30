@@ -53,7 +53,7 @@ def main() -> int:
 
     aplicacao = QApplication.instance() or QApplication([])
 
-    from pipboy.config import AppConfiguration, data_directory
+    from pipboy.config import AppConfiguration, Preferences, data_directory
     from pipboy.historico import HistoricoStore
     from pipboy.themes import PAPEIS_DA_PALETA, TEMAS
     from pipboy.vocabulary import VocabularyStore
@@ -530,7 +530,30 @@ def main() -> int:
     boas_vindas.show()
     aplicacao.processEvents()
     checar(not boas_vindas.grab().isNull(), "cartão de boas-vindas desenha")
+    largura_padrao = boas_vindas.minimumWidth()
     boas_vindas.close()
+
+    # O cartão passou a honrar o tamanho do texto — é a única tela que aparece
+    # antes de a janela existir, e quem aumentou a letra por precisar dela
+    # maior não deixa de precisar porque a chave sumiu. A LARGURA cresce
+    # junto: aumentar a fonte dentro de uma caixa fixa fazia o rótulo do botão
+    # de salvar encostar nas duas bordas, que é meio conserto.
+    prefs = Preferences.load()
+    prefs.extras["tamanho_texto"] = "Maior"
+    prefs.save()
+    try:
+        maior = JanelaBoasVindas("aviso de teste")
+        maior.show()
+        aplicacao.processEvents()
+        checar(not maior.grab().isNull(), "e desenha também com o texto maior")
+        checar(
+            maior.minimumWidth() > largura_padrao,
+            f"a caixa cresce com a letra ({largura_padrao} → {maior.minimumWidth()})",
+        )
+        maior.close()
+    finally:
+        prefs.extras.pop("tamanho_texto", None)
+        prefs.save()
 
     print("regressões da interface")
     # Cada verificação abaixo corresponde a um defeito que já existiu.
@@ -556,6 +579,30 @@ def main() -> int:
     # 1b. Tamanho do texto: acessibilidade, e por isso vale em toda superfície
     #     do programa — inclusive nas janelas satélites e DURANTE a sessão.
     from pipboy.interface.janela import ESCALA_TEXTO_PADRAO
+
+    # A rampa agora existe fora da janela, e é assim que ela se deixa
+    # exercitar: um tema, um fator, nenhum widget. As checagens abaixo
+    # continuam passando PELA janela, porque é o caminho que o usuário usa —
+    # as daqui provam a peça sozinha.
+    from pipboy.interface.tipografia import Tipografia, primeira_instalada
+
+    checar(
+        primeira_instalada(("Fonte Inexistente 123", "Outra Que Não Existe")) ==
+        "Outra Que Não Existe",
+        "sem nenhuma candidata instalada, a última é a reserva",
+    )
+    rampa = Tipografia(TEMAS["Fallout"])
+    corpo_padrao = rampa.fonte("corpo").pointSize()
+    checar(rampa.definir_escala(1.30), "trocar o fator responde que MUDOU")
+    checar(not rampa.definir_escala(1.30), "e repetir o mesmo fator responde que não")
+    checar(
+        rampa.fonte("corpo").pointSize() > corpo_padrao,
+        "o fator alcança a rampa sem janela nenhuma no meio",
+    )
+    checar(
+        rampa.mono("micro").pointSize() > Tipografia(TEMAS["Fallout"]).mono("micro").pointSize(),
+        "e alcança também a monoespaçada do rodapé",
+    )
 
     antes_corpo = janela.fonte("corpo").pointSize()
     antes_lateral = janela.largura_lateral

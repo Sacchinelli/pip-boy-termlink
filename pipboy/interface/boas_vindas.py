@@ -13,7 +13,7 @@ tema — o do último jogo usado, como a tela de abertura.
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -27,6 +27,8 @@ from ..config import ConfigurationError, Preferences, salvar_chave
 from ..themes import GameTheme, paleta_de, theme_for
 from .atmosfera import atmosfera_de
 from .componentes import Botao, caminho_forma
+from .montagem import ESCALAS_TEXTO
+from .tipografia import Tipografia
 
 LARGURA = 560
 ENDERECO_CHAVE = "https://aistudio.google.com/apikey"
@@ -36,18 +38,23 @@ class _ProvedorMinimo:
     """O contrato de tema dos componentes, sem precisar da janela principal."""
 
     def __init__(self) -> None:
-        self.tema: GameTheme = theme_for(Preferences.load().jogo)
+        prefs = Preferences.load()
+        self.tema: GameTheme = theme_for(prefs.jogo)
         self.atmosfera = atmosfera_de(self.tema.name)
-        self._instaladas = set(QFontDatabase.families())
+        # O tamanho do texto vale AQUI também. Este cartão montava a rampa
+        # crua e ignorava a escolha — a mesma falha que o `_aplicar_fontes` da
+        # janela existe para corrigir, na única tela que aparece antes de a
+        # janela existir. Quem aumentou a letra por precisar dela maior não
+        # deixa de precisar porque a chave sumiu.
+        escala = ESCALAS_TEXTO.get(str(prefs.extras.get("tamanho_texto", "")), 1.0)
+        self._tipografia = Tipografia(self.tema, escala=escala)
 
     def fonte(self, papel: str, *, ui: bool = True) -> QFont:
-        tipo = design.TIPO[papel]
-        candidatas = self.tema.ui_font_candidates if ui else self.tema.font_candidates
-        familia = next((f for f in candidatas if f in self._instaladas), candidatas[-1])
-        fonte = QFont(familia, tipo.tamanho)
-        fonte.setBold(tipo.peso == "bold")
-        fonte.setItalic(tipo.estilo == "italic")
-        return fonte
+        return self._tipografia.fonte(papel, ui=ui)
+
+    @property
+    def escala(self) -> float:
+        return self._tipografia.escala
 
     def paleta(self) -> dict[str, str]:
         return paleta_de(self.tema)
@@ -68,7 +75,11 @@ class JanelaBoasVindas(QDialog):
         self.setModal(True)
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setMinimumWidth(LARGURA)
+        # A largura acompanha a letra. Ela era fixa, e com o texto em 'Maior'
+        # o rótulo do botão de salvar passava a encostar nas duas bordas da
+        # própria caixa — crescer a fonte sem crescer o continente é meio
+        # conserto de acessibilidade.
+        self.setMinimumWidth(design.escalar(LARGURA, provedor.escala))
 
         coluna = QVBoxLayout(self)
         coluna.setContentsMargins(30, 26, 30, 22)
