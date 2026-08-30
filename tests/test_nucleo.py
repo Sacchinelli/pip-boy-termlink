@@ -2305,6 +2305,66 @@ def teste_carimbos_em_utc() -> None:
     historico2.close()
 
 
+def teste_teto_do_intervalo() -> None:
+    """O intervalo entre revisões para de crescer no teto, e o já crescido volta.
+
+    Sem teto o SM-2 não converge: no sétimo acerto a palavra sumia por um ano e
+    meio, no décimo segundo por 383 anos. "Dominada" virava sinônimo de "nunca
+    mais perguntada", e o esquecimento passava despercebido para sempre.
+    """
+    print("teto do intervalo")
+    from pipboy.vocabulary import MAX_INTERVALO_DIAS
+
+    pasta = Path(tempfile.mkdtemp())
+    loja = VocabularyStore(pasta / "teto.sqlite3")
+    loja.registrar("dragon", "dragão", "", "Skyrim")
+
+    # Acertos muito além do que faria o intervalo estourar sem o teto.
+    maior = 0
+    for _ in range(15):
+        resultado = loja.avaliar("dragon", True)
+        maior = max(maior, int(resultado["proxima_revisao_em_dias"]))
+    checar(maior == MAX_INTERVALO_DIAS, f"o intervalo para no teto ({maior} dias)")
+
+    # E o teto não atrapalha o caminho até ele: os primeiros passos do SM-2
+    # continuam iguais, senão a correção teria trocado um defeito por outro.
+    loja.registrar("shout", "grito", "", "Skyrim")
+    passos = [int(loja.avaliar("shout", True)["proxima_revisao_em_dias"]) for _ in range(3)]
+    checar(passos == [1, 3, 8], f"os primeiros intervalos não mudaram ({passos})")
+    loja.close()
+
+    # Uma palavra aposentada por uma versão sem teto: quarenta e dois anos.
+    aposentada = pasta / "aposentada.sqlite3"
+    antiga = VocabularyStore(aposentada)
+    antiga.registrar("settler", "colono", "", "Fallout")
+    antiga._connection.execute(
+        "UPDATE vocabulario SET intervalo_dias = 15552, visto_em = ?, proxima_revisao = ?",
+        ("2026-01-10T12:00:00+00:00", "2068-08-30T12:00:00+00:00"),
+    )
+    antiga._connection.commit()
+    antiga.close()
+
+    resgatada = VocabularyStore(aposentada)
+    entrada = resgatada.listar()[0]
+    checar(
+        entrada.intervalo_dias == MAX_INTERVALO_DIAS,
+        f"reabrir traz o intervalo para o teto ({entrada.intervalo_dias})",
+    )
+    checar(
+        entrada.proxima_revisao == "2027-01-10T12:00:00+00:00",
+        f"e reagenda a partir do último visto, não de hoje ({entrada.proxima_revisao})",
+    )
+    resgatada.close()
+
+    # Idempotente: a segunda abertura não empurra a data mais para a frente.
+    de_novo = VocabularyStore(aposentada)
+    checar(
+        de_novo.listar()[0].proxima_revisao == "2027-01-10T12:00:00+00:00",
+        "e reabrir de novo não mexe mais em nada",
+    )
+    de_novo.close()
+
+
 def teste_lancamento_sem_console() -> None:
     """O atalho da área de trabalho lança pelo ``pythonw.exe``, que não tem stderr.
 
@@ -2397,6 +2457,7 @@ def main() -> int:
         teste_crash,
         teste_busca_dobrada,
         teste_carimbos_em_utc,
+        teste_teto_do_intervalo,
         teste_lancamento_sem_console,
     ):
         try:

@@ -86,6 +86,19 @@ CARIMBOS: tuple[tuple[str, tuple[str, ...]], ...] = (
 # "dominada" seria só "acertei uma vez".
 DIAS_PARA_DOMINIO = 21
 
+# Teto do intervalo entre revisões. O SM-2 multiplica o intervalo pela
+# facilidade a cada acerto, e sem teto ele não converge: 1, 3, 8, 22, 64, 192,
+# 576… — no sétimo acerto a palavra some por um ano e meio, no décimo segundo
+# por 383 anos. Na prática isso é aposentar a palavra, e o banco passa a
+# guardar datas no ano 2400, que nenhuma tela consegue exibir com sentido.
+#
+# Um ano é o ponto em que confirmar ainda é barato e ainda serve para alguma
+# coisa. Palavra dominada custa uma pergunta por ano; em troca, o caderno
+# continua sendo capaz de descobrir que você esqueceu — que é a única razão de
+# existir de uma revisão espaçada. Sem teto, "dominada" viraria sinônimo de
+# "nunca mais perguntada", e o esquecimento passaria despercebido para sempre.
+MAX_INTERVALO_DIAS = 365
+
 # Filtros do caderno. Ficam aqui, e não na interface, porque quem sabe
 # traduzir "difícil" em SQL é o banco.
 FILTRO_TODAS = "todas"
@@ -275,6 +288,34 @@ class VocabularyStore:
             if "busca" in nasceram:
                 self._recarregar_busca()
             migrar_para_utc(self._connection, CARIMBOS)
+            self._limitar_intervalos()
+
+    def _limitar_intervalos(self) -> None:
+        """Traz de volta as palavras agendadas além do teto (ver MAX_INTERVALO_DIAS).
+
+        Limitar só na escrita não bastaria, e é justamente o caso interessante:
+        uma palavra marcada para daqui a quarenta anos nunca mais é revisada, e
+        portanto nunca mais passa pela escrita que a consertaria. Quem já foi
+        aposentado pelo crescimento sem teto precisa ser resgatado aqui, ou o
+        conserto não alcança ninguém que ele deveria alcançar.
+
+        A nova data é contada a partir de ``visto_em``, a última vez que a
+        palavra foi de fato revisada — é o único instante que o banco conhece e
+        o único honesto: contar a partir de hoje daria a quem não estuda há
+        meses mais um ano de folga.
+
+        Roda a cada abertura em vez de uma vez só, com versão de esquema, e é
+        de propósito: a operação é idempotente (na segunda passada nada mais
+        casa), o caderno tem centenas de linhas, e um número a menos para
+        manter é um modo a menos de errar.
+        """
+        self._connection.execute(
+            "UPDATE vocabulario SET intervalo_dias = ?, proxima_revisao = COALESCE("
+            "strftime('%Y-%m-%dT%H:%M:%S+00:00', visto_em, ?), proxima_revisao) "
+            "WHERE intervalo_dias > ?",
+            (MAX_INTERVALO_DIAS, f"+{MAX_INTERVALO_DIAS} days", MAX_INTERVALO_DIAS),
+        )
+        self._connection.commit()
 
     def _recarregar_busca(self) -> None:
         """Preenche a coluna de busca de um caderno criado antes dela existir.
@@ -466,6 +507,7 @@ class VocabularyStore:
                     intervalo = 3
                 else:
                     intervalo = max(intervalo + 1, round(intervalo * facilidade))
+                intervalo = min(intervalo, MAX_INTERVALO_DIAS)
                 facilidade = min(3.0, facilidade + 0.1)
                 # Em UTC, como todo carimbo gravado (ver banco.agora). O
                 # ``.astimezone()`` que estava aqui devolvia o fuso LOCAL, e
