@@ -16,7 +16,6 @@ from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import (
     QColor,
     QFont,
-    QFontDatabase,
     QGuiApplication,
     QPainter,
     QPen,
@@ -29,14 +28,13 @@ from ..config import Preferences
 from ..themes import theme_for
 from .atmosfera import atmosfera_de
 from .componentes import caminho_forma
+from .tipografia import primeira_instalada
 
 LARGURA, ALTURA = 520, 300
 
 
 def _fonte_do_tema(candidatas: tuple[str, ...], tamanho: int, *, negrito: bool) -> QFont:
-    instaladas = set(QFontDatabase.families())
-    familia = next((f for f in candidatas if f in instaladas), candidatas[-1])
-    fonte = QFont(familia, tamanho)
+    fonte = QFont(primeira_instalada(candidatas), tamanho)
     fonte.setBold(negrito)
     return fonte
 

@@ -146,7 +146,7 @@ def main() -> int:
         print("=" * 68 + "\n")
         return 0
 
-    from pipboy.interface.janela import FONTES_MONO
+    from pipboy.interface.tipografia import FONTES_MONO
     from pipboy.themes import TEMAS
 
     def primeira(candidatas: tuple[str, ...]) -> str:
