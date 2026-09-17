@@ -1091,6 +1091,103 @@ def main() -> int:
     janela.campo_atmosfera.setCurrentText(atmosfera_progresso)
     aplicacao.processEvents()
 
+    print("histórico que orienta")
+    # Uma conversa longa o bastante para a fala marcada ficar fora da tela.
+    sessao_longa = historico.iniciar_sessao(jogo="Fallout")
+    for numero in range(24):
+        historico.registrar_fala(
+            sessao_longa, autor="VOCÊ", tag="usuario", texto=f"pergunta de aquecimento {numero}"
+        )
+    historico.registrar_fala(sessao_longa, autor="", tag="vocab", texto="⊕ scrap — sucata")
+
+    atmosfera_historico = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    aplicacao.processEvents()
+
+    from pipboy.interface.historico import JanelaHistorico
+
+    def fala_a_vista(visor_alvo: JanelaHistorico) -> bool:
+        linha = visor_alvo.linha_marcada
+        if linha is None:
+            return False
+        vista = visor_alvo._rolagem_falas.viewport()
+        topo = linha.mapTo(vista, linha.rect().topLeft()).y()
+        return bool(topo >= 0 and topo + linha.height() <= vista.height())
+
+    janela.abrir_conversa(sessao_longa, "scrap")
+    visor = janela._visor_historico
+    assert visor is not None
+    # Lido antes de o laço rodar: uma cascata aqui ainda estaria em curso.
+    primeira_fala = visor._pilha_falas.itemAt(0).widget()
+    checar(
+        primeira_fala is not None and primeira_fala.graphicsEffect() is None,
+        "chegando a uma fala, a coluna não anima em cascata por cima da rolagem",
+    )
+    checar(
+        visor._itens_lista[sessao_longa].isChecked()
+        and not any(b.isChecked() for s, b in visor._itens_lista.items() if s != sessao_longa),
+        "a sessão aberta fica marcada na lista, e só ela",
+    )
+    checar(
+        aguardar(lambda: fala_a_vista(visor)),
+        "a transcrição rola até a fala marcada, que estava fora da tela",
+    )
+    checar(
+        aguardar(lambda: visor.linha_marcada is not None and visor.linha_marcada.pulsando),
+        "e a fala pulsa ao chegar",
+    )
+
+    visor._itens_lista[sessao_longa].click()
+    checar(
+        visor._itens_lista[sessao_longa].isChecked(),
+        "clicar na sessão já aberta não a desmarca",
+    )
+    outra = next(s for s in historico.listar_sessoes() if s.id != sessao_longa)
+    visor._abrir_sessao(outra)
+    checar(
+        visor._itens_lista[outra.id].isChecked() and not visor._itens_lista[sessao_longa].isChecked(),
+        "abrir outra sessão move a marca",
+    )
+    primeira_fala = visor._pilha_falas.itemAt(0).widget()
+    checar(
+        primeira_fala is not None and isinstance(primeira_fala.graphicsEffect(), EfeitoEntrada),
+        "e a conversa nova entra em cascata",
+    )
+    resumo_longo = historico.sessao(sessao_longa)
+    assert resumo_longo is not None
+    visor._abrir_sessao(resumo_longo)
+    visor._busca.setText("aquecimento")
+    aplicacao.processEvents()
+    primeira_fala = visor._pilha_falas.itemAt(0).widget()
+    checar(
+        isinstance(primeira_fala, QLabel)
+        and "aquecimento" in primeira_fala.text()
+        and primeira_fala.graphicsEffect() is None,
+        "filtrar pela busca redesenha sem cascata",
+    )
+    visor._busca.clear()
+    checar(
+        visor._botao_fechar.font().pointSize() == janela.fonte("corpo_forte").pointSize(),
+        "os botões do rodapé usam a fonte dos outros botões",
+    )
+
+    janela.campo_atmosfera.setCurrentText("Desligada")
+    aplicacao.processEvents()
+    janela.abrir_conversa(sessao_longa, "scrap")
+    checar(
+        aguardar(lambda: fala_a_vista(visor)),
+        "com a atmosfera desligada a fala também chega à vista",
+    )
+    checar(
+        visor._rolagem_animada is None and visor.linha_marcada is not None
+        and not visor.linha_marcada.pulsando,
+        "mas sem rolagem animada nem pulso",
+    )
+    visor.close()
+    historico.remover_sessao(sessao_longa)
+    janela.campo_atmosfera.setCurrentText(atmosfera_historico)
+    aplicacao.processEvents()
+
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()
     # nunca voltaria e a suíte penduraria. O tiro agendado é esse alguém.
