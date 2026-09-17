@@ -944,6 +944,153 @@ def main() -> int:
         janela.campo_atmosfera.setCurrentText(atmosfera_revisao)
         aplicacao.processEvents()
 
+    print("progresso que responde")
+    from datetime import date as Data
+
+    from PySide6.QtGui import QMouseEvent as EventoMouse
+
+    from pipboy.interface.progresso import (
+        JanelaProgresso,
+        descrever_semana,
+        segundas_do_grafico,
+    )
+
+    # A virada do ano é o caso que um rótulo "dd/mm" não resolve sozinho.
+    segundas = segundas_do_grafico(3, Data(2026, 1, 1))
+    checar(
+        segundas == [Data(2025, 12, 15), Data(2025, 12, 22), Data(2025, 12, 29)],
+        f"as segundas das barras atravessam a virada do ano ({segundas})",
+    )
+    semanas_teste = [("15/12", 1), ("22/12", 7), ("29/12", 7)]
+    checar(
+        descrever_semana(semanas_teste, 2, segundas)
+        == ("29/12 – 04/01 · esta semana", "7 palavras novas, igual à anterior"),
+        "a ficha da semana corrente diz o intervalo e compara com a anterior",
+    )
+    checar(
+        descrever_semana(semanas_teste, 1, segundas)[1] == "7 palavras novas, 6 a mais que a anterior",
+        "e diz quanto cresceu",
+    )
+    checar(
+        descrever_semana(semanas_teste, 0, segundas)[1] == "1 palavra nova",
+        "a primeira barra não tem com quem se comparar, e fala no singular",
+    )
+
+    def mover_em(alvo: QWidget, x: float, y: float) -> None:
+        ponto = QPointF(x, y)
+        QApplication.sendEvent(
+            alvo,
+            EventoMouse(
+                QEvent.Type.MouseMove, ponto, QPointF(alvo.mapToGlobal(ponto)),
+                Qt.MouseButton.NoButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+            ),
+        )
+
+    atmosfera_progresso = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    aplicacao.processEvents()
+    nunca_aberto = JanelaProgresso(janela, store, parent=janela)
+    checar(
+        nunca_aberto.grafico_semanas.crescimento.progresso(7) == 1.0,
+        "um painel fotografado sem nunca ter aparecido não sai com as barras vazias",
+    )
+    nunca_aberto.deleteLater()
+
+    # A linha do tempo lida em instantes fixos, sem relógio nenhum.
+    from pipboy.interface.movimento import Crescimento
+
+    linha_do_tempo = Crescimento(janela, 2, reduzir=lambda: False, atraso=120, duracao=300)
+    linha_do_tempo._avancar(100.0)
+    checar(linha_do_tempo.progresso(0) == 0.0, "antes do atraso, nada cresceu")
+    linha_do_tempo._avancar(420.0)
+    checar(
+        linha_do_tempo.progresso(0) == 1.0 and linha_do_tempo.progresso(1) < 1.0,
+        "no fim da duração o primeiro chegou e o segundo, escalonado, ainda não",
+    )
+    linha_do_tempo.deleteLater()
+
+    avisos_progresso: list[str] = []
+    qInstallMessageHandler(lambda _t, _c, mensagem: avisos_progresso.append(mensagem))
+    painel = JanelaProgresso(janela, store, parent=janela)
+    try:
+        painel.show()
+        checar(
+            painel.grafico_semanas.crescimento.ativo
+            and painel.grafico_semanas.crescimento.progresso(0) < 1.0,
+            "abrir o painel faz as barras crescerem",
+        )
+        jogos_atraso = painel.grafico_jogos.crescimento.atraso if painel.grafico_jogos else 10**6
+        checar(
+            painel.grafico_semanas.crescimento.atraso
+            < painel.regua.crescimento.atraso
+            < jogos_atraso,
+            "cada gráfico começa depois do de cima, na ordem de leitura",
+        )
+        checar(
+            aguardar(lambda: not painel.grafico_semanas.crescimento.ativo
+                     and painel.grafico_semanas.crescimento.progresso(7) == 1.0),
+            "até chegarem ao tamanho certo",
+        )
+
+        grafico = painel.grafico_semanas
+        mover_em(grafico, grafico.width() * (2.5 / 8), grafico.height() / 2)
+        checar(grafico.apontado == 2, f"o cursor sobre a terceira barra a aponta ({grafico.apontado})")
+        checar(aguardar(lambda: grafico._destaque.valor == 1.0), "e o destaque acende")
+        QApplication.sendEvent(grafico, QEvent(QEvent.Type.Leave))
+        checar(grafico.apontado is None, "sair do gráfico solta o apontado")
+        # Lido ANTES de o laço de eventos rodar: um destaque que sumisse num
+        # quadro já estaria em zero aqui.
+        checar(grafico._destaque.valor > 0.0, "e o destaque apaga em vez de sumir num quadro")
+        checar(aguardar(lambda: grafico._destaque.valor == 0.0), "até apagar de todo")
+
+        altura_regua = painel.regua.height()
+        mover_em(painel.regua, painel.regua.width() * 0.02, 6)
+        checar(
+            painel.regua.explicacao.startswith("Novas:"),
+            f"apontar um trecho da régua explica a categoria ({painel.regua.explicacao})",
+        )
+        aplicacao.processEvents()
+        checar(
+            painel.regua.height() == altura_regua
+            and painel.regua.retangulo_explicacao().bottom() <= painel.regua.height(),
+            "a explicação cabe no lugar reservado, sem mudar a altura da régua",
+        )
+
+        jogos_painel = painel.grafico_jogos
+        assert jogos_painel is not None
+        checar(
+            "%" not in jogos_painel.rotulo_de_valor(0),
+            "fora do cursor, a barra de um jogo mostra só o número",
+        )
+        mover_em(jogos_painel, 10, 5)
+        checar(
+            jogos_painel.apontado == 0 and "% do caderno" in jogos_painel.rotulo_de_valor(0),
+            f"sob o cursor, mostra a fatia do caderno ({jogos_painel.rotulo_de_valor(0)})",
+        )
+        avisos_progresso.clear()
+        painel.update()
+        esperar(80)
+        checar(
+            not [a for a in avisos_progresso if "ainter" in a],
+            f"repintar o painel apontado não gera aviso ({avisos_progresso[:2]})",
+        )
+    finally:
+        qInstallMessageHandler(None)
+        painel.close()
+
+    janela.campo_atmosfera.setCurrentText("Desligada")
+    aplicacao.processEvents()
+    calmo = JanelaProgresso(janela, store, parent=janela)
+    calmo.show()
+    checar(
+        not calmo.grafico_semanas.crescimento.ativo
+        and calmo.grafico_semanas.crescimento.progresso(7) == 1.0,
+        "com a atmosfera desligada as barras já abrem no tamanho certo",
+    )
+    calmo.close()
+    janela.campo_atmosfera.setCurrentText(atmosfera_progresso)
+    aplicacao.processEvents()
+
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()
     # nunca voltaria e a suíte penduraria. O tiro agendado é esse alguém.

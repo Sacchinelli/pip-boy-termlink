@@ -216,3 +216,70 @@ class ImagemQueSai(QWidget):
         pintor.setOpacity(max(0.0, 1.0 - self._progresso * 1.6))
         pintor.drawPixmap(self._deslocamento * self._progresso, self._retrato)
         pintor.end()
+
+
+class Crescimento(QObject):
+    """Uma linha do tempo para itens DESENHADOS que entram escalonados.
+
+    ``animar_entrada`` escalona widgets; as barras de um gráfico não são
+    widgets, são retângulos de um mesmo ``paintEvent``. Aqui há um relógio só
+    e cada barra pergunta o próprio progresso — ``progresso(i)`` já vem com a
+    curva aplicada e com o atraso do item embutido. Um relógio para oito barras,
+    e não oito animações.
+
+    ``atraso`` desloca a linha do tempo inteira: é como três gráficos da mesma
+    tela entram um depois do outro sem se conhecerem.
+    """
+
+    ESCALONAMENTO = 30
+
+    def __init__(
+        self,
+        dono: QWidget,
+        itens: int,
+        *,
+        reduzir: Callable[[], bool],
+        atraso: int = 0,
+        duracao: int = design.DURACAO_LENTA,
+    ) -> None:
+        super().__init__(dono)
+        self._dono = dono
+        self._itens = max(1, itens)
+        self._reduzir = reduzir
+        self._atraso = atraso
+        self._duracao = duracao
+        self._curva = QEasingCurve(QEasingCurve.Type.OutCubic)
+        self._total = atraso + duracao + self.ESCALONAMENTO * (self._itens - 1)
+        # Antes de iniciar, tudo está no lugar final: um gráfico fotografado
+        # sem nunca ter aparecido não pode sair vazio.
+        self._t = float(self._total)
+        self._animacao = QVariantAnimation(self)
+        self._animacao.setStartValue(0.0)
+        self._animacao.setEndValue(float(self._total))
+        self._animacao.setDuration(self._total)
+        self._animacao.valueChanged.connect(self._avancar)
+
+    @property
+    def ativo(self) -> bool:
+        return self._animacao.state() == QAbstractAnimation.State.Running
+
+    @property
+    def atraso(self) -> int:
+        return self._atraso
+
+    def iniciar(self) -> None:
+        self._animacao.stop()
+        if self._reduzir():
+            self._avancar(float(self._total))
+            return
+        self._t = 0.0
+        self._animacao.start()
+
+    def progresso(self, indice: int) -> float:
+        inicio = self._atraso + self.ESCALONAMENTO * indice
+        fracao = (self._t - inicio) / self._duracao
+        return self._curva.valueForProgress(max(0.0, min(1.0, fracao)))
+
+    def _avancar(self, valor: Any) -> None:
+        self._t = float(valor)
+        self._dono.update()
