@@ -4,6 +4,19 @@ Duas colunas: à esquerda as sessões (data, jogo, quantas falas), à direita a
 transcrição da sessão escolhida — cada fala com o autor na cor do seu papel,
 como na conversa ao vivo. Uma sessão pode ser apagada; o histórico é do
 jogador, não do programa.
+
+Quase sempre se chega aqui por um SALTO — o ◷ de uma palavra no caderno, um
+resultado da busca entre conversas —, e um salto desorienta. Três coisas dizem
+onde se está:
+
+* **A sessão aberta fica marcada na lista.** Antes, as entradas eram todas
+  iguais, e a única forma de saber qual conversa estava na direita era ler a
+  data no cabeçalho e procurá-la na coluna.
+* **A transcrição rola até a fala em vez de pular**, e a fala pulsa uma vez
+  ao chegar. Um pulo instantâneo deixa o olho no alto da coluna, procurando.
+* **Trocar de sessão faz as falas entrarem em cascata**, que é o que distingue
+  "outra conversa" de "a mesma conversa redesenhada". Filtrar pela busca não
+  anima: ela redesenha a cada tecla.
 """
 
 from __future__ import annotations
@@ -11,9 +24,18 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from PySide6.QtCore import QRectF, Qt, QTimer
+from PySide6.QtCore import (
+    QEasingCurve,
+    QEvent,
+    QPropertyAnimation,
+    QRectF,
+    Qt,
+    QTimer,
+    QVariantAnimation,
+)
 from PySide6.QtGui import QColor, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
+    QApplication,
     QDialog,
     QFrame,
     QHBoxLayout,
@@ -29,12 +51,20 @@ from ..historico import Fala, HistoricoStore, ResumoDeSessao
 from .componentes import Botao, caminho_forma
 from .dialogo import Caixa
 from .moldura import BarraDeTitulo, GripsRedimensionamento, aplicar_cantos_do_sistema
+from .movimento import animar_entrada
 
 LARGURA_LISTA = 250
 
 # A busca entre conversas só consulta o banco depois desta pausa, pelo mesmo
 # motivo do caderno: ela varre a tabela de falas inteira.
 ESPERA_BUSCA_MS = 180
+
+# Falas que entram em cascata ao trocar de sessão: as que cabem na tela.
+CASCATA_MAXIMA = 10
+
+# Folga acima e abaixo da fala marcada ao rolar até ela: a linha chega com
+# conversa em volta, que é o motivo inteiro de abrir a conversa.
+FOLGA_MARCADA = 140
 
 
 def _data_amigavel(iso: str) -> str:
@@ -43,6 +73,50 @@ def _data_amigavel(iso: str) -> str:
     except ValueError:
         return iso
     return quando.strftime("%d/%m/%Y %H:%M")
+
+
+class LinhaMarcada(QLabel):
+    """A fala que trouxe alguém até aqui: fundo próprio e um pulso ao chegar.
+
+    O fundo é pintado, e não posto na folha de estilo, para poder pulsar sem
+    reaplicar CSS a cada quadro.
+    """
+
+    DURACAO_PULSO = 900
+
+    def __init__(self, texto: str, *, fundo: str, acento: str) -> None:
+        super().__init__(texto)
+        self._fundo = fundo
+        self._acento = acento
+        self.pulso = 0.0
+        self._animacao = QVariantAnimation(self)
+        self._animacao.setDuration(self.DURACAO_PULSO)
+        self._animacao.setStartValue(0.0)
+        self._animacao.setKeyValueAt(0.25, 1.0)
+        self._animacao.setEndValue(0.0)
+        self._animacao.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        self._animacao.valueChanged.connect(self._repintar)
+
+    @property
+    def pulsando(self) -> bool:
+        return self._animacao.state() == QVariantAnimation.State.Running
+
+    def pulsar(self) -> None:
+        self._animacao.stop()
+        self._animacao.start()
+
+    def _repintar(self, valor: Any) -> None:
+        self.pulso = float(valor)
+        self.update()
+
+    def paintEvent(self, evento: Any) -> None:
+        pintor = QPainter(self)
+        pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pintor.setPen(Qt.PenStyle.NoPen)
+        pintor.setBrush(QColor(design.misturar(self._fundo, self._acento, 0.35 * self.pulso)))
+        pintor.drawRoundedRect(QRectF(self.rect()), 4, 4)
+        pintor.end()
+        super().paintEvent(evento)
 
 
 class JanelaHistorico(QDialog):
@@ -57,6 +131,9 @@ class JanelaHistorico(QDialog):
         self._titulo_sessao = ""
         # Palavra que trouxe o jogador até aqui, quando ele veio pelo caderno.
         self._destaque = ""
+        self._itens_lista: dict[int, Botao] = {}
+        self.linha_marcada: LinhaMarcada | None = None
+        self._rolagem_animada: QPropertyAnimation | None = None
 
         self.setWindowTitle("Histórico de sessões")
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
@@ -158,12 +235,12 @@ class JanelaHistorico(QDialog):
         )
         self._botao_apagar.clicked.connect(self._apagar_sessao)
         rodape.addWidget(self._botao_apagar)
-        botao_fechar = Botao(
+        self._botao_fechar = Botao(
             "Fechar", variante="acento",
             paleta=janela.paleta, forma=janela.atmosfera.forma,
         )
-        botao_fechar.clicked.connect(self.close)
-        rodape.addWidget(botao_fechar)
+        self._botao_fechar.clicked.connect(self.close)
+        rodape.addWidget(self._botao_fechar)
         coluna_falas.addLayout(rodape)
         linha.addLayout(coluna_falas, 1)
 
@@ -179,6 +256,12 @@ class JanelaHistorico(QDialog):
         self._cabecalho.setFont(janela.fonte("legenda"))
         self._busca.setFont(janela.fonte("corpo"))
         self._busca_sessoes.setFont(janela.fonte("aux"))
+        # Sem isto os dois botões herdavam a fonte do diálogo, e saíam numa
+        # letra diferente da de todas as outras janelas — no Fallout, em
+        # caixa-alta pixelada.
+        for botao in (self._botao_apagar, self._botao_fechar):
+            botao.setFont(janela.fonte("corpo_forte"))
+            botao.forma = janela.atmosfera.forma
         raio = {"chanfrada": 3, "reta": 2}.get(janela.atmosfera.forma, 8)
         self.setStyleSheet(f"""
         QDialog {{ background: {t.screen}; }}
@@ -218,6 +301,7 @@ class JanelaHistorico(QDialog):
         janela = self._janela
         self._espera_sessoes.stop()
         # Limpa a lista (o stretch do fim fica).
+        self._itens_lista = {}
         while self._pilha_lista.count() > 1:
             item = self._pilha_lista.takeAt(0)
             widget = item.widget() if item is not None else None
@@ -238,12 +322,16 @@ class JanelaHistorico(QDialog):
                 f"{_data_amigavel(resumo.iniciada_em)}\n"
                 f"{resumo.jogo or 'Sem jogo'} · {contagem}"
             )
+            # Chip, e não botão sutil: é uma lista de ESCOLHA, e o chip ligado
+            # é a forma que o programa já usa para "esta é a que está valendo".
             botao = Botao(
-                rotulo, variante="sutil", paleta=janela.paleta,
+                rotulo, variante="chip", paleta=janela.paleta,
                 forma=janela.atmosfera.forma, alinhamento_esquerdo=True,
             )
+            botao.setCheckable(True)
             botao.setFont(janela.fonte("legenda"))
             botao.setMinimumHeight(52)
+            self._itens_lista[resumo.id] = botao
             # Clicar num RESULTADO leva o texto procurado junto: a conversa
             # abre já rolada até a fala que casou. Sem isso, achar a conversa
             # certa devolveria ao jogador uma hora de transcrição e o problema
@@ -316,8 +404,14 @@ class JanelaHistorico(QDialog):
             f"{_data_amigavel(resumo.iniciada_em)}   ·   {'   ·   '.join(partes)}"
         )
         self._falas_abertas = self._historico.falas_de(resumo.id)
+        for sessao_id, item in self._itens_lista.items():
+            # Também desfaz a alternância que o clique acabou de fazer num
+            # chip: clicar na sessão já aberta não pode desmarcá-la.
+            item.setChecked(sessao_id == resumo.id)
+        self._busca.blockSignals(True)
         self._busca.clear()  # trocar de sessão zera o filtro da anterior
-        self._pintar_falas()
+        self._busca.blockSignals(False)
+        self._pintar_falas(animar=True)
 
     def _linha_a_marcar(self, falas: list[Fala]) -> int:
         """Posição da fala a destacar, ou -1. A de vocabulário tem preferência."""
@@ -335,11 +429,18 @@ class JanelaHistorico(QDialog):
         return primeira
 
     def _filtrar(self) -> None:
-        self._pintar_falas()
+        self._pintar_falas(animar=False)
 
-    def _pintar_falas(self) -> None:
+    def _movimento_reduzido(self) -> bool:
+        return bool(self._janela.intensidade_atmosfera <= 0.0)
+
+    def _pintar_falas(self, *, animar: bool = False) -> None:
         """Desenha a transcrição aberta, respeitando o filtro de busca."""
         janela, t = self._janela, self._janela.tema
+        if self._rolagem_animada is not None:
+            self._rolagem_animada.stop()
+            self._rolagem_animada = None
+        self.linha_marcada = None
         self._limpar_falas()
 
         alvo = " ".join(self._busca.text().split()).lower()
@@ -363,31 +464,34 @@ class JanelaHistorico(QDialog):
         # numa fala que viria primeiro. Vindo da busca entre conversas, não há
         # anotação nenhuma e a primeira menção é a resposta certa.
         indice_marcado = self._linha_a_marcar(visiveis)
-        marcado: QWidget | None = None
+        blocos: list[QWidget] = []
         for posicao, fala in enumerate(visiveis):
-            bloco = QLabel(
+            texto = (
                 f"{fala.autor or fala.tag.upper()} — {fala.texto}"
                 if fala.autor or fala.tag
                 else fala.texto
             )
-            bloco.setWordWrap(True)
-            bloco.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            bloco.setFont(janela.fonte("corpo"))
             cor = cores.get(fala.tag, t.secondary)
-
             if posicao == indice_marcado:
-                marcado = bloco
                 fundo = design.misturar(t.screen, t.accent, 0.20)
+                marcada = LinhaMarcada(texto, fundo=fundo, acento=t.accent)
+                self.linha_marcada = marcada
+                bloco: QLabel = marcada
                 bloco.setStyleSheet(
                     f"color: {design.garantir_contraste(cor, fundo)};"
-                    f" background: {fundo}; border-radius: 4px; padding: 6px 9px;"
+                    " background: transparent; padding: 6px 9px;"
                 )
             else:
+                bloco = QLabel(texto)
                 bloco.setStyleSheet(
                     f"color: {design.garantir_contraste(cor, t.screen)};"
                     " background: transparent;"
                 )
+            bloco.setWordWrap(True)
+            bloco.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            bloco.setFont(janela.fonte("corpo"))
             self._pilha_falas.insertWidget(self._pilha_falas.count() - 1, bloco)
+            blocos.append(bloco)
 
         if alvo and not visiveis:
             vazio = QLabel("Nenhuma fala desta conversa contém esse texto.")
@@ -400,14 +504,45 @@ class JanelaHistorico(QDialog):
             self._pilha_falas.insertWidget(self._pilha_falas.count() - 1, vazio)
 
         self._rolagem_falas.verticalScrollBar().setValue(0)
-        if marcado is not None:
+        # Um movimento por vez: com uma fala de destino, quem guia o olho é a
+        # rolagem até ela, e uma cascata no alto da coluna animaria justamente
+        # as linhas que estão saindo de vista.
+        if animar and self.linha_marcada is None:
+            animar_entrada(blocos[:CASCATA_MAXIMA], reduzir=self._movimento_reduzido())
+        if self.linha_marcada is not None:
             # Depois que o layout existir: antes disso o widget não tem
-            # posição, e rolar até ele não faz nada. A margem generosa deixa a
-            # linha marcada com conversa em volta — que é o motivo INTEIRO de
-            # abrir a conversa em vez de só mostrar a palavra.
-            QTimer.singleShot(
-                0, lambda w=marcado: self._rolagem_falas.ensureWidgetVisible(w, 0, 140)
-            )
+            # posição, e rolar até ele não faz nada.
+            QTimer.singleShot(0, lambda w=self.linha_marcada: self._chegar_em(w))
+
+    def _chegar_em(self, linha: LinhaMarcada) -> None:
+        """Rola até a fala marcada e a faz pulsar quando chega."""
+        if linha is not self.linha_marcada:
+            return  # a transcrição foi redesenhada antes deste quadro
+        # O layout das falas recém-inseridas ainda está na fila: sem processá-lo,
+        # a área de rolagem não conhece a altura nova, o máximo da barra é zero e
+        # não há para onde rolar. Era o que acontecia antes desta função existir
+        # — a promessa de abrir "já rolada até a fala" nunca se cumpria, porque
+        # um único giro do laço não bastava para o conteúdo ser medido.
+        QApplication.sendPostedEvents(None, QEvent.Type.LayoutRequest)
+        barra = self._rolagem_falas.verticalScrollBar()
+        # O destino é o que ensureWidgetVisible escolheria; ele é perguntado ao
+        # próprio Qt e desfeito no mesmo instante, antes de qualquer pintura.
+        partida = barra.value()
+        self._rolagem_falas.ensureWidgetVisible(linha, 0, FOLGA_MARCADA)
+        destino = barra.value()
+        if self._movimento_reduzido() or destino == partida:
+            if not self._movimento_reduzido():
+                linha.pulsar()
+            return
+        barra.setValue(partida)
+        animacao = QPropertyAnimation(barra, b"value", self)
+        animacao.setDuration(design.DURACAO_LENTA + 140)
+        animacao.setStartValue(partida)
+        animacao.setEndValue(destino)
+        animacao.setEasingCurve(QEasingCurve.Type.OutCubic)
+        animacao.finished.connect(linha.pulsar)
+        self._rolagem_animada = animacao
+        animacao.start()
 
     def _apagar_sessao(self) -> None:
         if self._sessao_aberta is None:
