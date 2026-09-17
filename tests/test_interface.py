@@ -828,6 +828,122 @@ def main() -> int:
     janela.resize(tamanho_antes)
     aplicacao.processEvents()
 
+    print("revisão com retorno")
+    # Um caderno SÓ desta seção: responder cartões reagenda as palavras, e as
+    # do caderno principal ainda são contadas mais adiante.
+    from pipboy.interface.movimento import ImagemQueSai
+    from pipboy.interface.revisao import JanelaRevisao, quando_volta
+
+    caderno_revisao = VocabularyStore(dados / "revisao-com-retorno.sqlite3")
+    caderno_revisao.registrar("wasteland", "terra devastada", "Welcome to the wasteland.", "Fallout")
+    caderno_revisao.registrar("to scavenge", "vasculhar", "", "Fallout")
+    caderno_revisao.registrar("bounty", "recompensa", "A bounty on your head.", "Red Dead")
+
+    checar(
+        (quando_volta(0), quando_volta(1), quando_volta(4))
+        == ("na próxima rodada", "amanhã", "em 4 dias"),
+        "os dias até a volta são ditos como se diz",
+    )
+
+    atmosfera_revisao = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    aplicacao.processEvents()
+    avisos_revisao: list[str] = []
+    qInstallMessageHandler(lambda _t, _c, mensagem: avisos_revisao.append(mensagem))
+    rodada_ui = JanelaRevisao(janela, caderno_revisao, parent=janela)
+    try:
+        rodada_ui.show()
+        aplicacao.processEvents()
+        checar(rodada_ui._barra.isVisible(), "a barra da rodada aparece com cartões na fila")
+        checar(rodada_ui._dica.isVisible(), "antes de revelar, o verso pede para tentar lembrar")
+        altura_frente = rodada_ui.height()
+        posicao_botoes = rodada_ui._botao_revelar.mapTo(rodada_ui, rodada_ui._botao_revelar.rect().topLeft()).y()
+
+        primeiro = rodada_ui._rodada.atual
+        assert primeiro is not None
+        rodada_ui._revelar()
+        aplicacao.processEvents()
+        checar(
+            not rodada_ui._dica.isVisible() and rodada_ui._traducao.text() == primeiro.traducao,
+            "revelar troca a dica pela resposta",
+        )
+        checar(
+            isinstance(rodada_ui._traducao.graphicsEffect(), EfeitoEntrada),
+            "e a resposta entra subindo em vez de aparecer",
+        )
+        posicao_resposta = rodada_ui._botao_acertei.mapTo(rodada_ui, rodada_ui._botao_acertei.rect().topLeft()).y()
+        checar(
+            rodada_ui.height() == altura_frente and posicao_resposta == posicao_botoes,
+            f"revelar não empurra os botões ({posicao_botoes} → {posicao_resposta})",
+        )
+
+        rodada_ui._responder(True)
+        aplicacao.processEvents()
+        checar(rodada_ui._barra.resultados == [True], "acertar pinta o primeiro segmento")
+        checar(
+            primeiro.termo in rodada_ui._recado.toolTip() and "volta" in rodada_ui._recado.toolTip(),
+            f"e o recado diz quando a palavra volta ({rodada_ui._recado.toolTip()})",
+        )
+        checar(
+            len(rodada_ui._cartao.findChildren(ImagemQueSai)) == 1,
+            "o cartão respondido sai deslizando por cima do próximo",
+        )
+        checar(
+            aguardar(lambda: not rodada_ui._cartao.findChildren(ImagemQueSai)),
+            "e a foto dele some sozinha",
+        )
+
+        segundo = rodada_ui._rodada.atual
+        assert segundo is not None
+        rodada_ui._revelar()
+        rodada_ui._responder(False)
+        aplicacao.processEvents()
+        checar(rodada_ui._barra.resultados == [True, False], "errar pinta o segmento seguinte")
+        checar(
+            rodada_ui._recado.toolTip() == f"{segundo.termo} volta na próxima rodada",
+            f"e a palavra errada volta na próxima rodada ({rodada_ui._recado.toolTip()})",
+        )
+
+        rodada_ui._revelar()
+        rodada_ui._responder(False)
+        aplicacao.processEvents()
+        checar(
+            rodada_ui._termo.text() == "1 acerto · 2 erros",
+            f"o resumo conjuga acerto no singular ({rodada_ui._termo.text()})",
+        )
+        checar(
+            rodada_ui._meta.text() == "2 palavras ainda vencidas.",
+            f"e as vencidas no plural, sem parênteses ({rodada_ui._meta.text()})",
+        )
+        checar(rodada_ui.height() == altura_frente, "o resumo cabe na mesma altura do cartão")
+        aguardar(lambda: not rodada_ui._cartao.findChildren(ImagemQueSai))
+        avisos_revisao.clear()
+        rodada_ui.update()
+        esperar(80)
+        checar(
+            not [a for a in avisos_revisao if "ainter" in a],
+            f"repintar a revisão não briga por pintor ({avisos_revisao[:2]})",
+        )
+
+        # Nova rodada zera a barra; atmosfera desligada troca sem foto.
+        rodada_ui._nova_rodada()
+        checar(rodada_ui._barra.resultados == [], "nova rodada recomeça a barra")
+        janela.campo_atmosfera.setCurrentText("Desligada")
+        aplicacao.processEvents()
+        rodada_ui._revelar()
+        rodada_ui._responder(True)
+        checar(
+            not rodada_ui._cartao.findChildren(ImagemQueSai),
+            "com a atmosfera desligada o cartão troca num quadro",
+        )
+        checar(rodada_ui._recado.toolTip() != "", "mas o recado continua dizendo o que houve")
+    finally:
+        qInstallMessageHandler(None)
+        rodada_ui.close()
+        caderno_revisao.close()
+        janela.campo_atmosfera.setCurrentText(atmosfera_revisao)
+        aplicacao.processEvents()
+
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()
     # nunca voltaria e a suíte penduraria. O tiro agendado é esse alguém.

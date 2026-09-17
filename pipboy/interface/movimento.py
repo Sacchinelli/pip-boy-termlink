@@ -31,7 +31,7 @@ from PySide6.QtCore import (
     Qt,
     QVariantAnimation,
 )
-from PySide6.QtGui import QPainter
+from PySide6.QtGui import QPainter, QPixmap
 from PySide6.QtWidgets import QGraphicsEffect, QWidget
 
 from .. import design
@@ -165,3 +165,54 @@ def animar_entrada(widgets: Sequence[QWidget], *, reduzir: bool) -> None:
 
         grupo.finished.connect(encerrar)
         grupo.start(QAbstractAnimation.DeletionPolicy.DeleteWhenStopped)
+
+
+class ImagemQueSai(QWidget):
+    """A fotografia do que estava na tela, indo embora por cima do que chegou.
+
+    É a ``TransicaoDeTema`` com direção: além de esmaecer, a imagem anda. Quem
+    chama fotografa ANTES de trocar o conteúdo, troca, e cria esta peça por
+    cima — o conteúdo novo já está no lugar e a foto do antigo sai deslizando.
+    Não intercepta o mouse, e se destrói ao fim.
+
+    Quem respeita o movimento reduzido é o chamador: sem movimento, não se
+    cria a peça e a troca acontece num quadro.
+    """
+
+    def __init__(
+        self,
+        parent: QWidget,
+        retrato: QPixmap,
+        *,
+        deslocamento: QPointF,
+        duracao: int = design.DURACAO_MEDIA,
+    ) -> None:
+        super().__init__(parent)
+        self._retrato = retrato
+        self._deslocamento = deslocamento
+        self._progresso = 0.0
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setGeometry(parent.rect())
+
+        self._animacao = QVariantAnimation(self)
+        self._animacao.setStartValue(0.0)
+        self._animacao.setEndValue(1.0)
+        self._animacao.setDuration(duracao)
+        self._animacao.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._animacao.valueChanged.connect(self._avancar)
+        self._animacao.finished.connect(self.deleteLater)
+        self.show()
+        self.raise_()
+        self._animacao.start()
+
+    def _avancar(self, valor: Any) -> None:
+        self._progresso = float(valor)
+        self.update()
+
+    def paintEvent(self, _evento: Any) -> None:
+        pintor = QPainter(self)
+        # A foto some mais rápido do que anda: sem isso, no meio do caminho as
+        # duas camadas de texto ficam igualmente legíveis e embaralhadas.
+        pintor.setOpacity(max(0.0, 1.0 - self._progresso * 1.6))
+        pintor.drawPixmap(self._deslocamento * self._progresso, self._retrato)
+        pintor.end()
