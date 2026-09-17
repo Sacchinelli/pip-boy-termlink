@@ -36,6 +36,7 @@ from PySide6.QtCore import (
     QTimer,
 )
 from PySide6.QtGui import (
+    QBrush,
     QColor,
     QFont,
     QFontMetrics,
@@ -43,6 +44,7 @@ from PySide6.QtGui import (
     QPainter,
     QPainterPath,
     QPen,
+    QRadialGradient,
 )
 from PySide6.QtWidgets import (
     QAbstractButton,
@@ -547,6 +549,111 @@ def caminho_visto(caixa: QRectF, progresso: float) -> QPainterPath:
         caminho.lineTo(a + (b - a) * min(1.0, restante / comprimento))
         restante -= comprimento
     return caminho
+
+
+# ------------------------------------------------------------------ Holofote
+class Holofote:
+    """A luz de uma superfície que percebe o cursor.
+
+    Um holofote na cor pedida acompanha o cursor, a superfície sobe um degrau
+    e o contorno acende do lado da luz. Nasceu no cartão do caderno e saiu de
+    lá quando a tela inicial quis a mesma luz nos próprios cartões: duas cópias
+    de um gradiente radial divergem no primeiro ajuste de alcance, e a janela
+    passaria a ter duas luzes que quase combinam.
+
+    Não é widget: quem hospeda sabe se está sob o cursor, onde ele está e quem
+    tem o foco, e repassa isso. O holofote guarda a posição, anima a
+    intensidade e pinta.
+    """
+
+    ALCANCE = 260.0
+
+    def __init__(self, dono: QWidget, *, reduzir: Callable[[], bool]) -> None:
+        self._dono = dono
+        self._reduzir = reduzir
+        self.cursor: QPointF | None = None
+        self._intensidade = Transicao(
+            dono, design.DURACAO_RAPIDA, lambda _v: dono.update(), reduzir=reduzir
+        )
+        # O dono passa a receber HoverMove, e é por ele que deve seguir o
+        # cursor — não por mouseMoveEvent. O Qt DESCARTA o movimento sem botão
+        # que cai sobre um filho sem rastreamento, e ele não sobe para o pai:
+        # no cartão do caderno, a luz congelava assim que o cursor passava
+        # sobre a tradução ou o exemplo, que são quase o cartão todo. O
+        # HoverMove é entregue a todo ancestral com WA_Hover.
+        dono.setAttribute(Qt.WidgetAttribute.WA_Hover)
+
+    @property
+    def valor(self) -> float:
+        return self._intensidade.valor
+
+    def acender(self, ligado: bool) -> None:
+        self._intensidade.ir(1.0 if ligado else 0.0)
+
+    def seguir(self, ponto: QPointF) -> None:
+        self.cursor = ponto
+        if self.valor > 0.0 and not self._reduzir():
+            self._dono.update()
+
+    def _centro(self, foco: QWidget | None) -> QPointF:
+        if foco is self._dono:
+            return QPointF(self._dono.rect().center())
+        if foco is not None:
+            return QPointF(foco.mapTo(self._dono, foco.rect().center()))
+        if self._reduzir() or self.cursor is None:
+            # Luz parada no alto, como uma luminária: a superfície ainda se
+            # destaca, só não persegue o cursor.
+            return QPointF(self._dono.width() * 0.3, 0.0)
+        return self.cursor
+
+    def pintar(
+        self, pintor: QPainter, caminho: QPainterPath, *,
+        fundo: str, cor: str, borda: str, foco: QWidget | None = None,
+    ) -> None:
+        """Superfície, luz e contorno. ``foco`` guia a luz quando não há cursor.
+
+        Quem chama passa ``foco`` só quando a presença veio do TECLADO: com o
+        cursor em cima, é ele quem manda na luz.
+        """
+        luz = self.valor
+        area = caminho.boundingRect()
+
+        # A superfície sobe um degrau. Elevação em tema escuro é luz, não
+        # sombra: sombra preta sobre um fundo quase preto não se vê.
+        pintor.setPen(Qt.PenStyle.NoPen)
+        pintor.setBrush(QColor(design.misturar(fundo, design.elevar(fundo, 0.07, cor), luz)))
+        pintor.drawPath(caminho)
+
+        centro = self._centro(foco)
+        if luz > 0.005:
+            # Somada à superfície, pela regra deste módulo: brilho é aditivo.
+            pintor.save()
+            pintor.setClipPath(caminho)
+            pintor.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
+            gradiente = QRadialGradient(centro, self.ALCANCE)
+            perto = QColor(cor)
+            perto.setAlphaF(0.11 * luz)
+            longe = QColor(perto)
+            longe.setAlphaF(0.0)
+            gradiente.setColorAt(0.0, perto)
+            gradiente.setColorAt(1.0, longe)
+            pintor.fillRect(area, gradiente)
+            pintor.restore()
+
+        # Um fio discreto em repouso, que acende do lado da luz. O gradiente
+        # radial na CANETA é o que faz a borda parecer iluminada pela mesma
+        # luz, e não pintada de outra cor.
+        repouso = QColor(borda)
+        if luz > 0.005:
+            fio = QRadialGradient(centro, self.ALCANCE * 0.8)
+            fio.setColorAt(0.0, QColor(design.misturar(borda, cor, 0.75 * luz)))
+            fio.setColorAt(1.0, repouso)
+            caneta = QPen(QBrush(fio), 1.2)
+        else:
+            caneta = QPen(repouso, 1.0)
+        pintor.setPen(caneta)
+        pintor.setBrush(Qt.BrushStyle.NoBrush)
+        pintor.drawPath(caminho)
 
 
 # ------------------------------------------------------------------- Seletor

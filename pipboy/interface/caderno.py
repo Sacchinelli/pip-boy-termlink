@@ -32,21 +32,16 @@ from PySide6.QtCore import (
     QEvent,
     QObject,
     QParallelAnimationGroup,
-    QPointF,
     QPropertyAnimation,
     QRectF,
     Qt,
     QTimer,
 )
 from PySide6.QtGui import (
-    QBrush,
-    QColor,
     QEnterEvent,
     QHoverEvent,
     QKeySequence,
     QPainter,
-    QPen,
-    QRadialGradient,
     QShortcut,
 )
 from PySide6.QtWidgets import (
@@ -78,6 +73,7 @@ from .componentes import (
     BotaoDeEstado,
     CampoSelecao,
     Desvanecer,
+    Holofote,
     caminho_forma,
     css_campo_selecao,
 )
@@ -150,7 +146,6 @@ class CartaoTermo(QFrame):
     com eles que se decide o que fazer.
     """
 
-    ALCANCE_LUZ = 260.0
     INTENCAO_MS = 70
     DESLIZE = 10.0
     TAMANHO_ACAO = 28
@@ -175,22 +170,13 @@ class CartaoTermo(QFrame):
         # "Animação também é atmosfera", como na troca de tema: a mesma escolha
         # que para a partícula para a luz que persegue o cursor.
         self._reduzir: Callable[[], bool] = lambda: janela.intensidade_atmosfera <= 0.0
-        self._cursor: QPointF | None = None
         self._sob_cursor = False
         self._foco: QWidget | None = None
         self._saindo = False
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
-        # HoverMove, e não mouseMoveEvent: o Qt DESCARTA o movimento sem botão
-        # que cai sobre um filho sem rastreamento — ele não sobe para o pai.
-        # Com rastreamento só no cartão, a luz congelava assim que o cursor
-        # passava sobre a tradução ou o exemplo, que são quase o cartão todo. O
-        # HoverMove, ao contrário, é entregue a todo ancestral com WA_Hover.
-        self.setAttribute(Qt.WidgetAttribute.WA_Hover)
 
-        self._luz = Transicao(
-            self, design.DURACAO_RAPIDA, lambda _v: self.update(), reduzir=self._reduzir
-        )
+        self._holofote = Holofote(self, reduzir=self._reduzir)
         self._revelacao = Transicao(
             self, design.DURACAO_MEDIA, self._aplicar_revelacao, reduzir=self._reduzir
         )
@@ -345,7 +331,7 @@ class CartaoTermo(QFrame):
     # -- presença: mouse e teclado alimentam o mesmo estado
     def enterEvent(self, evento: QEnterEvent) -> None:
         self._sob_cursor = True
-        self._cursor = evento.position()
+        self._holofote.seguir(evento.position())
         self._atualizar_presenca()
         super().enterEvent(evento)
 
@@ -356,9 +342,7 @@ class CartaoTermo(QFrame):
 
     def event(self, evento: QEvent) -> bool:
         if evento.type() == QEvent.Type.HoverMove and isinstance(evento, QHoverEvent):
-            self._cursor = evento.position()
-            if self._luz.valor > 0.0 and not self._reduzir():
-                self.update()
+            self._holofote.seguir(evento.position())
         return super().event(evento)
 
     def eventFilter(self, alvo: QObject, evento: QEvent) -> bool:
@@ -373,7 +357,7 @@ class CartaoTermo(QFrame):
     def _atualizar_presenca(self) -> None:
         if self._saindo:
             return
-        self._luz.ir(1.0 if self._sob_cursor or self._foco is not None else 0.0)
+        self._holofote.acender(self._sob_cursor or self._foco is not None)
         if self._foco is not None:
             self._intencao.stop()
             self._revelacao.ir(1.0)
@@ -461,61 +445,18 @@ class CartaoTermo(QFrame):
         grupo.start()
 
     # -- desenho
-    def _centro_da_luz(self) -> QPointF:
-        if self._foco is not None and not self._sob_cursor:
-            return QPointF(self._foco.mapTo(self, self._foco.rect().center()))
-        if self._reduzir() or self._cursor is None:
-            # Luz parada no alto, como uma luminária: o cartão ainda se
-            # destaca, só não persegue o cursor.
-            return QPointF(self.width() * 0.3, 0.0)
-        return self._cursor
-
     def paintEvent(self, _evento: Any) -> None:
         pintor = QPainter(self)
         pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
-        t = self._tema
-        luz = self._luz.valor
         area = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        caminho = caminho_forma(area, self._forma, design.RAIO)
-
-        # A superfície sobe um degrau. Elevação em tema escuro é luz, não
-        # sombra: sombra preta sobre um fundo quase preto não se vê.
-        elevada = design.elevar(self._fundo, 0.07, t.primary)
-        pintor.setPen(Qt.PenStyle.NoPen)
-        pintor.setBrush(QColor(design.misturar(self._fundo, elevada, luz)))
-        pintor.drawPath(caminho)
-
-        centro = self._centro_da_luz()
-        if luz > 0.005:
-            # O holofote é somado à superfície, pela regra de componentes.py:
-            # brilho é aditivo, e por isso parece luz, e não tinta por cima.
-            pintor.save()
-            pintor.setClipPath(caminho)
-            pintor.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
-            holofote = QRadialGradient(centro, self.ALCANCE_LUZ)
-            perto = QColor(t.primary)
-            perto.setAlphaF(0.11 * luz)
-            longe = QColor(perto)
-            longe.setAlphaF(0.0)
-            holofote.setColorAt(0.0, perto)
-            holofote.setColorAt(1.0, longe)
-            pintor.fillRect(area, holofote)
-            pintor.restore()
-
-        # Um fio discreto em repouso, que acende do lado do cursor. O gradiente
-        # radial na CANETA é o que faz a borda parecer iluminada pela mesma luz,
-        # e não pintada de outra cor.
-        repouso = QColor(t.border)
-        if luz > 0.005:
-            fio = QRadialGradient(centro, self.ALCANCE_LUZ * 0.8)
-            fio.setColorAt(0.0, QColor(design.misturar(t.border, t.primary, 0.75 * luz)))
-            fio.setColorAt(1.0, repouso)
-            caneta = QPen(QBrush(fio), 1.2)
-        else:
-            caneta = QPen(repouso, 1.0)
-        pintor.setPen(caneta)
-        pintor.setBrush(Qt.BrushStyle.NoBrush)
-        pintor.drawPath(caminho)
+        self._holofote.pintar(
+            pintor,
+            caminho_forma(area, self._forma, design.RAIO),
+            fundo=self._fundo,
+            cor=self._tema.primary,
+            borda=self._tema.border,
+            foco=None if self._sob_cursor else self._foco,
+        )
         pintor.end()
 
 

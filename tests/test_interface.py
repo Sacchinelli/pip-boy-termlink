@@ -308,11 +308,11 @@ def main() -> int:
         )
         esperado = QPointF(rotulo.mapTo(cartao, centro.toPoint()))
         checar(
-            cartao._cursor == esperado,
-            f"o cursor sobre a tradução ainda conduz a luz ({cartao._cursor} vs {esperado})",
+            cartao._holofote.cursor == esperado,
+            f"o cursor sobre a tradução ainda conduz a luz ({cartao._holofote.cursor} vs {esperado})",
         )
         checar(
-            aguardar(lambda: cartao._revelacao.valor == 1.0 and cartao._luz.valor == 1.0),
+            aguardar(lambda: cartao._revelacao.valor == 1.0 and cartao._holofote.valor == 1.0),
             "parado no cartão, a luz acende e as ações aparecem",
         )
         checar(
@@ -422,7 +422,7 @@ def main() -> int:
     aplicacao.processEvents()
     cartao = caderno._cartoes[0]
     entrar(cartao, 40, 20)
-    checar(cartao._luz.valor == 1.0, "com a atmosfera desligada a luz chega sem trajeto")
+    checar(cartao._holofote.valor == 1.0, "com a atmosfera desligada a luz chega sem trajeto")
     sair(cartao)
     caderno.hide()
     caderno.show()
@@ -675,6 +675,158 @@ def main() -> int:
     )
     janela._visor_historico.close()
     visor.close()
+
+    print("tela inicial")
+    # O que a conversa mostra antes de haver conversa. O modelo, a chave e os
+    # atalhos globais eram anotações soltas no pé do painel; agora moram aqui.
+    from pipboy.events import Tag as TagInicial
+    from pipboy.interface.tela_inicial import tecla_legivel
+
+    tela = janela.conversa.tela_inicial
+    janela.conversa.limpar()
+    aplicacao.processEvents()
+    checar(not tela.isHidden(), "com a conversa vazia, a tela inicial está à vista")
+    checar(
+        not any("Atalhos globais" in texto for texto, _, _ in janela.conversa._mensagens),
+        "os atalhos globais não são mais anotação solta na conversa",
+    )
+    checar(
+        janela._configuration.model in tela.diagnostico.text(),
+        "o modelo em uso aparece no rodapé da tela inicial",
+    )
+    checar(
+        tecla_legivel("ctrl+alt+p") == "Ctrl+Alt+P" and tecla_legivel("f12") == "F12",
+        "as teclas do .env são escritas como se leem numa tecla",
+    )
+
+    janela.conversa.atualizar_inicial()
+    checar(
+        str(store.total()) in tela.cartao_caderno.detalhe,
+        f"o cartão do caderno traz o total de agora ({tela.cartao_caderno.detalhe})",
+    )
+    checar(
+        tela.cartao_revisar.destaque == (store.pendentes() > 0),
+        "o cartão de revisar se destaca só quando há palavra vencida",
+    )
+    store.registrar("scrap", "sucata", "", "Fallout")
+    janela.caderno_mudou()
+    checar(
+        str(store.total()) in tela.cartao_caderno.detalhe,
+        "uma palavra nova no caderno atualiza o cartão na hora",
+    )
+    store.remover("scrap")
+    janela.caderno_mudou()
+    checar(
+        janela.conversa.tela_inicial.corpo.text().count(janela.tema.assistant_name.replace("-", "‑")) == 1,
+        "o texto chama o assistente pelo nome do tema",
+    )
+
+    # Nenhum destes cartões gasta a chave: abrem janelas locais.
+    tela.cartao_caderno.click()
+    aplicacao.processEvents()
+    checar(janela._caderno is not None and janela._caderno.isVisible(), "o cartão abre o caderno")
+    janela._caderno.close()
+    tela.cartao_historico.click()
+    aplicacao.processEvents()
+    checar(
+        janela._visor_historico is not None and janela._visor_historico.isVisible(),
+        "e o outro abre o histórico",
+    )
+    janela._visor_historico.close()
+
+    # A luz dos cartões é a mesma do caderno.
+    ponto = QPointF(40, 12)
+    QApplication.sendEvent(
+        tela.cartao_caderno, QEnterEvent(ponto, ponto, QPointF(tela.cartao_caderno.mapToGlobal(ponto)))
+    )
+    checar(
+        aguardar(lambda: tela.cartao_caderno._holofote.valor == 1.0),
+        "passar o mouse acende o cartão",
+    )
+    QApplication.sendEvent(tela.cartao_caderno, QEvent(QEvent.Type.Leave))
+    QApplication.sendEvent(
+        tela.cartao_historico, QFocusEvent(QEvent.Type.FocusIn, Qt.FocusReason.TabFocusReason)
+    )
+    checar(
+        aguardar(lambda: tela.cartao_historico._holofote.valor == 1.0),
+        "e chegar pelo Tab acende do mesmo jeito",
+    )
+    QApplication.sendEvent(
+        tela.cartao_historico, QFocusEvent(QEvent.Type.FocusOut, Qt.FocusReason.TabFocusReason)
+    )
+
+    # Anotação do sistema convive com a tela; sessão e fala a tiram de cena.
+    janela._registrar("aviso qualquer", TagInicial.SISTEMA)
+    checar(not tela.isHidden(), "uma anotação do sistema não esconde a tela inicial")
+    janela._definir_controles(ativa=True)
+    checar(tela.isHidden(), "iniciar a sessão tira a tela de cena")
+    atmosfera_inicial = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    aplicacao.processEvents()
+    janela._definir_controles(ativa=False)
+    checar(not tela.isHidden(), "encerrar sem ter falado nada a traz de volta")
+    checar(
+        any(isinstance(b.graphicsEffect(), EfeitoEntrada) for b in tela._blocos),
+        "e ela volta em cascata",
+    )
+    checar(
+        aguardar(lambda: all(b.graphicsEffect() is None for b in tela._blocos)),
+        "sem deixar efeito pendurado",
+    )
+    janela._registrar("Hello, wastelander.", TagInicial.ASSISTENTE, "PIP-BOY")
+    checar(tela.isHidden(), "a primeira fala tira a tela de cena")
+    janela._definir_controles(ativa=False)
+    checar(tela.isHidden(), "e ela não volta enquanto houver conversa")
+    janela.conversa.limpar()
+    checar(not tela.isHidden(), "limpar a conversa devolve a tela")
+    janela.campo_atmosfera.setCurrentText(atmosfera_inicial)
+    aplicacao.processEvents()
+
+    # Troca de tema: o glifo e o botão são os do jogo novo.
+    tema_antes = janela.campo_jogo.currentText()
+    janela._trocar_jogo("Cyberpunk 2077")
+    aplicacao.processEvents()
+    checar(tela.glifo.text() == "▚", f"o glifo acompanha o tema ({tela.glifo.text()})")
+    checar("CONECTAR" in tela.corpo.text(), "e o texto usa o nome do botão daquele tema")
+    janela._trocar_jogo(tema_antes)
+    aplicacao.processEvents()
+
+    # Estreita e com letra grande, os cartões empilham em vez de cortar o título.
+    # O que se confere é a REGRA, e não um resultado fixo: sem fontes no
+    # backend offscreen o texto mede diferente do Windows, e "cabe lado a
+    # lado" passaria a depender da máquina que roda a suíte.
+    from pipboy.design import ESPACO_MD
+
+    def fileira_coerente() -> bool:
+        cartoes = (tela.cartao_revisar, tela.cartao_caderno, tela.cartao_historico)
+        necessaria = 3 * max(c.largura_ideal() for c in cartoes) + 2 * ESPACO_MD
+        return tela.empilhada == (necessaria > min(tela.width(), tela.LARGURA_MAX))
+
+    tamanho_antes = janela.size()
+    escala_antes = janela.campo_tamanho_texto.currentText()
+    janela.resize(980, 620)
+    aplicacao.processEvents()
+    checar(fileira_coerente(), "no tamanho mínimo, a fileira segue a conta de largura")
+    ideal_padrao = tela.cartao_revisar.largura_ideal()
+    janela.campo_tamanho_texto.setCurrentText("Maior")
+    aplicacao.processEvents()
+    checar(
+        tela.cartao_revisar.largura_ideal() > ideal_padrao,
+        "com letra maior, cada cartão pede mais largura",
+    )
+    checar(aguardar(fileira_coerente), "e a fileira refaz a conta sozinha")
+    # Só o redimensionamento, sem trocar letra nem tema: é o caso de quem
+    # arrasta a borda da janela. O teto de largura sai do caminho para que
+    # "larga" seja larga de verdade com qualquer métrica de fonte.
+    tela.LARGURA_MAX = 100_000
+    tela.resize(100_000, tela.height())
+    checar(not tela.empilhada, "larga o bastante, os três voltam a ficar lado a lado")
+    tela.resize(260, tela.height())
+    checar(tela.empilhada, "estreita a ponto de não caber, a fileira empilha")
+    del tela.LARGURA_MAX
+    janela.campo_tamanho_texto.setCurrentText(escala_antes)
+    janela.resize(tamanho_antes)
+    aplicacao.processEvents()
 
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()

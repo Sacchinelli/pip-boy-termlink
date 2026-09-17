@@ -61,7 +61,7 @@ from ..profiles import (
     personas_for,
 )
 from ..themes import GameTheme, paleta_de, theme_for
-from ..vocabulary import VocabularyStore
+from ..vocabulary import FILTRO_REVISAR, VocabularyStore
 from . import montagem
 from .atalhos import Atalhos, globais_disponiveis
 from .atmosfera import Cenario, atmosfera_de
@@ -90,6 +90,7 @@ from .montagem import (
 )
 from .preferencias import Escolha, Marca, VinculoDePreferencias
 from .relogios import Batidas, Relogios
+from .tela_inicial import Resumo
 
 if TYPE_CHECKING:  # pragma: no cover
     # O módulo de áudio puxa o PyAudio, que custa 175 ms para importar. Ele não
@@ -224,11 +225,10 @@ class Janela(QWidget):
             self._bandeja = None
             LOGGER.exception("Bandeja indisponível — o programa segue sem ela.")
 
-        self._registrar(
-            f"Modelo {configuration.model} · chave {configuration.redacted_key()} · "
-            f"{self._store.total()} termos no caderno",
-            Tag.SISTEMA,
-        )
+        # O modelo, a chave mascarada e os atalhos globais eram as duas primeiras
+        # anotações da conversa, sozinhas no pé de um painel vazio. Moram agora
+        # no rodapé da tela inicial (ver resumo_inicial). Este aviso continua
+        # sendo anotação: é notícia de uma vez, não apresentação.
         if self._atmosfera_veio_do_sistema:
             # Sem este aviso, a primeira execução numa máquina com animação
             # desligada parece um programa sem a aparência que ele anuncia —
@@ -237,13 +237,6 @@ class Janela(QWidget):
                 "O Windows está configurado para reduzir animações, então a atmosfera "
                 "começou DESLIGADA. Para ver o ambiente completo, mude 'Atmosfera do "
                 "jogo' na coluna ao lado — a escolha fica gravada.",
-                Tag.SISTEMA,
-            )
-        if globais_disponiveis() and configuration.global_hotkeys_enabled:
-            self._registrar(
-                f"Atalhos globais: {configuration.hotkey_toggle} iniciar/parar · "
-                f"{configuration.hotkey_mute} mudo · "
-                f"{configuration.hotkey_game_audio} áudio do jogo",
                 Tag.SISTEMA,
             )
 
@@ -973,6 +966,7 @@ class Janela(QWidget):
         if vencidas:
             texto += f"\n{vencidas} para revisar"
         self.rotulo_caderno.setText(texto)
+        self.conversa.atualizar_inicial()
 
     def _definir_controles(self, ativa: bool, pode_parar: bool = True) -> None:
         # Os dois controles de APRESENTAÇÃO seguem vivos durante a sessão. O
@@ -992,6 +986,7 @@ class Janela(QWidget):
             self._tema.stop_label if ativa else self._tema.start_label
         )
         self.botao_acao.setEnabled(not (ativa and not pode_parar))
+        self.conversa.definir_sessao_ativa(ativa)
         self.botao_mudo.setEnabled(ativa)
         self._relogios.medir_entrada(ativa)
         self._atualizar_medidor()
@@ -1254,6 +1249,36 @@ class Janela(QWidget):
                 "A sequência de estudo não está sendo contada.",
                 erro,
             )
+
+    def resumo_inicial(self) -> Resumo:
+        """Os números e textos da tela inicial, lidos na hora em que ela aparece."""
+        config = self._configuration
+        globais = globais_disponiveis() and config.global_hotkeys_enabled
+        vencidas = self._store.pendentes()
+        palavra = ""
+        if vencidas:
+            primeiras = self._store.listar(filtro=FILTRO_REVISAR, limite=1)
+            palavra = primeiras[0].termo if primeiras else ""
+        try:
+            conversas = self._historico.total_sessoes()
+        except Exception:
+            conversas = 0
+        return Resumo(
+            termos=self._store.total(),
+            vencidas=vencidas,
+            conversas=conversas,
+            sequencia=self.sequencia_de_estudo(),
+            palavra=palavra,
+            atalhos=(
+                (
+                    (config.hotkey_toggle, "iniciar/parar"),
+                    (config.hotkey_mute, "mudo"),
+                    (config.hotkey_game_audio, "áudio do jogo"),
+                )
+                if globais else ()
+            ),
+            diagnostico=f"Modelo {config.model} · chave {config.redacted_key()}",
+        )
 
     def sequencia_de_estudo(self) -> int:
         try:
