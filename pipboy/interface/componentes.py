@@ -19,8 +19,10 @@ Três ideias sustentam este módulo:
 
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import Callable
+from itertools import pairwise
 from typing import Any
 
 from PySide6.QtCore import (
@@ -56,6 +58,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import design
+from .movimento import Transicao
 
 
 # ------------------------------------------------------------------- Geometria
@@ -352,6 +355,11 @@ class Botao(QAbstractButton):
                 )
             )
 
+        self._pintar_rotulo(pintor, area, frente)
+        pintor.end()
+
+    def _pintar_rotulo(self, pintor: QPainter, area: QRectF, frente: QColor) -> None:
+        """O conteúdo sobre o corpo já pintado. Separado para quem troca só isto."""
         pintor.setPen(frente)
         pintor.setFont(self.font())
         bandeiras = (
@@ -365,7 +373,180 @@ class Botao(QAbstractButton):
         # da largura de cada lado.
         recuo_h = min(14.0, area.width() / 4.0)
         pintor.drawText(area.adjusted(recuo_h, 0, -recuo_h, 0), int(bandeiras), self.text())
-        pintor.end()
+
+
+class BotaoDeEstado(Botao):
+    """Botão que confirma, no próprio lugar, o que acabou de fazer.
+
+    Nasceu do Exportar do caderno. A exportação escrevia o arquivo e anunciava
+    o resultado no registro da janela principal — que fica ATRÁS do caderno.
+    Quem clicava via o seletor de arquivo fechar e mais nada: sem saber se o
+    arquivo tinha sido escrito, o natural era exportar de novo.
+
+    Três decisões de feedback:
+
+    * **Sucesso muda a matéria, não só o texto.** O corpo se enche da cor de
+      acento e um sinal de visto se desenha traço a traço. Um rótulo trocando
+      sozinho passa despercebido; uma superfície que se enche, não.
+    * **A largura é a do maior rótulo.** Um botão que muda de tamanho ao virar
+      "Exportado" desloca os vizinhos no instante em que a pessoa olha.
+    * **Volta sozinho.** O estado confirmado é notícia, não configuração: em
+      ``RETORNO_MS`` o botão está pronto de novo, sem pedir clique para fechar.
+
+    Hover, pressão, auréola e anel de foco continuam sendo os do ``Botao``: só
+    as cores (``_cores``) e o conteúdo (``_pintar_rotulo``) são trocados.
+    """
+
+    RETORNO_MS = 1800
+    ICONE = 14.0
+    VAO = 8.0
+
+    def __init__(
+        self,
+        texto: str,
+        concluido: str,
+        *,
+        reduzir: Callable[[], bool],
+        variante: str = "sutil",
+        paleta: Callable[[], dict[str, str]] | None = None,
+        forma: str = "arredondada",
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(texto, variante=variante, paleta=paleta, forma=forma, parent=parent)
+        self._rotulos = {"ocioso": texto, "concluido": concluido}
+        self._estado = "ocioso"
+        self._anterior = "ocioso"
+        self._dica_ociosa = ""
+        self._troca = Transicao(self, design.DURACAO_MEDIA, self._repintar, reduzir=reduzir)
+        self._troca.saltar(1.0)
+        self._sucesso = Transicao(self, design.DURACAO_LENTA, self._repintar, reduzir=reduzir)
+        self._retorno = QTimer(self)
+        self._retorno.setSingleShot(True)
+        self._retorno.setInterval(self.RETORNO_MS)
+        self._retorno.timeout.connect(lambda: self._mudar("ocioso"))
+
+    @property
+    def estado(self) -> str:
+        return self._estado
+
+    def concluir(self, detalhe: str = "") -> None:
+        """Mostra o sucesso por ``RETORNO_MS``; ``detalhe`` vira a dica nesse meio-tempo."""
+        if self._estado == "ocioso":
+            self._dica_ociosa = self.toolTip()
+        if detalhe:
+            self.setToolTip(detalhe)
+            self.setAccessibleDescription(detalhe)
+        self._mudar("concluido")
+
+    def _mudar(self, estado: str) -> None:
+        if estado == "concluido":
+            # Concluir de novo dentro da janela só estende o aviso.
+            self._retorno.start()
+        if estado == self._estado:
+            return
+        if estado == "ocioso":
+            self.setToolTip(self._dica_ociosa)
+            self.setAccessibleDescription("")
+        self._anterior, self._estado = self._estado, estado
+        self.setText(self._rotulos[estado])
+        self._troca.saltar(0.0)
+        self._troca.ir(1.0)
+        self._sucesso.ir(1.0 if estado == "concluido" else 0.0)
+
+    def _repintar(self, _valor: float) -> None:
+        self._atualizar_halo()
+        self.update()
+
+    def sizeHint(self) -> QSize:
+        # O construtor do Botao pode perguntar o tamanho antes de haver rótulos.
+        rotulos = getattr(self, "_rotulos", None)
+        if rotulos is None:
+            return super().sizeHint()
+        metricas = QFontMetrics(self.font())
+        largura = max(
+            metricas.horizontalAdvance(rotulos["ocioso"]),
+            metricas.horizontalAdvance(rotulos["concluido"]) + self.ICONE + self.VAO,
+        )
+        return QSize(max(self._largura_min, round(largura) + 46), 38)
+
+    def _cores(self) -> tuple[QColor, QColor, QColor | None, QColor]:
+        fundo, frente, contorno, halo = super()._cores()
+        sucesso = getattr(self, "_sucesso", None)
+        p = self._paleta()
+        if sucesso is None or sucesso.valor <= 0.0 or not p or not self.isEnabled():
+            return fundo, frente, contorno, halo
+        s = sucesso.valor
+        base = contorno.name() if contorno is not None else fundo.name()
+        return (
+            QColor(design.misturar(fundo.name(), p["accent"], s)),
+            QColor(design.misturar(frente.name(), p["on_accent"], s)),
+            QColor(design.misturar(base, p["accent"], s)),
+            QColor(p["accent"]),
+        )
+
+    def _pintar_rotulo(self, pintor: QPainter, area: QRectF, frente: QColor) -> None:
+        # O que sai sobe e esmaece; o que entra vem de baixo. Seis pixels
+        # bastam: é direção, não viagem.
+        troca = self._troca.valor
+        if troca < 1.0:
+            self._pintar_conteudo(pintor, area, frente, self._anterior, 1.0 - troca, -6.0 * troca)
+        self._pintar_conteudo(pintor, area, frente, self._estado, troca, 6.0 * (1.0 - troca))
+
+    def _pintar_conteudo(
+        self, pintor: QPainter, area: QRectF, cor: QColor, estado: str,
+        opacidade: float, deslocamento: float,
+    ) -> None:
+        if opacidade <= 0.01:
+            return
+        texto = self._rotulos[estado]
+        icone = self.ICONE if estado == "concluido" else 0.0
+        vao = self.VAO if icone else 0.0
+        largura = QFontMetrics(self.font()).horizontalAdvance(texto) + icone + vao
+        x = area.center().x() - largura / 2.0
+        centro_y = area.center().y() + deslocamento
+
+        pintor.save()
+        pintor.setOpacity(opacidade)
+        if icone:
+            caneta = QPen(cor)
+            caneta.setWidthF(2.0)
+            caneta.setCapStyle(Qt.PenCapStyle.RoundCap)
+            caneta.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            pintor.setPen(caneta)
+            pintor.setBrush(Qt.BrushStyle.NoBrush)
+            caixa = QRectF(x, centro_y - icone / 2.0, icone, icone)
+            pintor.drawPath(caminho_visto(caixa, self._sucesso.valor))
+        pintor.setPen(cor)
+        pintor.setFont(self.font())
+        pintor.drawText(
+            QRectF(x + icone + vao, area.top() + deslocamento, largura, area.height()),
+            int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft),
+            texto,
+        )
+        pintor.restore()
+
+
+def caminho_visto(caixa: QRectF, progresso: float) -> QPainterPath:
+    """Sinal de visto desenhado até ``progresso`` do próprio comprimento.
+
+    Desenhado, e não digitado: o "✓" é do bloco Dingbats, que Consolas e
+    Georgia não têm — sairia como caixinha em metade dos temas, a mesma
+    armadilha do "✕" documentada no caderno.
+    """
+    pontos = (
+        QPointF(caixa.left() + caixa.width() * 0.12, caixa.top() + caixa.height() * 0.55),
+        QPointF(caixa.left() + caixa.width() * 0.40, caixa.top() + caixa.height() * 0.82),
+        QPointF(caixa.left() + caixa.width() * 0.90, caixa.top() + caixa.height() * 0.20),
+    )
+    trechos = [math.dist((a.x(), a.y()), (b.x(), b.y())) for a, b in pairwise(pontos)]
+    restante = max(0.0, min(1.0, progresso)) * sum(trechos)
+    caminho = QPainterPath(pontos[0])
+    for (a, b), comprimento in zip(pairwise(pontos), trechos, strict=True):
+        if restante <= 0.0:
+            break
+        caminho.lineTo(a + (b - a) * min(1.0, restante / comprimento))
+        restante -= comprimento
+    return caminho
 
 
 # ------------------------------------------------------------------- Seletor

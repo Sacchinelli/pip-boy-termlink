@@ -1339,20 +1339,27 @@ class Janela(QWidget):
         if aviso:
             self._registrar(aviso, Tag.SISTEMA)
 
-    def exportar_vocabulario(self) -> None:
+    def exportar_vocabulario(self) -> int | None:
+        """Pergunta o destino e exporta. Devolve quantos termos foram escritos.
+
+        ``None`` quando nada foi escrito — caderno vazio, seletor cancelado ou
+        falha de disco. É a pergunta de quem confirma o sucesso na própria
+        tela: o botão do caderno, que fica na frente do registro onde o total
+        também é anunciado.
+        """
         if self._store.total() == 0:
             avisar(
                 self, "Caderno vazio",
                 "Nada foi salvo ainda. Inicie uma sessão e pergunte o significado "
                 "de qualquer palavra em inglês: o assistente anota sozinho.",
             )
-            return
+            return None
         destino, _ = QFileDialog.getSaveFileName(
             self, "Exportar vocabulário", "vocabulario_pipboy.txt",
             "Anki / TSV (*.txt);;Markdown (*.md)",
         )
         if not destino:
-            return
+            return None
         caminho = Path(destino)
         try:
             if caminho.suffix.lower() == ".md":
@@ -1361,8 +1368,9 @@ class Janela(QWidget):
                 total = self._store.exportar_csv(caminho)
         except OSError as erro:
             avisar(self, "Falha ao exportar", str(erro), erro=True)
-            return
+            return None
         self._registrar(f"{total} termos exportados para {caminho.name}.", Tag.SISTEMA)
+        return total
 
     def importar_vocabulario(self) -> None:
         """Traz termos de um TSV para o caderno, sem tocar no que já existe."""
