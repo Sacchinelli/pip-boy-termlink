@@ -23,6 +23,7 @@ from PySide6.QtCore import (
     QAbstractAnimation,
     QEasingCurve,
     QObject,
+    QPoint,
     QPointF,
     QPropertyAnimation,
     QRect,
@@ -31,7 +32,7 @@ from PySide6.QtCore import (
     Qt,
     QVariantAnimation,
 )
-from PySide6.QtGui import QPainter, QPixmap
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPixmap
 from PySide6.QtWidgets import QGraphicsEffect, QWidget
 
 from .. import design
@@ -283,3 +284,72 @@ class Crescimento(QObject):
     def _avancar(self, valor: Any) -> None:
         self._t = float(valor)
         self._dono.update()
+
+
+class SinalFlutuante(QWidget):
+    """Um recado curtíssimo que sobe de um ponto e some sozinho.
+
+    Feito para o "+1" que sai do contador do caderno quando a sessão salva uma
+    palavra: o número ao lado muda de "3 termos" para "4 termos" num quadro, e
+    uma mudança de um caractere num canto da tela não se vê. O sinal é o que
+    leva o olho até ela.
+
+    Fica parado e cheio no começo — é o instante em que precisa ser lido — e só
+    então esmaece enquanto termina de subir. Não intercepta o mouse e se
+    destrói ao fim. Quem respeita o movimento reduzido é o chamador.
+    """
+
+    SUBIDA = 16.0
+    DURACAO = 1200
+    # Fração do tempo em que o sinal fica totalmente visível antes de esmaecer.
+    LEITURA = 0.45
+
+    def __init__(
+        self, parent: QWidget, texto: str, *, ancora: QPoint, cor: str, fonte: QFont
+    ) -> None:
+        super().__init__(parent)
+        self.texto = texto
+        self._cor = QColor(cor)
+        self._progresso = 0.0
+        self._curva = QEasingCurve(QEasingCurve.Type.OutCubic)
+        self.setFont(fonte)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        metricas = QFontMetrics(fonte)
+        # O ponto de ancoragem é o topo da linha de texto no destino final; o
+        # widget se estende SUBIDA pixels abaixo dele, de onde o texto parte.
+        self._altura_texto = metricas.height()
+        self.setGeometry(
+            ancora.x(), ancora.y(),
+            metricas.horizontalAdvance(texto) + 4, self._altura_texto + round(self.SUBIDA),
+        )
+
+        self._animacao = QVariantAnimation(self)
+        self._animacao.setStartValue(0.0)
+        self._animacao.setEndValue(1.0)
+        self._animacao.setDuration(self.DURACAO)
+        self._animacao.valueChanged.connect(self._avancar)
+        self._animacao.finished.connect(self.deleteLater)
+        self.show()
+        self.raise_()
+        self._animacao.start()
+
+    def _avancar(self, valor: Any) -> None:
+        self._progresso = float(valor)
+        self.update()
+
+    def paintEvent(self, _evento: Any) -> None:
+        subida = self._curva.valueForProgress(self._progresso)
+        if self._progresso <= self.LEITURA:
+            opacidade = 1.0
+        else:
+            opacidade = 1.0 - (self._progresso - self.LEITURA) / (1.0 - self.LEITURA)
+        pintor = QPainter(self)
+        pintor.setOpacity(max(0.0, opacidade))
+        pintor.setPen(self._cor)
+        pintor.setFont(self.font())
+        pintor.drawText(
+            QRectF(0.0, self.SUBIDA * (1.0 - subida), self.width(), self._altura_texto),
+            int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            self.texto,
+        )
+        pintor.end()
