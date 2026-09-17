@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 from PySide6.QtCore import (
     QEasingCurve,
     QEvent,
+    QPoint,
     QPropertyAnimation,
     Qt,
     QTimer,
@@ -88,6 +89,7 @@ from .montagem import (
     NIVEIS_ATMOSFERA,
     NIVEIS_GANHO_JOGO,
 )
+from .movimento import SinalFlutuante
 from .preferencias import Escolha, Marca, VinculoDePreferencias
 from .relogios import Batidas, Relogios
 from .tela_inicial import Resumo
@@ -168,6 +170,10 @@ class Janela(QWidget):
         # meia dúzia de leitores usavam getattr com padrão para contornar a
         # janela em que ela não existia.
         self._intensidade_atmosfera = 1.0
+        # O total que a lateral mostra agora. É contra ele que uma palavra
+        # salva pela sessão se mede, para o sinal dizer QUANTAS entraram.
+        self._total_no_caderno = 0
+        self.sinal_do_caderno: SinalFlutuante | None = None
         # Nasce antes de qualquer widget: `fonte()` é chamada durante a
         # montagem, e ela lê este fator.
         self._escala_texto = 1.0
@@ -826,8 +832,13 @@ class Janela(QWidget):
             if self._da_sessao_atual(evento):
                 self._definir_estado(evento.text, evento.color_role)
         elif tipo is UiEventKind.VOCAB_ADDED:
+            antes = self._total_no_caderno
             self.caderno_mudou()
             self._campainha.tocar("vocab")
+            # O evento também vem de reencontro e de resposta de quiz, que não
+            # mudam o total: só palavra NOVA ganha o sinal.
+            if self._total_no_caderno > antes:
+                self._anunciar_palavras(self._total_no_caderno - antes)
         elif tipo is UiEventKind.USAGE:
             if self._da_sessao_atual(evento):
                 self._tokens = int(evento.payload or 0)
@@ -961,6 +972,7 @@ class Janela(QWidget):
 
     def _atualizar_caderno(self) -> None:
         total = self._store.total()
+        self._total_no_caderno = total
         texto = f"Caderno · {total} termos"
         vencidas = self._store.pendentes()
         if vencidas:
@@ -1352,6 +1364,29 @@ class Janela(QWidget):
                 "A conversa em que esta palavra foi ensinada não está mais no "
                 "histórico. A palavra continua no caderno.",
             )
+
+    def _anunciar_palavras(self, novas: int) -> None:
+        """Um "+1" sobe do contador do caderno, na lateral.
+
+        A lateral é o único lugar da janela principal que mostra o tamanho do
+        caderno, e a mudança de "3 termos" para "4 termos" acontecia num quadro,
+        num texto miúdo, no canto oposto ao da conversa. O som da campainha já
+        dizia que algo foi salvo; o sinal diz ONDE aquilo foi parar.
+        """
+        rotulo = self.rotulo_caderno
+        pai = rotulo.parentWidget()
+        if self._intensidade_atmosfera <= 0.0 or pai is None or not rotulo.isVisible():
+            return
+        primeira_linha = rotulo.text().split("\n", 1)[0]
+        fonte = self.fonte("legenda")
+        fonte.setBold(True)
+        ancora = QPoint(
+            rotulo.x() + QFontMetrics(rotulo.font()).horizontalAdvance(primeira_linha) + 8,
+            rotulo.y() - 2,
+        )
+        self.sinal_do_caderno = SinalFlutuante(
+            pai, f"+{novas}", ancora=ancora, cor=self._tema.accent_text, fonte=fonte
+        )
 
     def caderno_mudou(self, aviso: str = "") -> None:
         """Ponto único de reação a uma escrita no caderno, venha de onde vier.

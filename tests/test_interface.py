@@ -1188,6 +1188,86 @@ def main() -> int:
     janela.campo_atmosfera.setCurrentText(atmosfera_historico)
     aplicacao.processEvents()
 
+    print("palavra salva chega ao caderno")
+    # Os eventos são os mesmos que a sessão publica ao salvar uma palavra; a
+    # sessão em si não é aberta (ela gastaria a chave).
+    from PySide6.QtGui import QFontMetrics
+    from shiboken6 import isValid
+
+    from pipboy.events import Tag as TagPalavra
+    from pipboy.events import UiEvent as EventoUi
+    from pipboy.events import UiEventKind as TipoEvento
+    from pipboy.interface.movimento import SinalFlutuante
+
+    atmosfera_palavra = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    aplicacao.processEvents()
+    janela.caderno_mudou()
+    janela.sinal_do_caderno = None
+
+    store.registrar("scrap", "sucata", "", "Fallout")
+    janela._tratar_evento(
+        EventoUi(TipoEvento.LOG, text="⊕ scrap — sucata", tag=TagPalavra.VOCAB)
+    )
+    anotacao = janela.conversa._itens[-1]
+    checar(
+        isinstance(anotacao.graphicsEffect(), EfeitoEntrada),
+        "a anotação de palavra salva entra, em vez de simplesmente estar lá",
+    )
+    pilula = anotacao.findChild(QLabel)
+    checar(
+        pilula is not None
+        and pilula.minimumWidth() >= QFontMetrics(pilula.font()).horizontalAdvance("⊕ scrap — sucata"),
+        "e cabe numa linha só, sem quebrar um texto curto ao meio",
+    )
+    janela._tratar_evento(EventoUi(TipoEvento.VOCAB_ADDED, payload=store.total()))
+    sinal = janela.sinal_do_caderno
+    checar(
+        isinstance(sinal, SinalFlutuante) and sinal.texto == "+1",
+        "o contador do caderno solta um +1",
+    )
+    checar(f"{store.total()} termos" in janela.rotulo_caderno.text(), "e o número ao lado já é o novo")
+    checar(
+        sinal is not None and sinal.parentWidget() is janela.rotulo_caderno.parentWidget(),
+        "o sinal nasce ao lado do contador, na lateral",
+    )
+    checar(aguardar(lambda: not isValid(sinal)), "e some sozinho")
+
+    # Reencontro e resposta de quiz publicam o mesmo evento sem mudar o total.
+    janela.sinal_do_caderno = None
+    janela._tratar_evento(EventoUi(TipoEvento.VOCAB_ADDED, payload=store.total()))
+    checar(janela.sinal_do_caderno is None, "sem palavra nova, não há sinal")
+
+    # Palavras que nenhuma outra seção cria: "ghoul" e "raider" já estão no
+    # caderno a esta altura, e reencontrá-las não muda o total.
+    store.registrar("vertibird", "aeronave de rotor", "", "Fallout")
+    store.registrar("nuka", "refrigerante Nuka-Cola", "", "Fallout")
+    janela._tratar_evento(EventoUi(TipoEvento.VOCAB_ADDED, payload=store.total()))
+    checar(
+        janela.sinal_do_caderno is not None and janela.sinal_do_caderno.texto == "+2",
+        "duas palavras de uma vez viram +2",
+    )
+
+    janela.conversa.repintar()
+    checar(
+        janela.conversa._itens[-1].graphicsEffect() is None,
+        "a troca de tema reconstrói a anotação sem anunciá-la de novo",
+    )
+
+    janela.campo_atmosfera.setCurrentText("Desligada")
+    aplicacao.processEvents()
+    janela.sinal_do_caderno = None
+    store.registrar("stimpak", "estimulante", "", "Fallout")
+    janela._tratar_evento(EventoUi(TipoEvento.VOCAB_ADDED, payload=store.total()))
+    checar(janela.sinal_do_caderno is None, "com a atmosfera desligada o número muda sem sinal")
+
+    for termo in ("scrap", "vertibird", "nuka", "stimpak"):
+        store.remover(termo)
+    janela.conversa.limpar()
+    janela.caderno_mudou()
+    janela.campo_atmosfera.setCurrentText(atmosfera_palavra)
+    aplicacao.processEvents()
+
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()
     # nunca voltaria e a suíte penduraria. O tiro agendado é esse alguém.

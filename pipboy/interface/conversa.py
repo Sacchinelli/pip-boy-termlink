@@ -21,6 +21,7 @@ import time
 from typing import Any
 
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -34,6 +35,7 @@ from PySide6.QtWidgets import (
 from .. import design
 from ..events import Tag
 from .componentes import Bolha, LinhaFala, TransicaoDeTema
+from .movimento import animar_entrada
 from .tela_inicial import TelaInicial
 
 # Teto de falas guardadas. Uma sessão de horas não precisa carregar o começo
@@ -91,6 +93,15 @@ class Conversa(QScrollArea):
             del self._mensagens[0]
         no_fim = self._no_fim()
         self._inserir(texto, tag, autor)
+        if tag is Tag.VOCAB and self._itens:
+            # A anotação de palavra salva ENTRA, como as falas: é a notícia de
+            # que o caderno cresceu, e uma notícia que simplesmente já está lá
+            # passa por anotação de sistema. Só aqui, e não em _inserir: a
+            # repintura da troca de tema reconstrói todas as anotações, e elas
+            # não são notícia de novo.
+            animar_entrada(
+                [self._itens[-1]], reduzir=bool(self._janela.intensidade_atmosfera <= 0.0)
+            )
         self._podar()
         self._sincronizar_inicial(animar=True)
 
@@ -153,6 +164,12 @@ class Conversa(QScrollArea):
             f" border-radius: {raio}px; padding: 5px 12px;"
         )
         rotulo.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        # A largura é medida, pela mesma razão documentada na Bolha: um QLabel
+        # com quebra de linha dentro de um layout encolhe até a largura mínima,
+        # e "⊕ stimpak — estimulante médico" saía partido em duas linhas num
+        # painel com espaço de sobra. Os 24 px são o padding horizontal.
+        ideal = QFontMetrics(rotulo.font()).horizontalAdvance(texto) + 24
+        rotulo.setMinimumWidth(min(ideal, design.BOLHA_LARGURA_MAX))
 
         embrulho = QWidget()
         caixa = QHBoxLayout(embrulho)
