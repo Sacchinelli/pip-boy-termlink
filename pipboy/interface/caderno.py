@@ -27,11 +27,32 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from PySide6.QtCore import QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QKeySequence, QPainter, QShortcut
+from PySide6.QtCore import (
+    QEasingCurve,
+    QEvent,
+    QObject,
+    QParallelAnimationGroup,
+    QPointF,
+    QPropertyAnimation,
+    QRectF,
+    Qt,
+    QTimer,
+)
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QEnterEvent,
+    QHoverEvent,
+    QKeySequence,
+    QPainter,
+    QPen,
+    QRadialGradient,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -54,6 +75,7 @@ from ..vocabulary import (
 from .atmosfera import Cenario
 from .componentes import (
     Botao,
+    BotaoDeEstado,
     CampoSelecao,
     Desvanecer,
     caminho_forma,
@@ -65,6 +87,7 @@ from .moldura import (
     GripsRedimensionamento,
     aplicar_cantos_do_sistema,
 )
+from .movimento import Transicao, animar_entrada
 
 # Rótulo visível -> filtro do banco. A ordem é a da barra de filtros.
 FILTROS_VISIVEIS: dict[str, str] = {
@@ -86,6 +109,11 @@ ESPERA_BUSCA_MS = 180
 # Primeira opção do seletor de jogo — a que não filtra nada.
 TODOS_OS_JOGOS = "Todos os jogos"
 
+# Quantos cartões entram em cascata. É o que cabe na janela no tamanho padrão:
+# um cartão fora da vista pagaria efeito e animação para ninguém ver, e numa
+# lista de 250 a cascata inteira levaria mais de dez segundos.
+CASCATA_MAXIMA = 8
+
 
 def _plural(quantidade: int, singular: str, plural: str) -> str:
     return f"{quantidade} {singular if quantidade == 1 else plural}"
@@ -101,7 +129,32 @@ def _selo(entrada: Entrada) -> tuple[str, str]:
 
 
 class CartaoTermo(QFrame):
-    """Uma palavra do caderno: termo, tradução, exemplo e histórico."""
+    """Uma palavra do caderno: termo, tradução, exemplo e histórico.
+
+    O cartão percebe quem chega perto, com três respostas em três tempos:
+
+    1. **Luz, na hora.** Um holofote na cor do tema acompanha o cursor e o
+       contorno acende do lado dele. É a resposta mais barata e a mais imediata:
+       diz "este é o cartão sob o mouse" antes de qualquer decisão.
+    2. **Ações, depois de uma pausa.** Os três botões eram desenhados em todo
+       cartão, o tempo todo: numa lista de trinta palavras, noventa ícones
+       disputando o olho com o que se veio ler. Agora eles aparecem quando o
+       cursor PARA no cartão (``INTENCAO_MS``) — varrer a lista acende cada
+       cartão de passagem, mas não faz trinta fileiras de botões piscarem.
+    3. **Teclado vale o mesmo que mouse.** Tab até uma ação revela as ações na
+       hora e leva a luz até ela. Esconder controles no hover sem isso seria
+       trancar o teclado para fora — o erro clássico desse padrão.
+
+    O que se esconde são AÇÕES, repetidas em todo cartão; nunca INFORMAÇÃO. O
+    estado de revisão, a tradução e o exemplo ficam sempre à vista, porque é
+    com eles que se decide o que fazer.
+    """
+
+    ALCANCE_LUZ = 260.0
+    INTENCAO_MS = 70
+    DESLIZE = 10.0
+    TAMANHO_ACAO = 28
+    MARGENS = (16, 13, 13, 13)  # esquerda, topo, direita, base
 
     def __init__(
         self,
@@ -116,13 +169,38 @@ class CartaoTermo(QFrame):
         super().__init__(parent)
         self._entrada = entrada
         tema = janela.tema
+        self._tema = tema
         self._forma = janela.atmosfera.forma
         self._fundo = tema.surface_alta
+        # "Animação também é atmosfera", como na troca de tema: a mesma escolha
+        # que para a partícula para a luz que persegue o cursor.
+        self._reduzir: Callable[[], bool] = lambda: janela.intensidade_atmosfera <= 0.0
+        self._cursor: QPointF | None = None
+        self._sob_cursor = False
+        self._foco: QWidget | None = None
+        self._saindo = False
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        # HoverMove, e não mouseMoveEvent: o Qt DESCARTA o movimento sem botão
+        # que cai sobre um filho sem rastreamento — ele não sobe para o pai.
+        # Com rastreamento só no cartão, a luz congelava assim que o cursor
+        # passava sobre a tradução ou o exemplo, que são quase o cartão todo. O
+        # HoverMove, ao contrário, é entregue a todo ancestral com WA_Hover.
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover)
+
+        self._luz = Transicao(
+            self, design.DURACAO_RAPIDA, lambda _v: self.update(), reduzir=self._reduzir
+        )
+        self._revelacao = Transicao(
+            self, design.DURACAO_MEDIA, self._aplicar_revelacao, reduzir=self._reduzir
+        )
+        self._intencao = QTimer(self)
+        self._intencao.setSingleShot(True)
+        self._intencao.setInterval(self.INTENCAO_MS)
+        self._intencao.timeout.connect(self._confirmar_intencao)
 
         coluna = QVBoxLayout(self)
-        coluna.setContentsMargins(16, 13, 13, 13)
+        coluna.setContentsMargins(*self.MARGENS)
         coluna.setSpacing(5)
 
         topo = QHBoxLayout()
@@ -147,59 +225,6 @@ class CartaoTermo(QFrame):
             " background: transparent;"
         )
         topo.addWidget(selo)
-
-        # De volta à conversa em que a palavra nasceu. O caderno guarda o QUE
-        # foi ensinado; o histórico guarda o EM QUE MOMENTO — e a palavra sem
-        # o contexto em que ela apareceu é metade da memória. Os dois bancos
-        # já tinham tudo para fechar esse arco e não havia porta entre eles.
-        #
-        # O botão só existe quando há conversa: desabilitado, ele diz por quê,
-        # em vez de simplesmente não reagir ao clique.
-        self.botao_conversa = conversa = Botao(
-            "◷", variante="sutil", paleta=janela.paleta, forma=self._forma
-        )
-        conversa.setFont(janela.fonte("corpo_forte"))
-        conversa.setFixedSize(28, 28)
-        conversa.setEnabled(sessao is not None)
-        if sessao is None:
-            conversa.setToolTip(
-                "A conversa em que esta palavra apareceu não está no histórico."
-            )
-            conversa.setAccessibleName(f"Conversa de {entrada.termo} indisponível")
-        else:
-            conversa.setToolTip(f"Abrir a conversa em que “{entrada.termo}” foi ensinada")
-            conversa.setAccessibleName(f"Abrir a conversa de {entrada.termo}")
-            conversa.clicked.connect(
-                lambda _=False, s=sessao: janela.abrir_conversa(s, entrada.termo)
-            )
-        topo.addWidget(conversa)
-
-        # Quem escreve o caderno é o modelo, em silêncio, e de vez em quando
-        # ele erra a tradução. Sem esta porta a única saída era o "×" ao lado —
-        # que leva junto meses de repetição espaçada para consertar um typo.
-        #
-        # "▤" é do bloco Geometric Shapes, como todo símbolo desta interface:
-        # o lápis (U+270E) seria o desenho óbvio e é do bloco Dingbats, que
-        # Consolas e Georgia não têm — sairia como caixinha em metade dos temas.
-        corrigir = Botao("▤", variante="sutil", paleta=janela.paleta, forma=self._forma)
-        corrigir.setFont(janela.fonte("corpo_forte"))
-        corrigir.setFixedSize(28, 28)
-        corrigir.setToolTip(f"Corrigir o texto de “{entrada.termo}” sem perder a revisão")
-        corrigir.setAccessibleName(f"Corrigir {entrada.termo}")
-        corrigir.clicked.connect(lambda: ao_corrigir(entrada))
-        topo.addWidget(corrigir)
-
-        # "×" (U+00D7, Latin-1) e não "✕" (U+2715, Dingbats): o segundo não
-        # existe em Consolas nem em Georgia — as fontes de metade dos temas —
-        # e saía como um tracinho vertical irreconhecível. É a mesma armadilha
-        # já documentada para os emoji do cabeçalho.
-        apagar = Botao("×", variante="perigo_sutil", paleta=janela.paleta, forma=self._forma)
-        apagar.setFont(janela.fonte("titulo"))
-        apagar.setFixedSize(28, 28)
-        apagar.setToolTip(f"Remover “{entrada.termo}” do caderno")
-        apagar.setAccessibleName(f"Remover {entrada.termo}")
-        apagar.clicked.connect(lambda: ao_remover(entrada))
-        topo.addWidget(apagar)
         coluna.addLayout(topo)
 
         traducao = QLabel(entrada.traducao)
@@ -223,7 +248,76 @@ class CartaoTermo(QFrame):
             exemplo.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             coluna.addWidget(exemplo)
 
-        partes = [p for p in (entrada.jogo, _plural(entrada.encontros, "encontro", "encontros")) if p]
+        # As ações moram no canto de baixo, que em repouso já é espaço vazio:
+        # o rodapé é curto e alinhado à esquerda. Revelar ali não abre buraco
+        # no cartão parado, e o espaço é reservado desde o início — aparecer
+        # nunca empurra texto. Elas ficam FORA do layout para que o deslize
+        # seja só um ``move`` do grupo, sem refazer a disposição do cartão.
+        self._acoes = QWidget(self)
+        fila = QHBoxLayout(self._acoes)
+        fila.setContentsMargins(0, 0, 0, 0)
+        fila.setSpacing(4)
+
+        # De volta à conversa em que a palavra nasceu. O caderno guarda o QUE
+        # foi ensinado; o histórico guarda o EM QUE MOMENTO — e a palavra sem
+        # o contexto em que ela apareceu é metade da memória. Os dois bancos
+        # já tinham tudo para fechar esse arco e não havia porta entre eles.
+        #
+        # O botão só existe quando há conversa: desabilitado, ele diz por quê,
+        # em vez de simplesmente não reagir ao clique.
+        self.botao_conversa = conversa = Botao(
+            "◷", variante="sutil", paleta=janela.paleta, forma=self._forma
+        )
+        conversa.setFont(janela.fonte("corpo_forte"))
+        conversa.setEnabled(sessao is not None)
+        if sessao is None:
+            conversa.setToolTip(
+                "A conversa em que esta palavra apareceu não está no histórico."
+            )
+            conversa.setAccessibleName(f"Conversa de {entrada.termo} indisponível")
+        else:
+            conversa.setToolTip(f"Abrir a conversa em que “{entrada.termo}” foi ensinada")
+            conversa.setAccessibleName(f"Abrir a conversa de {entrada.termo}")
+            conversa.clicked.connect(
+                lambda _=False, s=sessao: janela.abrir_conversa(s, entrada.termo)
+            )
+
+        # Quem escreve o caderno é o modelo, em silêncio, e de vez em quando
+        # ele erra a tradução. Sem esta porta a única saída era o "×" ao lado —
+        # que leva junto meses de repetição espaçada para consertar um typo.
+        #
+        # "▤" é do bloco Geometric Shapes, como todo símbolo desta interface:
+        # o lápis (U+270E) seria o desenho óbvio e é do bloco Dingbats, que
+        # Consolas e Georgia não têm — sairia como caixinha em metade dos temas.
+        corrigir = Botao("▤", variante="sutil", paleta=janela.paleta, forma=self._forma)
+        corrigir.setFont(janela.fonte("corpo_forte"))
+        corrigir.setToolTip(f"Corrigir o texto de “{entrada.termo}” sem perder a revisão")
+        corrigir.setAccessibleName(f"Corrigir {entrada.termo}")
+        corrigir.clicked.connect(lambda: ao_corrigir(entrada))
+
+        # "×" (U+00D7, Latin-1) e não "✕" (U+2715, Dingbats): o segundo não
+        # existe em Consolas nem em Georgia — as fontes de metade dos temas —
+        # e saía como um tracinho vertical irreconhecível. É a mesma armadilha
+        # já documentada para os emoji do cabeçalho.
+        apagar = Botao("×", variante="perigo_sutil", paleta=janela.paleta, forma=self._forma)
+        apagar.setFont(janela.fonte("titulo"))
+        apagar.setToolTip(f"Remover “{entrada.termo}” do caderno")
+        apagar.setAccessibleName(f"Remover {entrada.termo}")
+        apagar.clicked.connect(lambda: ao_remover(entrada))
+
+        for botao in (conversa, corrigir, apagar):
+            botao.setFixedSize(self.TAMANHO_ACAO, self.TAMANHO_ACAO)
+            botao.installEventFilter(self)
+            fila.addWidget(botao)
+        self._acoes.adjustSize()
+        self._opacidade = QGraphicsOpacityEffect(self._acoes)
+        self._acoes.setGraphicsEffect(self._opacidade)
+
+        base = QHBoxLayout()
+        base.setSpacing(8)
+        partes = [
+            p for p in (entrada.jogo, _plural(entrada.encontros, "encontro", "encontros")) if p
+        ]
         if entrada.acertos or entrada.erros:
             partes.append(
                 f"{_plural(entrada.acertos, 'acerto', 'acertos')} · "
@@ -235,7 +329,12 @@ class CartaoTermo(QFrame):
             f"color: {design.garantir_contraste(tema.secondary, self._fundo)};"
             " background: transparent;"
         )
-        coluna.addWidget(rodape)
+        rodape.setMinimumHeight(self.TAMANHO_ACAO)
+        base.addWidget(rodape, 1)
+        base.addSpacing(self._acoes.width())
+        coluna.addLayout(base)
+
+        self._aplicar_revelacao(0.0)
 
     def _realce(self, tema: Any, cor_texto: str) -> str:
         """Realce de seleção contra o fundo deste cartão."""
@@ -243,16 +342,180 @@ class CartaoTermo(QFrame):
             self._fundo, tema.accent, design.garantir_contraste(cor_texto, self._fundo)
         )
 
+    # -- presença: mouse e teclado alimentam o mesmo estado
+    def enterEvent(self, evento: QEnterEvent) -> None:
+        self._sob_cursor = True
+        self._cursor = evento.position()
+        self._atualizar_presenca()
+        super().enterEvent(evento)
+
+    def leaveEvent(self, evento: QEvent) -> None:
+        self._sob_cursor = False
+        self._atualizar_presenca()
+        super().leaveEvent(evento)
+
+    def event(self, evento: QEvent) -> bool:
+        if evento.type() == QEvent.Type.HoverMove and isinstance(evento, QHoverEvent):
+            self._cursor = evento.position()
+            if self._luz.valor > 0.0 and not self._reduzir():
+                self.update()
+        return super().event(evento)
+
+    def eventFilter(self, alvo: QObject, evento: QEvent) -> bool:
+        if evento.type() == QEvent.Type.FocusIn and isinstance(alvo, QWidget):
+            self._foco = alvo
+            self._atualizar_presenca()
+        elif evento.type() == QEvent.Type.FocusOut and alvo is self._foco:
+            self._foco = None
+            self._atualizar_presenca()
+        return super().eventFilter(alvo, evento)
+
+    def _atualizar_presenca(self) -> None:
+        if self._saindo:
+            return
+        self._luz.ir(1.0 if self._sob_cursor or self._foco is not None else 0.0)
+        if self._foco is not None:
+            self._intencao.stop()
+            self._revelacao.ir(1.0)
+        elif self._sob_cursor:
+            if self._revelacao.valor < 1.0 and not self._intencao.isActive():
+                self._intencao.start()
+        else:
+            self._intencao.stop()
+            self._revelacao.ir(0.0)
+
+    def _confirmar_intencao(self) -> None:
+        if self._sob_cursor:
+            self._revelacao.ir(1.0)
+
+    def _aplicar_revelacao(self, valor: float) -> None:
+        self._opacidade.setOpacity(valor)
+        # Desligado quando opaco, e não por economia. Em opacidade EXATAMENTE
+        # 1.0 o QGraphicsOpacityEffect pega um atalho: pinta os filhos direto,
+        # com o mesmo pintor. A auréola de cada Botao é outro efeito, que tenta
+        # abrir um segundo pintor no mesmo dispositivo — e cada repintura do
+        # cartão aceso cuspia "A paint device can only be painted by one
+        # painter at a time". Abaixo de 1.0 o efeito pinta numa imagem antes, e
+        # o aninhamento funciona (é o que a Bolha faz com o brilho de fósforo).
+        # Em zero ele fica LIGADO: é o que mantém os botões invisíveis sem
+        # tirá-los da ordem do Tab.
+        self._opacidade.setEnabled(valor < 1.0)
+        # Botão quase invisível não pode receber clique: o "×" levaria a uma
+        # remoção que a pessoa nem viu que estava ao alcance.
+        self._acoes.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, valor < 0.35)
+        self._posicionar_acoes()
+
+    def _posicionar_acoes(self) -> None:
+        _, _, direita, base = self.MARGENS
+        deslize = round((1.0 - self._revelacao.valor) * self.DESLIZE)
+        self._acoes.move(
+            self.width() - direita - self._acoes.width() + deslize,
+            self.height() - base - self._acoes.height(),
+        )
+
+    def resizeEvent(self, evento: Any) -> None:
+        super().resizeEvent(evento)
+        self._posicionar_acoes()
+
+    # -- saída
+    def sair(self, ao_terminar: Callable[[], None]) -> None:
+        """Esmaece e fecha o espaço que ocupava, em vez de sumir num quadro.
+
+        Sem transição, o cartão de baixo salta para cima e o olho perde qual
+        palavra saiu. Esmaecer primeiro e recolher logo atrás mantém a
+        continuidade: dá para ver a lista se fechando sobre o buraco. É a única
+        animação do cartão que mexe em layout, porque ali a mudança de layout é
+        justamente o que precisa ser visto.
+        """
+        if self._reduzir():
+            ao_terminar()
+            return
+        # Congela o cartão como está. Uma revelação ainda em curso deixaria o
+        # efeito das ações ligado sob o esmaecer, que começa em 1.0 — o atalho
+        # de ``_aplicar_revelacao``, com um efeito embaixo.
+        self._saindo = True
+        self._intencao.stop()
+        self._revelacao.saltar(1.0)
+        self._acoes.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        # Pelo mesmo atalho, as auréolas dois níveis abaixo reclamariam. Um
+        # cartão de saída não precisa de auréola nenhuma.
+        for botao in self._acoes.findChildren(Botao):
+            halo = botao.graphicsEffect()
+            if halo is not None:
+                halo.setEnabled(False)
+        efeito = QGraphicsOpacityEffect(self)
+        self.setGraphicsEffect(efeito)
+        grupo = QParallelAnimationGroup(self)
+        esmaecer = QPropertyAnimation(efeito, b"opacity", grupo)
+        esmaecer.setDuration(design.DURACAO_RAPIDA)
+        esmaecer.setStartValue(1.0)
+        esmaecer.setEndValue(0.0)
+        recolher = QPropertyAnimation(self, b"maximumHeight", grupo)
+        recolher.setDuration(design.DURACAO_MEDIA)
+        recolher.setStartValue(self.height())
+        recolher.setEndValue(0)
+        recolher.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        grupo.addAnimation(esmaecer)
+        grupo.addAnimation(recolher)
+        grupo.finished.connect(ao_terminar)
+        grupo.start()
+
+    # -- desenho
+    def _centro_da_luz(self) -> QPointF:
+        if self._foco is not None and not self._sob_cursor:
+            return QPointF(self._foco.mapTo(self, self._foco.rect().center()))
+        if self._reduzir() or self._cursor is None:
+            # Luz parada no alto, como uma luminária: o cartão ainda se
+            # destaca, só não persegue o cursor.
+            return QPointF(self.width() * 0.3, 0.0)
+        return self._cursor
+
     def paintEvent(self, _evento: Any) -> None:
         pintor = QPainter(self)
         pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+        t = self._tema
+        luz = self._luz.valor
+        area = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        caminho = caminho_forma(area, self._forma, design.RAIO)
+
+        # A superfície sobe um degrau. Elevação em tema escuro é luz, não
+        # sombra: sombra preta sobre um fundo quase preto não se vê.
+        elevada = design.elevar(self._fundo, 0.07, t.primary)
         pintor.setPen(Qt.PenStyle.NoPen)
-        pintor.setBrush(QColor(self._fundo))
-        pintor.drawPath(
-            caminho_forma(
-                QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), self._forma, design.RAIO
-            )
-        )
+        pintor.setBrush(QColor(design.misturar(self._fundo, elevada, luz)))
+        pintor.drawPath(caminho)
+
+        centro = self._centro_da_luz()
+        if luz > 0.005:
+            # O holofote é somado à superfície, pela regra de componentes.py:
+            # brilho é aditivo, e por isso parece luz, e não tinta por cima.
+            pintor.save()
+            pintor.setClipPath(caminho)
+            pintor.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
+            holofote = QRadialGradient(centro, self.ALCANCE_LUZ)
+            perto = QColor(t.primary)
+            perto.setAlphaF(0.11 * luz)
+            longe = QColor(perto)
+            longe.setAlphaF(0.0)
+            holofote.setColorAt(0.0, perto)
+            holofote.setColorAt(1.0, longe)
+            pintor.fillRect(area, holofote)
+            pintor.restore()
+
+        # Um fio discreto em repouso, que acende do lado do cursor. O gradiente
+        # radial na CANETA é o que faz a borda parecer iluminada pela mesma luz,
+        # e não pintada de outra cor.
+        repouso = QColor(t.border)
+        if luz > 0.005:
+            fio = QRadialGradient(centro, self.ALCANCE_LUZ * 0.8)
+            fio.setColorAt(0.0, QColor(design.misturar(t.border, t.primary, 0.75 * luz)))
+            fio.setColorAt(1.0, repouso)
+            caneta = QPen(QBrush(fio), 1.2)
+        else:
+            caneta = QPen(repouso, 1.0)
+        pintor.setPen(caneta)
+        pintor.setBrush(Qt.BrushStyle.NoBrush)
+        pintor.drawPath(caminho)
         pintor.end()
 
 
@@ -265,7 +528,7 @@ class JanelaCaderno(QDialog):
         self._store = store
         self._filtro = FILTRO_TODAS
         self._jogo = ""
-        self._cartoes: list[QWidget] = []
+        self._cartoes: list[CartaoTermo] = []
 
         # Só a camada estática do cenário: o mesmo material da janela
         # principal, sem o relógio de quadros. Um catálogo se lê parado, e uma
@@ -360,7 +623,7 @@ class JanelaCaderno(QDialog):
         self.campo_jogo.setMinimumContentsLength(14)
         self.campo_jogo.setAccessibleName("Filtrar por jogo")
         self.campo_jogo.setToolTip("Mostrar só o vocabulário de um jogo")
-        self.campo_jogo.currentIndexChanged.connect(lambda _: self.atualizar())
+        self.campo_jogo.currentIndexChanged.connect(lambda _: self.atualizar(animar=True))
         filtros.addWidget(self.campo_jogo)
         coluna.addLayout(filtros)
 
@@ -407,9 +670,15 @@ class JanelaCaderno(QDialog):
         )
         self.botao_revisar.clicked.connect(self._abrir_revisao)
         rodape.addWidget(self.botao_revisar)
-        self.botao_exportar = Botao("↓   Exportar", variante="sutil", paleta=self._janela.paleta)
+        # O resultado da exportação ia só para o registro da janela principal,
+        # que fica ATRÁS deste caderno: o seletor de arquivo fechava e nada mais
+        # acontecia. A confirmação agora aparece no botão que foi clicado.
+        self.botao_exportar = BotaoDeEstado(
+            "↓   Exportar", "Exportado",
+            reduzir=self._movimento_reduzido, variante="sutil", paleta=self._janela.paleta,
+        )
         self.botao_exportar.setToolTip("Salvar o caderno como TSV para o Anki ou como Markdown")
-        self.botao_exportar.clicked.connect(self._janela.exportar_vocabulario)
+        self.botao_exportar.clicked.connect(self._exportar)
         rodape.addWidget(self.botao_exportar)
         self.botao_importar = Botao("↑   Importar", variante="sutil", paleta=self._janela.paleta)
         self.botao_importar.setToolTip(
@@ -499,6 +768,14 @@ class JanelaCaderno(QDialog):
     def showEvent(self, evento: Any) -> None:
         super().showEvent(evento)
         aplicar_cantos_do_sistema(self)
+        # A lista chega por baixo em vez de simplesmente estar lá: abrir o
+        # caderno é uma troca de lugar, e a cascata diz de onde para onde.
+        # Reabrir anima de novo; um Ctrl+B com ele já aberto, não.
+        animar_entrada(self._cartoes[:CASCATA_MAXIMA], reduzir=self._movimento_reduzido())
+
+    def _movimento_reduzido(self) -> bool:
+        # A mesma régua da janela principal: animação também é atmosfera.
+        return bool(self._janela.intensidade_atmosfera <= 0.0)
 
     def closeEvent(self, evento: Any) -> None:
         """Fechar o caderno também desarma a busca pendente.
@@ -536,7 +813,7 @@ class JanelaCaderno(QDialog):
         for chave, chip in self.chips.items():
             # Os chips são um grupo exclusivo: marcar um desmarca os outros.
             chip.setChecked(chave == valor)
-        self.atualizar()
+        self.atualizar(animar=True)
 
     def _sincronizar_jogos(self) -> str:
         """Reflete no seletor os jogos que o caderno tem. Devolve o escolhido.
@@ -563,8 +840,17 @@ class JanelaCaderno(QDialog):
         atual = self.campo_jogo.currentText()
         return "" if atual == TODOS_OS_JOGOS else atual
 
-    def atualizar(self) -> None:
-        """Recarrega estatísticas e lista a partir do banco."""
+    def atualizar(self, *, animar: bool = False, manter_rolagem: bool = False) -> None:
+        """Recarrega estatísticas e lista a partir do banco.
+
+        ``animar`` é para quando a lista TROCA de assunto — outro filtro, outro
+        jogo. A busca não anima: ela recarrega a cada pausa na digitação, e uma
+        cascata por pausa seria a lista pulando debaixo dos olhos de quem lê.
+
+        ``manter_rolagem`` é para quando a lista é a MESMA com uma palavra a
+        menos ou corrigida. Voltar ao topo depois de apagar o 40º termo jogava
+        a pessoa para longe do lugar em que ela estava trabalhando.
+        """
         self._espera.stop()
         self._jogo = self._sincronizar_jogos()
         estatisticas = self._store.estatisticas()
@@ -585,7 +871,9 @@ class JanelaCaderno(QDialog):
         )
         excedeu = len(entradas) > LIMITE_CARTOES
         entradas = entradas[:LIMITE_CARTOES]
-        self._preencher(entradas)
+        self._preencher(entradas, manter_rolagem=manter_rolagem)
+        if animar:
+            animar_entrada(self._cartoes[:CASCATA_MAXIMA], reduzir=self._movimento_reduzido())
 
         if excedeu:
             self.contagem.setText(f"mostrando os primeiros {LIMITE_CARTOES} — refine a busca")
@@ -649,7 +937,9 @@ class JanelaCaderno(QDialog):
             FILTRO_DIFICEIS: "Nenhuma palavra problemática. Bom sinal.",
         }.get(self._filtro, "Nada para mostrar.")
 
-    def _preencher(self, entradas: list[Entrada]) -> None:
+    def _preencher(self, entradas: list[Entrada], *, manter_rolagem: bool = False) -> None:
+        barra = self.rolagem.verticalScrollBar()
+        posicao = barra.value() if manter_rolagem else 0
         for cartao in self._cartoes:
             self._fluxo.removeWidget(cartao)
             cartao.setParent(None)
@@ -668,7 +958,9 @@ class JanelaCaderno(QDialog):
             )
             self._fluxo.insertWidget(self._fluxo.count() - 1, cartao)
             self._cartoes.append(cartao)
-        self.rolagem.verticalScrollBar().setValue(0)
+        # Ainda com o alcance antigo: a lista nova só é medida no próximo passo
+        # do laço, e o Qt apara a posição sozinho se o alcance encolher.
+        barra.setValue(posicao)
         self._posicionar_veu()
 
     def _corrigir(self, entrada: Entrada) -> None:
@@ -693,13 +985,33 @@ class JanelaCaderno(QDialog):
             # lista continua como estava, para tentar de novo.
             avisar(self._janela, "Não deu para corrigir", str(erro), erro=True)
             return
-        self.atualizar()
+        self.atualizar(manter_rolagem=True)
         self._janela.caderno_mudou(f"“{atualizada.termo}” corrigido no caderno.")
 
     def _remover(self, entrada: Entrada) -> None:
         if not confirmar_remocao(self._janela, entrada.termo):
             return
-        if self._store.remover(entrada.termo):
-            self.atualizar()
-            # A lateral mostra o total e a fila de revisão; ela precisa saber.
-            self._janela.caderno_mudou(f"“{entrada.termo}” removido do caderno.")
+        if not self._store.remover(entrada.termo):
+            return
+        # A lateral mostra o total e a fila de revisão; ela precisa saber já.
+        self._janela.caderno_mudou(f"“{entrada.termo}” removido do caderno.")
+        cartao = next((c for c in self._cartoes if c._entrada is entrada), None)
+        if cartao is None:
+            self.atualizar(manter_rolagem=True)
+            return
+
+        def recarregar() -> None:
+            # Fechar o programa fecha este caderno e, logo depois, o banco. Uma
+            # saída ainda em curso que chegasse aqui consultaria uma conexão
+            # encerrada — a mesma corrida que ``closeEvent`` desarma na busca.
+            if self.isVisible():
+                self.atualizar(manter_rolagem=True)
+
+        cartao.sair(recarregar)
+
+    def _exportar(self) -> None:
+        total = self._janela.exportar_vocabulario()
+        if total is not None:
+            self.botao_exportar.concluir(
+                _plural(total, "termo exportado", "termos exportados")
+            )

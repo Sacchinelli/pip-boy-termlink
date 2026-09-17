@@ -54,6 +54,22 @@ CABECALHO_LARGURA_MAX: Final = 206
 BOLHA_LARGURA_MAX: Final = 560
 
 
+# ------------------------------------------------------------------ Movimento
+# Três durações, pela mesma razão da grade de 4 px: o olho percebe quando cada
+# peça anda num tempo seu, mesmo sem saber nomear o que incomoda.
+#
+# RÁPIDA responde ao cursor — acima de ~150 ms a luz de um cartão parece correr
+# ATRÁS do mouse. MÉDIA é para o que aparece ou muda de estado. LENTA é para o
+# que entra em cena, e só entra uma vez. As peças anteriores a esta escala
+# (Botao, Bolha, TransicaoDeTema) ainda têm números próprios.
+DURACAO_RAPIDA: Final = 140
+DURACAO_MEDIA: Final = 220
+DURACAO_LENTA: Final = 340
+# Atraso entre um item e o seguinte numa entrada em cascata. Com mais que isso,
+# uma lista de oito cartões leva meio segundo para ficar legível.
+ESCALONAMENTO: Final = 45
+
+
 # ---------------------------------------------------------------- Tipografia
 @dataclass(frozen=True, slots=True)
 class Tipo:

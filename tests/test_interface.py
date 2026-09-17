@@ -226,6 +226,213 @@ def main() -> int:
     aplicacao.processEvents()
     checar(len(caderno._cartoes) == 2, "voltar para 'todos os jogos' devolve a lista")
 
+    print("microinterações do caderno")
+    # A atmosfera é fixada em Completa pelo mesmo motivo do relógio de quadros:
+    # num runner sem "efeitos de animação" ela nasce Desligada, as transições
+    # daqui virariam saltos, e as checagens passariam a medir a máquina.
+    from collections.abc import Callable
+
+    from PySide6.QtCore import QEvent, QEventLoop, QPointF, QTimer, qInstallMessageHandler
+    from PySide6.QtGui import QEnterEvent, QFocusEvent, QMouseEvent
+    from PySide6.QtWidgets import QLabel, QWidget
+
+    import pipboy.interface.caderno as mod_caderno
+    import pipboy.interface.janela as mod_exportar
+    from pipboy.interface.componentes import Botao
+    from pipboy.interface.movimento import EfeitoEntrada
+
+    def esperar(ms: int) -> None:
+        laco = QEventLoop()
+        QTimer.singleShot(ms, laco.quit)
+        laco.exec()
+
+    def aguardar(condicao: Callable[[], bool], limite_ms: int = 4000) -> bool:
+        # Espera pelo ESTADO, não por um tempo fixo: o runner de CI é mais
+        # lento que qualquer máquina de desenvolvimento, e um "espera 400 ms"
+        # que aqui sobra lá falta.
+        for _ in range(limite_ms // 50):
+            if condicao():
+                return True
+            esperar(50)
+        return bool(condicao())
+
+    def entrar(alvo: QWidget, x: float, y: float) -> None:
+        ponto = QPointF(x, y)
+        QApplication.sendEvent(alvo, QEnterEvent(ponto, ponto, QPointF(alvo.mapToGlobal(ponto))))
+
+    def sair(alvo: QWidget) -> None:
+        QApplication.sendEvent(alvo, QEvent(QEvent.Type.Leave))
+
+    atmosfera_caderno = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    aplicacao.processEvents()
+
+    # Trocar de filtro, logo acima, já dispara uma cascata. Sem esperá-la
+    # acabar, a checagem da REABERTURA enxergaria os efeitos da troca e
+    # passaria mesmo com a reabertura sem animação nenhuma.
+    aguardar(lambda: all(c.graphicsEffect() is None for c in caderno._cartoes))
+    caderno.hide()
+    caderno.show()
+    checar(
+        all(isinstance(c.graphicsEffect(), EfeitoEntrada) for c in caderno._cartoes),
+        "reabrir o caderno faz os cartões entrarem em cascata",
+    )
+    checar(
+        aguardar(lambda: all(c.graphicsEffect() is None for c in caderno._cartoes)),
+        "e nenhum efeito fica pendurado quando a entrada termina",
+    )
+
+    cartao = caderno._cartoes[0]
+    acoes = cartao._acoes
+    avisos_qt: list[str] = []
+    qInstallMessageHandler(lambda _tipo, _contexto, mensagem: avisos_qt.append(mensagem))
+    try:
+        entrar(cartao, 40, 20)
+        checar(
+            cartao._intencao.isActive() and cartao._revelacao.valor == 0.0,
+            "chegar ao cartão arma a intenção sem revelar as ações de cara",
+        )
+        checar(
+            acoes.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents),
+            "e ação invisível não recebe clique",
+        )
+        # O movimento cai sobre um FILHO: é o caso que congelava a luz.
+        rotulo = next(r for r in cartao.findChildren(QLabel) if r.text() == cartao._entrada.traducao)
+        centro = QPointF(rotulo.rect().center())
+        QApplication.sendEvent(
+            rotulo,
+            QMouseEvent(
+                QEvent.Type.MouseMove, centro, QPointF(rotulo.mapToGlobal(centro)),
+                Qt.MouseButton.NoButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+            ),
+        )
+        esperado = QPointF(rotulo.mapTo(cartao, centro.toPoint()))
+        checar(
+            cartao._cursor == esperado,
+            f"o cursor sobre a tradução ainda conduz a luz ({cartao._cursor} vs {esperado})",
+        )
+        checar(
+            aguardar(lambda: cartao._revelacao.valor == 1.0 and cartao._luz.valor == 1.0),
+            "parado no cartão, a luz acende e as ações aparecem",
+        )
+        checar(
+            not acoes.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents),
+            "e passam a aceitar clique",
+        )
+        avisos_qt.clear()
+        cartao.update()
+        acoes.update()
+        esperar(80)
+        checar(
+            not [a for a in avisos_qt if "ainter" in a],
+            f"repintar o cartão aceso não briga por pintor ({avisos_qt[:2]})",
+        )
+        sair(cartao)
+        checar(aguardar(lambda: cartao._revelacao.valor == 0.0), "sair esconde as ações")
+
+        # O foco é ENTREGUE, e não pedido com setFocus: a esta altura do roteiro
+        # o backend offscreen não tem janela ativa nenhuma, e um setFocus sem
+        # janela ativa guarda o pedido sem nunca emitir o evento. O que se prova
+        # aqui é a reação do cartão ao Tab, não o gerenciador de janelas.
+        corrigir = acoes.findChildren(Botao)[1]
+        QApplication.sendEvent(
+            corrigir, QFocusEvent(QEvent.Type.FocusIn, Qt.FocusReason.TabFocusReason)
+        )
+        checar(
+            aguardar(lambda: cartao._revelacao.valor == 1.0),
+            "Tab até uma ação revela as ações sem mouse nenhum",
+        )
+        QApplication.sendEvent(
+            corrigir, QFocusEvent(QEvent.Type.FocusOut, Qt.FocusReason.TabFocusReason)
+        )
+        checar(aguardar(lambda: cartao._revelacao.valor == 0.0), "e o foco saindo esconde de novo")
+    finally:
+        qInstallMessageHandler(None)
+
+    # -- Exportar confirma no próprio botão. Antes, o resultado ia só para o
+    #    registro da janela principal, escondido atrás do caderno.
+    exportar = caderno.botao_exportar
+    largura_exportar = exportar.width()
+    dica_exportar = exportar.toolTip()
+    destino_exportar = dados / "exportado.txt"
+    salvar_original = mod_exportar.QFileDialog.getSaveFileName
+    try:
+        mod_exportar.QFileDialog.getSaveFileName = staticmethod(  # type: ignore[assignment]
+            lambda *a, **k: ("", "")
+        )
+        exportar.click()
+        checar(exportar.estado == "ocioso", "cancelar o seletor não confirma nada")
+        mod_exportar.QFileDialog.getSaveFileName = staticmethod(  # type: ignore[assignment]
+            lambda *a, **k: (str(destino_exportar), "")
+        )
+        exportar.click()
+        aplicacao.processEvents()
+        checar(
+            destino_exportar.exists() and exportar.estado == "concluido",
+            "exportar confirma no botão que foi clicado",
+        )
+        checar(
+            f"{store.total()} termos exportados" in exportar.toolTip(),
+            f"e a dica diz quanto foi escrito ({exportar.toolTip()})",
+        )
+        checar(exportar.width() == largura_exportar, "sem mudar a largura do botão")
+        checar(
+            aguardar(lambda: exportar.estado == "ocioso"),
+            "a confirmação volta sozinha",
+        )
+        checar(exportar.toolTip() == dica_exportar, "e devolve a dica original")
+    finally:
+        mod_exportar.QFileDialog.getSaveFileName = salvar_original  # type: ignore[assignment]
+
+    # -- Remover esmaece e fecha o buraco SEM devolver a lista ao topo.
+    extras = [f"scrap {i:02d}" for i in range(14)]
+    for termo in extras:
+        store.registrar(termo, "sucata", "Scrap metal everywhere.", "Fallout")
+    caderno.atualizar()
+    barra = caderno.rolagem.verticalScrollBar()
+    checar(aguardar(lambda: barra.maximum() > 0), "com dezesseis palavras a lista rola")
+    barra.setValue(barra.maximum())
+    # A ordem da lista é a do caderno, não a de inserção: o alvo é procurado
+    # entre as palavras de apoio, para não levar junto uma das verdadeiras.
+    removido = next(c for c in reversed(caderno._cartoes) if c._entrada.termo in extras)
+    confirmar_original = mod_caderno.confirmar_remocao
+    try:
+        mod_caderno.confirmar_remocao = lambda *a, **k: True  # type: ignore[assignment]
+        caderno._remover(removido._entrada)
+        checar(
+            removido.graphicsEffect() is not None,
+            "remover esmaece o cartão em vez de sumir num quadro",
+        )
+        checar(
+            aguardar(lambda: len(caderno._cartoes) == len(extras) + 1),
+            "e a lista se fecha sobre ele",
+        )
+        aplicacao.processEvents()
+        checar(barra.value() > 0, f"sem devolver a rolagem ao topo ({barra.value()})")
+    finally:
+        mod_caderno.confirmar_remocao = confirmar_original  # type: ignore[assignment]
+        for termo in extras:
+            store.remover(termo)
+        caderno.atualizar()
+        aplicacao.processEvents()
+    checar(len(caderno._cartoes) == 2, "as palavras de apoio saem sem deixar rastro")
+
+    # -- Atmosfera desligada: o estado final chega, o trajeto não.
+    janela.campo_atmosfera.setCurrentText("Desligada")
+    aplicacao.processEvents()
+    cartao = caderno._cartoes[0]
+    entrar(cartao, 40, 20)
+    checar(cartao._luz.valor == 1.0, "com a atmosfera desligada a luz chega sem trajeto")
+    sair(cartao)
+    caderno.hide()
+    caderno.show()
+    checar(
+        all(c.graphicsEffect() is None for c in caderno._cartoes),
+        "e o caderno abre sem cascata",
+    )
+    janela.campo_atmosfera.setCurrentText(atmosfera_caderno)
+    aplicacao.processEvents()
+
     # -- Correção: a borracha que faltava ao lado do "×". A caixa é
     #    substituída pelo mesmo motivo do QFileDialog acima — ela bloqueia
     #    esperando alguém digitar; o resto do caminho é o de produção.
@@ -472,8 +679,6 @@ def main() -> int:
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()
     # nunca voltaria e a suíte penduraria. O tiro agendado é esse alguém.
-    from PySide6.QtCore import QTimer
-
     def _fechar_modal() -> None:
         ativo = aplicacao.activeModalWidget()
         if ativo is not None:
