@@ -32,7 +32,7 @@ import random
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Final
 
-from PySide6.QtCore import QPointF, QRect, QRectF, Qt
+from PySide6.QtCore import QEasingCurve, QPointF, QRect, QRectF, Qt
 
 if TYPE_CHECKING:
     from ..themes import GameTheme
@@ -41,6 +41,7 @@ from PySide6.QtGui import (
     QImage,
     QLinearGradient,
     QPainter,
+    QPen,
     QPixmap,
     QRadialGradient,
     QRegion,
@@ -177,6 +178,15 @@ PARALAXE: Final = 22.0
 # baixa o bastante para ter peso: esse pequeno atraso é o que faz o movimento
 # parecer fluido em vez de colado ao ponteiro.
 SEGUIMENTO: Final = 11.0
+# O anel que acompanha o cursor, com mais pressa que a luz, e que cresce sobre o
+# que se pode clicar — o cursor dos sites que respondem ao mouse, desenhado no
+# vidro da janela ao lado do ponteiro do sistema, sem substituí-lo.
+RAIO_ANEL: Final = 13.0
+RAIO_ANEL_CLICAVEL: Final = 22.0
+SEGUIMENTO_ANEL: Final = 22.0
+# A onda que sai de cada clique: o quanto cresce e quanto tempo dura.
+RAIO_ONDA: Final = 46.0
+DURACAO_ONDA: Final = 0.55
 
 
 # ------------------------------------------------------------------- Partículas
@@ -387,17 +397,40 @@ class Cenario:
         # Onde a luz estava e está: a região do FUNDO a repintar. Ver
         # ``regiao_da_luz``.
         self._luz_suja: list[QRect] = []
+        self._anel = QPointF()
+        self._raio_anel = RAIO_ANEL
+        self._sobre_clicavel = False
+        # Cada onda de clique: centro e idade, em segundos.
+        self._ondas: list[tuple[QPointF, float]] = []
 
     # -- configuração
-    def definir_cursor(self, ponto: QPointF | None) -> None:
+    def definir_cursor(self, ponto: QPointF | None, *, sobre_clicavel: bool = False) -> None:
         """Onde está o cursor, em coordenadas da janela; ``None`` quando saiu.
 
-        A luz nasce EM CIMA do cursor quando ele entra, em vez de atravessar a
-        janela vindo de onde ela apagou da última vez.
+        A luz e o anel nascem EM CIMA do cursor quando ele entra, em vez de
+        atravessarem a janela vindos de onde apagaram da última vez.
+        ``sobre_clicavel`` faz o anel crescer: ele anuncia o que responde a um
+        clique antes do clique.
         """
         if ponto is not None and self._forca_luz <= 0.001:
             self._luz = QPointF(ponto)
+            self._anel = QPointF(ponto)
         self._cursor = None if ponto is None else QPointF(ponto)
+        self._sobre_clicavel = sobre_clicavel and ponto is not None
+
+    def pulsar(self, ponto: QPointF) -> None:
+        """Uma onda sai do ponto do clique: a resposta imediata a qualquer toque."""
+        if self.movimento:
+            self._ondas.append((QPointF(ponto), 0.0))
+
+    @property
+    def anel(self) -> tuple[QPointF, float]:
+        """Posição e raio atuais do anel do cursor."""
+        return QPointF(self._anel), self._raio_anel
+
+    @property
+    def ondas(self) -> int:
+        return len(self._ondas)
 
     @property
     def cursor(self) -> QPointF | None:
@@ -438,8 +471,16 @@ class Cenario:
         alvo_forca = 1.0 if self._cursor is not None else 0.0
         if abs(self._forca_luz - alvo_forca) > 0.001:
             return True
+        if self._ondas:
+            return True
         if self._cursor is None:
             return False
+        alvo_raio = RAIO_ANEL_CLICAVEL if self._sobre_clicavel else RAIO_ANEL
+        if abs(self._raio_anel - alvo_raio) > 0.1:
+            return True
+        falta_anel = self._cursor - self._anel
+        if abs(falta_anel.x()) + abs(falta_anel.y()) > 0.5:
+            return True
         falta = self._cursor - self._luz
         falta_paralaxe = self._alvo_paralaxe() - self._paralaxe
         return (
@@ -474,7 +515,12 @@ class Cenario:
             self._forca_luz = alvo_forca
         if self._cursor is not None:
             self._luz += (self._cursor - self._luz) * passo
+            passo_anel = 1.0 - math.exp(-SEGUIMENTO_ANEL * dt)
+            self._anel += (self._cursor - self._anel) * passo_anel
+            alvo_raio = RAIO_ANEL_CLICAVEL if self._sobre_clicavel else RAIO_ANEL
+            self._raio_anel += (alvo_raio - self._raio_anel) * passo_anel
         self._paralaxe += (self._alvo_paralaxe() - self._paralaxe) * passo
+        self._ondas = [(c, idade + dt) for c, idade in self._ondas if idade + dt < DURACAO_ONDA]
     def definir(self, tema: GameTheme, atmosfera: Atmosfera) -> None:
         self._tema = tema
         self._atmosfera = atmosfera
@@ -572,6 +618,12 @@ class Cenario:
         caixas: list[QRect] = []
         if self._enxame is not None:
             caixas += self._enxame.caixas(self._paralaxe)
+        if self._forca_luz > 0.001:
+            r = RAIO_ANEL_CLICAVEL + 4
+            caixas.append(QRectF(self._anel.x() - r, self._anel.y() - r, 2 * r, 2 * r).toAlignedRect())
+        for centro, _ in self._ondas:
+            r = RAIO_ONDA + 4
+            caixas.append(QRectF(centro.x() - r, centro.y() - r, 2 * r, 2 * r).toAlignedRect())
         if self._faixas:
             largura = self._tamanho[0] or 1
             for y, altura, _ in self._faixas:
@@ -666,6 +718,9 @@ class Cenario:
         if self._enxame is not None and self.movimento:
             self._enxame.pintar(pintor, cor_viva, self._paralaxe)
 
+        if self.movimento:
+            self._pintar_anel_e_ondas(pintor)
+
         if self._faixas and self.movimento:
             pintor.save()
             pintor.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
@@ -689,6 +744,40 @@ class Cenario:
                 c.setAlphaF(min(1.0, osc * a.tremulacao))
                 pintor.fillRect(QRectF(0, 0, largura, altura), c)
                 pintor.restore()
+
+    def _pintar_anel_e_ondas(self, pintor: QPainter) -> None:
+        """O anel que persegue o cursor e as ondas dos cliques, no vidro."""
+        if self._tema is None:
+            return
+        pintor.save()
+        pintor.setBrush(Qt.BrushStyle.NoBrush)
+        cor = QColor(self._tema.accent)
+        forca = self._forca_luz * self._intensidade
+        if forca > 0.001:
+            crescido = (self._raio_anel - RAIO_ANEL) / (RAIO_ANEL_CLICAVEL - RAIO_ANEL)
+            contorno = QColor(cor)
+            contorno.setAlphaF(min(1.0, 0.85 * forca))
+            caneta = QPen(contorno)
+            caneta.setWidthF(1.6)
+            pintor.setPen(caneta)
+            if crescido > 0.01:
+                # Sobre o que é clicável, o anel ganha um miolo: vira alvo.
+                miolo = QColor(cor)
+                miolo.setAlphaF(min(1.0, 0.14 * crescido * forca))
+                pintor.setBrush(miolo)
+            pintor.drawEllipse(self._anel, self._raio_anel, self._raio_anel)
+            pintor.setBrush(Qt.BrushStyle.NoBrush)
+        curva = QEasingCurve(QEasingCurve.Type.OutCubic)
+        for centro, idade in self._ondas:
+            progresso = idade / DURACAO_ONDA
+            raio = 8.0 + (RAIO_ONDA - 8.0) * curva.valueForProgress(progresso)
+            onda = QColor(cor)
+            onda.setAlphaF(max(0.0, 0.75 * (1.0 - progresso)) * self._intensidade)
+            caneta = QPen(onda)
+            caneta.setWidthF(0.6 + 2.2 * (1.0 - progresso))
+            pintor.setPen(caneta)
+            pintor.drawEllipse(centro, raio, raio)
+        pintor.restore()
 
     def _pintar_luz(self, pintor: QPainter) -> None:
         """A luz que segue o cursor: um halo largo e um núcleo, somados.

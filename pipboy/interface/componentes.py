@@ -28,6 +28,7 @@ from typing import Any
 from PySide6.QtCore import (
     Property,
     QEasingCurve,
+    QEvent,
     QPointF,
     QPropertyAnimation,
     QRectF,
@@ -38,8 +39,10 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (
     QBrush,
     QColor,
+    QEnterEvent,
     QFont,
     QFontMetrics,
+    QHoverEvent,
     QLinearGradient,
     QPainter,
     QPainterPath,
@@ -102,6 +105,23 @@ def sombra(
     return efeito
 
 
+# ------------------------------------------------------------- Movimento
+# Quem decide se há movimento é a janela principal, pela atmosfera: ela troca a
+# regra ao nascer. Com movimento reduzido, a luz dentro dos botões fica parada no
+# centro e nenhum botão é puxado pelo cursor. Uma regra do módulo, e não um
+# parâmetro, porque há botões em toda janela e só uma atmosfera.
+_regra_do_movimento: Callable[[], bool] = lambda: False  # noqa: E731
+
+
+def definir_movimento_reduzido(regra: Callable[[], bool]) -> None:
+    global _regra_do_movimento
+    _regra_do_movimento = regra
+
+
+def movimento_reduzido() -> bool:
+    return bool(_regra_do_movimento())
+
+
 # ---------------------------------------------------------------------- Botão
 class Botao(QAbstractButton):
     """Botão pintado por inteiro, com transições animadas e foco visível.
@@ -129,12 +149,18 @@ class Botao(QAbstractButton):
         largura_min: int = 0,
         alinhamento_esquerdo: bool = False,
         magnetico: bool = False,
+        folga_ima: int | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.setText(texto)
-        self._folga = self.FOLGA_IMA if magnetico else 0
+        # A folga é o quanto o botão pode ser puxado. O principal ganha a folga
+        # inteira; os secundários, uma menor — o ímã deles é um aceno, e uma
+        # folga grande em todo botão incharia a janela.
+        self._folga = (self.FOLGA_IMA if folga_ima is None else folga_ima) if magnetico else 0
         self._direcao_ima = QPointF()
+        # Onde o cursor está sobre o botão, para a luz interna o seguir.
+        self._cursor_local: QPointF | None = None
         self.variante = variante
         self.forma = forma
         self._paleta = paleta or (lambda: {})
@@ -147,6 +173,9 @@ class Botao(QAbstractButton):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self.setMinimumHeight(38 + 2 * self._folga)
+        # HoverMove para a luz interna seguir o cursor: ver o Holofote sobre por
+        # que não mouseMoveEvent.
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover)
 
         self._anim_hover = QPropertyAnimation(self, b"progressoHover", self)
         self._anim_hover.setDuration(self.DURACAO_HOVER)
@@ -171,7 +200,10 @@ class Botao(QAbstractButton):
         """
         if not self._folga:
             return
-        if ponto is None or not self.isEnabled():
+        if (
+            ponto is None or not self.isEnabled() or not self.isVisible()
+            or movimento_reduzido()
+        ):
             self._forca_ima.ir(0.0)
             return
         corpo = QRectF(self.rect()).adjusted(self._folga, self._folga, -self._folga, -self._folga)
@@ -188,8 +220,22 @@ class Botao(QAbstractButton):
         self.update()
 
     @property
+    def magnetico(self) -> bool:
+        return self._folga > 0
+
+    def tornar_magnetico(self, folga: int = FOLGA_IMA) -> None:
+        """Liga o ímã num botão já construído, reservando a folga em volta dele."""
+        self._folga = folga
+        self.setMinimumHeight(38 + 2 * folga)
+        self.updateGeometry()
+
+    @property
     def deslocamento_ima(self) -> QPointF:
         return self._direcao_ima * self._forca_ima.valor
+
+    @property
+    def cursor_local(self) -> QPointF | None:
+        return self._cursor_local
 
     def _repintar_ima(self, _valor: float) -> None:
         self._atualizar_halo()
@@ -225,7 +271,16 @@ class Botao(QAbstractButton):
     def enterEvent(self, evento: Any) -> None:
         if self.isEnabled():
             self._animar(self._anim_hover, 1.0)
+        if isinstance(evento, QEnterEvent):
+            self._cursor_local = QPointF(evento.position())
         super().enterEvent(evento)
+
+    def event(self, evento: QEvent) -> bool:
+        if evento.type() == QEvent.Type.HoverMove and isinstance(evento, QHoverEvent):
+            self._cursor_local = QPointF(evento.position())
+            if self._hover > 0.0:
+                self.update()
+        return super().event(evento)
 
     def leaveEvent(self, evento: Any) -> None:
         self._animar(self._anim_hover, 0.0)
@@ -366,6 +421,13 @@ class Botao(QAbstractButton):
         if self.isEnabled():
             fundo = QColor(design.misturar(fundo.name(), "#ffffff", 0.12 * self._hover))
             fundo = QColor(design.misturar(fundo.name(), "#000000", 0.16 * self._pressao))
+            if self._hover > 0.0:
+                # O rótulo era escolhido contra o fundo EM REPOUSO, e o hover
+                # clareava o fundo sem reconferir: no Cyberpunk, o amarelo-oliva
+                # do texto sumia no botão aceso. O contraste é garantido contra o
+                # fundo já clareado e com a luz interna somada.
+                aceso = design.misturar(fundo.name(), halo.name(), 0.25 * self._hover)
+                frente = QColor(design.garantir_contraste(frente.name(), aceso))
 
         pintor.setPen(Qt.PenStyle.NoPen)
         pintor.setBrush(fundo)
@@ -378,16 +440,33 @@ class Botao(QAbstractButton):
             pintor.setBrush(Qt.BrushStyle.NoBrush)
             pintor.drawPath(caminho)
 
-        # Realce interno aditivo na borda superior: dá volume sem gradiente
-        # chapado, e some junto com o cursor.
+        # Realce interno aditivo: um véu uniforme que dá volume e, por cima dele,
+        # uma luz que acompanha o cursor DENTRO do botão — o ponto que ele toca
+        # acende mais que o resto. Os dois somem junto com o cursor.
         if self._hover > 0.01 and self.isEnabled():
             pintor.save()
+            pintor.setClipPath(caminho)
             pintor.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
             brilho = QColor(halo)
-            brilho.setAlphaF(min(1.0, 0.10 * self._hover))
+            brilho.setAlphaF(min(1.0, 0.08 * self._hover))
             pintor.setPen(Qt.PenStyle.NoPen)
             pintor.setBrush(brilho)
             pintor.drawPath(caminho)
+            centro = (
+                area.center()
+                if self._cursor_local is None or movimento_reduzido()
+                else self._cursor_local
+            )
+            # Contida: com mais força, a luz da cor do tema lavava o próprio
+            # rótulo do botão — amarelo sobre amarelo no Cyberpunk.
+            luz = QRadialGradient(centro, max(area.width(), area.height()) * 0.55)
+            perto = QColor(halo)
+            perto.setAlphaF(min(1.0, 0.17 * self._hover))
+            longe = QColor(perto)
+            longe.setAlphaF(0.0)
+            luz.setColorAt(0.0, perto)
+            luz.setColorAt(1.0, longe)
+            pintor.fillRect(area, luz)
             pintor.restore()
 
         if self.hasFocus():
@@ -523,7 +602,8 @@ class BotaoDeEstado(Botao):
             metricas.horizontalAdvance(rotulos["ocioso"]),
             metricas.horizontalAdvance(rotulos["concluido"]) + self.ICONE + self.VAO,
         )
-        return QSize(max(self._largura_min, round(largura) + 46), 38)
+        folga = 2 * self._folga
+        return QSize(max(self._largura_min, round(largura) + 46) + folga, 38 + folga)
 
     def _cores(self) -> tuple[QColor, QColor, QColor | None, QColor]:
         fundo, frente, contorno, halo = super()._cores()
@@ -717,16 +797,67 @@ class CampoSelecao(QComboBox):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._cor_seta = QColor("#888888")
+        self._cor_luz = QColor("#888888")
+        self._cursor_local: QPointF | None = None
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # O seletor também acende sob o cursor, como os botões: numa coluna de
+        # oito seletores iguais, a luz diz em qual deles o mouse está.
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover)
+        self._luz = Transicao(
+            self, design.DURACAO_RAPIDA, lambda _v: self.update(), reduzir=movimento_reduzido
+        )
 
     def definir_cor_seta(self, cor: str) -> None:
         self._cor_seta = QColor(cor)
         self.update()
 
+    def definir_cor_luz(self, cor: str) -> None:
+        self._cor_luz = QColor(cor)
+        self.update()
+
+    @property
+    def luz(self) -> float:
+        return self._luz.valor
+
+    def enterEvent(self, evento: Any) -> None:
+        if self.isEnabled():
+            self._luz.ir(1.0)
+        if isinstance(evento, QEnterEvent):
+            self._cursor_local = QPointF(evento.position())
+        super().enterEvent(evento)
+
+    def leaveEvent(self, evento: Any) -> None:
+        self._luz.ir(0.0)
+        super().leaveEvent(evento)
+
+    def event(self, evento: QEvent) -> bool:
+        if evento.type() == QEvent.Type.HoverMove and isinstance(evento, QHoverEvent):
+            self._cursor_local = QPointF(evento.position())
+            if self._luz.valor > 0.0:
+                self.update()
+        return super().event(evento)
+
     def paintEvent(self, evento: Any) -> None:
         super().paintEvent(evento)
         pintor = QPainter(self)
         pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self._luz.valor > 0.01 and self.isEnabled():
+            centro = (
+                QPointF(self.rect().center())
+                if self._cursor_local is None or movimento_reduzido()
+                else self._cursor_local
+            )
+            luz = QRadialGradient(centro, max(60.0, self.width() * 0.45))
+            perto = QColor(self._cor_luz)
+            perto.setAlphaF(0.16 * self._luz.valor)
+            longe = QColor(perto)
+            longe.setAlphaF(0.0)
+            luz.setColorAt(0.0, perto)
+            luz.setColorAt(1.0, longe)
+            pintor.save()
+            pintor.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
+            pintor.fillRect(self.rect(), luz)
+            pintor.restore()
         caneta = QPen(self._cor_seta)
         caneta.setWidthF(1.6)
         caneta.setCapStyle(Qt.PenCapStyle.RoundCap)

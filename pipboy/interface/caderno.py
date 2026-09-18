@@ -77,6 +77,7 @@ from .componentes import (
     caminho_forma,
     css_campo_selecao,
 )
+from .cursor import CampoMagnetico, RastreadorDeCursor
 from .dialogo import avisar, confirmar_remocao, pedir_correcao
 from .moldura import (
     BarraDeTitulo,
@@ -632,6 +633,16 @@ class JanelaCaderno(QDialog):
         self.botao_fechar.clicked.connect(self.close)
         rodape.addWidget(self.botao_fechar)
         coluna.addLayout(rodape)
+
+        # O rodapé responde ao cursor como os botões da janela principal: cada
+        # um é puxado de leve pelo mouse que se aproxima e acende antes do toque.
+        for botao in (
+            self.botao_progresso, self.botao_revisar, self.botao_exportar,
+            self.botao_importar, self.botao_fechar,
+        ):
+            botao.tornar_magnetico(4)
+        self._campo_magnetico = CampoMagnetico(self)
+        self._rastreador = RastreadorDeCursor(self, self._campo_magnetico.mover)
 
     # ---------------------------------------------------------------- tema
     def definir_intensidade(self, valor: float) -> None:

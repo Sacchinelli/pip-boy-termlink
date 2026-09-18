@@ -72,8 +72,9 @@ from .componentes import (
     CampoSelecao,
     Desvanecer,
     TransicaoDeTema,
+    definir_movimento_reduzido,
 )
-from .cursor import RastreadorDeCursor
+from .cursor import CampoMagnetico, RastreadorDeCursor
 from .dialogo import avisar
 from .estilo import folha_da_janela
 from .moldura import (
@@ -172,6 +173,9 @@ class Janela(QWidget):
         # meia dúzia de leitores usavam getattr com padrão para contornar a
         # janela em que ela não existia.
         self._intensidade_atmosfera = 1.0
+        # A mesma régua para os botões de todas as janelas: sem atmosfera, a luz
+        # dentro deles fica parada e nenhum é puxado pelo cursor.
+        definir_movimento_reduzido(lambda: self._intensidade_atmosfera <= 0.0)
         # O total que a lateral mostra agora. É contra ele que uma palavra
         # salva pela sessão se mede, para o sinal dizer QUANTAS entraram.
         self._total_no_caderno = 0
@@ -222,7 +226,8 @@ class Janela(QWidget):
         )
         self._relogios.iniciar()
         # Depois dos relógios: o primeiro movimento já pede um quadro.
-        self._rastreador = RastreadorDeCursor(self, self._cursor_mudou)
+        self._campo_magnetico = CampoMagnetico(self)
+        self._rastreador = RastreadorDeCursor(self, self._cursor_mudou, self._clique)
         self._aplicar_preferencias()
         self._aplicar_tema()
         self._registrar_atalhos()
@@ -567,6 +572,7 @@ class Janela(QWidget):
         self._posicionar_veu()
         for campo in self.campos.values():
             campo.definir_cor_seta(t.text_muted)
+            campo.definir_cor_luz(t.primary)
         self._atualizar_pilula()
         self._campainha.aplicar_tema()
         if self._capsula is not None:
@@ -782,7 +788,7 @@ class Janela(QWidget):
         if not self._cenario.tem_camada_viva and not self._cenario.seguindo_cursor:
             self._relogios.sincronizar_animacao()
 
-    def _cursor_mudou(self, ponto: QPointF | None) -> None:
+    def _cursor_mudou(self, ponto: QPointF | None, sobre_clicavel: bool = False) -> None:
         """O cursor andou sobre a janela (ou saiu dela, com ``None``).
 
         A atmosfera ganha uma luz que o segue e partículas que fogem dele, e o
@@ -791,10 +797,16 @@ class Janela(QWidget):
         """
         if self._intensidade_atmosfera <= 0.0:
             ponto = None
-        self._cenario.definir_cursor(ponto)
-        self.botao_acao.atrair(
-            None if ponto is None else self.botao_acao.mapFrom(self, ponto)
-        )
+        self._cenario.definir_cursor(ponto, sobre_clicavel=sobre_clicavel)
+        self._campo_magnetico.mover(ponto)
+        if not self._relogios.animando:
+            self._relogios.sincronizar_animacao()
+
+    def _clique(self, ponto: QPointF) -> None:
+        """Todo clique na janela solta uma onda do ponto tocado."""
+        if self._intensidade_atmosfera <= 0.0:
+            return
+        self._cenario.pulsar(ponto)
         if not self._relogios.animando:
             self._relogios.sincronizar_animacao()
 

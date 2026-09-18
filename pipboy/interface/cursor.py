@@ -16,11 +16,51 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QEvent, QObject, QPointF
+from PySide6.QtCore import QEvent, QObject, QPointF, Qt
 from PySide6.QtGui import QHoverEvent, QMouseEvent
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QAbstractButton, QApplication, QComboBox, QWidget
+
+from .componentes import Botao
 
 _MOVIMENTOS = (QEvent.Type.MouseMove, QEvent.Type.HoverMove)
+
+
+def clicavel(widget: QWidget) -> bool:
+    """O widget sob o cursor responde a clique? É o que faz o anel crescer."""
+    return (
+        isinstance(widget, (QAbstractButton, QComboBox))
+        or widget.cursor().shape() == Qt.CursorShape.PointingHandCursor
+    )
+
+
+class CampoMagnetico:
+    """Os botões magnéticos de uma janela, puxados pelo cursor dela.
+
+    A janela sabe onde o cursor está; cada botão sabe como reagir. Isto só faz
+    a ponte, levando o ponto para as coordenadas de cada botão.
+    """
+
+    def __init__(self, janela: QWidget) -> None:
+        self._janela = janela
+        self._botoes: list[Botao] | None = None
+
+    @property
+    def botoes(self) -> list[Botao]:
+        # Procurados na primeira vez, e não na construção: a janela ainda está
+        # sendo montada quando o campo nasce. Só os desta JANELA: o caderno e a
+        # revisão são filhos da janela principal, e a busca recursiva trazia os
+        # botões deles junto — puxados por um cursor de outra janela, com
+        # coordenadas que não significam nada lá.
+        if self._botoes is None:
+            self._botoes = [
+                b for b in self._janela.findChildren(Botao)
+                if b.magnetico and b.window() is self._janela
+            ]
+        return self._botoes
+
+    def mover(self, ponto: QPointF | None, _clicavel: bool = False) -> None:
+        for botao in self.botoes:
+            botao.atrair(None if ponto is None else botao.mapFrom(self._janela, ponto))
 
 
 class RastreadorDeCursor(QObject):
@@ -31,10 +71,20 @@ class RastreadorDeCursor(QObject):
     nem saída volta na hora.
     """
 
-    def __init__(self, janela: QWidget, ao_mover: Callable[[QPointF | None], None]) -> None:
+    def __init__(
+        self,
+        janela: QWidget,
+        ao_mover: Callable[[QPointF | None, bool], None],
+        ao_clicar: Callable[[QPointF], None] | None = None,
+    ) -> None:
         super().__init__(janela)
         self._janela = janela
         self._ao_mover = ao_mover
+        self._ao_clicar = ao_clicar
+        # O Qt repassa um clique não aceito a cada ancestral do widget clicado, e
+        # o filtro da aplicação o vê em cada um: um clique virava quatro ondas.
+        # Instante e posição na tela identificam o MESMO clique entre as cópias.
+        self._ultimo_clique: tuple[int, float, float] | None = None
         aplicacao = QApplication.instance()
         if aplicacao is not None:
             aplicacao.installEventFilter(self)
@@ -47,7 +97,19 @@ class RastreadorDeCursor(QObject):
                 and isinstance(evento, (QMouseEvent, QHoverEvent))
                 and alvo.window() is self._janela
             ):
-                self._ao_mover(alvo.mapTo(self._janela, evento.position()))
+                self._ao_mover(alvo.mapTo(self._janela, evento.position()), clicavel(alvo))
+        elif tipo == QEvent.Type.MouseButtonPress:
+            if (
+                self._ao_clicar is not None
+                and isinstance(alvo, QWidget)
+                and isinstance(evento, QMouseEvent)
+                and alvo.window() is self._janela
+            ):
+                global_ = evento.globalPosition()
+                chave = (evento.timestamp(), global_.x(), global_.y())
+                if chave != self._ultimo_clique:
+                    self._ultimo_clique = chave
+                    self._ao_clicar(alvo.mapTo(self._janela, evento.position()))
         elif tipo == QEvent.Type.Leave and alvo is self._janela:
-            self._ao_mover(None)
+            self._ao_mover(None, False)
         return False

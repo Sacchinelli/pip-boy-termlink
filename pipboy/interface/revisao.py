@@ -42,6 +42,7 @@ from .. import design
 from ..revisao import RodadaDeRevisao
 from ..vocabulary import VocabularyStore
 from .componentes import Botao, RotuloElidido, caminho_forma
+from .cursor import CampoMagnetico, RastreadorDeCursor
 from .movimento import ImagemQueSai, Transicao, animar_entrada
 
 LARGURA = 520
@@ -257,6 +258,15 @@ class JanelaRevisao(QDialog):
         self._botao_nova.clicked.connect(self._nova_rodada)
         acoes.addWidget(self._botao_nova)
         coluna.addLayout(acoes)
+        # As ações são puxadas pelo cursor que se aproxima, como na janela
+        # principal. Quem responde pelo teclado não é afetado.
+        for botao in (
+            self._botao_sair, self._botao_errei, self._botao_acertei,
+            self._botao_revelar, self._botao_nova,
+        ):
+            botao.tornar_magnetico(4)
+        self._campo_magnetico = CampoMagnetico(self)
+        self._rastreador = RastreadorDeCursor(self, self._campo_magnetico.mover)
 
         # A borda acende na cor do resultado e apaga: sobe rápido, desce devagar.
         self._lampejo = 0.0
