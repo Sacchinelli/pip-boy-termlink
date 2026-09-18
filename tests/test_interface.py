@@ -1268,6 +1268,186 @@ def main() -> int:
     janela.campo_atmosfera.setCurrentText(atmosfera_palavra)
     aplicacao.processEvents()
 
+    print("a janela reage ao cursor")
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtGui import QMouseEvent as MovimentoMouse
+
+    from pipboy.interface import atmosfera as mod_atmosfera
+    from pipboy.interface.atmosfera import Cenario as CenarioCursor
+    from pipboy.interface.atmosfera import atmosfera_de
+    from pipboy.interface.componentes import Botao as BotaoIma
+    from pipboy.themes import TEMAS as TEMAS_CURSOR
+
+    # -- As partículas fogem: uma partícula parada ao lado do cursor é empurrada
+    #    para longe dele, e a chuva de dados só desvia para o lado.
+    enxame = mod_atmosfera._Enxame("neve", 1, 7)
+    enxame.redimensionar(800, 600)
+    particula = enxame._particulas[0]
+    particula.x, particula.y, particula.vx, particula.vy = 100.0, 100.0, 0.0, 0.0
+    enxame.avancar(0.05, QPointF(110.0, 100.0))
+    checar(particula.x < 100.0, f"a partícula foge do cursor ({particula.x:.1f})")
+    longe = mod_atmosfera._Enxame("neve", 1, 7)
+    longe.redimensionar(800, 600)
+    distante = longe._particulas[0]
+    distante.x, distante.y, distante.vx, distante.vy = 100.0, 100.0, 0.0, 0.0
+    longe.avancar(0.05, QPointF(100.0 + mod_atmosfera.RAIO_FUGA + 5, 100.0))
+    checar(distante.x == 100.0, "e fora do raio de fuga nada muda")
+    chuva = mod_atmosfera._Enxame("dados", 1, 7)
+    chuva.redimensionar(800, 600)
+    gota = chuva._particulas[0]
+    gota.x, gota.y, gota.vx, gota.vy = 100.0, 100.0, 0.0, 0.0
+    chuva.avancar(0.05, QPointF(110.0, 110.0))
+    checar(gota.x < 100.0 and gota.y == 100.0, "a chuva de dados só desvia para o lado")
+
+    # -- A luz segue com atraso, assenta, e o relógio pode parar.
+    cenario = CenarioCursor()
+    cenario.definir(TEMAS_CURSOR["Genérico / Outro"], atmosfera_de("Genérico / Outro"))
+    cenario.redimensionar(1000, 800)
+    checar(not cenario.precisa_quadros, "sem partícula e sem cursor, a atmosfera não pede quadros")
+    cenario.definir_cursor(QPointF(200.0, 200.0))
+    cenario.avancar(0.016)
+    cenario.definir_cursor(QPointF(700.0, 400.0))
+    cenario.avancar(0.016)
+    luz, forca = cenario.luz
+    checar(
+        cenario.precisa_quadros and 200.0 < luz.x() < 700.0,
+        f"a luz vai até o cursor com atraso, em vez de colar nele ({luz.x():.0f})",
+    )
+    checar(not cenario.regiao_da_luz().isEmpty(), "e pede para repintar só onde passou")
+    for _ in range(90):
+        cenario.avancar(0.033)
+    luz, forca = cenario.luz
+    checar(
+        abs(luz.x() - 700.0) < 1.0 and forca == 1.0 and not cenario.seguindo_cursor,
+        "parado o cursor, a luz assenta nele e não pede mais quadros",
+    )
+    checar(
+        cenario.paralaxe.x() < 0.0,
+        f"com o cursor à direita, o enxame desliza para a esquerda ({cenario.paralaxe.x():.1f})",
+    )
+
+    def brilho_em(cenario_alvo: CenarioCursor, ponto: QPoint) -> int:
+        imagem = QImage(1000, 800, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem.fill(0)
+        pintor = QPainter(imagem)
+        cenario_alvo.pintar_fundo(pintor, 1000, 800)
+        pintor.end()
+        cor = imagem.pixelColor(ponto)
+        return cor.red() + cor.green() + cor.blue()
+
+    aceso = brilho_em(cenario, QPoint(700, 400))
+    cenario.definir_cursor(None)
+    for _ in range(90):
+        cenario.avancar(0.033)
+    checar(cenario.luz[1] == 0.0 and not cenario.precisa_quadros, "o cursor saiu: a luz apaga e o relógio pode parar")
+    checar(
+        aceso > brilho_em(cenario, QPoint(700, 400)) + 30,
+        "a luz é pintada no FUNDO, atrás do conteúdo, onde o cursor está",
+    )
+
+    # -- O ímã do botão principal.
+    comum = BotaoIma("Comum")
+    comum.atrair(QPointF(5.0, 5.0))
+    checar(comum.deslocamento_ima == QPointF(), "um botão comum ignora o ímã")
+    ima = BotaoIma("Iniciar", largura_min=150, magnetico=True)
+    ima.resize(ima.sizeHint())
+    checar(
+        ima.sizeHint().height() == 38 + 2 * BotaoIma.FOLGA_IMA,
+        "o botão magnético reserva a folga para onde pode ser puxado",
+    )
+    ima.atrair(QPointF(ima.width() + 30.0, ima.height() / 2))
+    checar(
+        aguardar(lambda: ima.deslocamento_ima.x() > 0.0),
+        f"com o cursor chegando pela direita, o botão é puxado para a direita ({ima.deslocamento_ima})",
+    )
+    checar(
+        abs(ima.deslocamento_ima.x()) <= BotaoIma.FOLGA_IMA,
+        "sem passar da folga que tem para se mover",
+    )
+    ima.atrair(QPointF(ima.width() + 30.0 + BotaoIma.ALCANCE_IMA * 3, 0.0))
+    checar(aguardar(lambda: ima.deslocamento_ima == QPointF()), "longe demais, ele volta ao lugar")
+    ima.deleteLater()
+
+    # -- A janela inteira: o rastreador vê o cursor sobre um filho qualquer.
+    atmosfera_cursor = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    janela._trocar_jogo("Genérico / Outro")
+    aplicacao.processEvents()
+    rotulo_filho = janela._rotulos_campo[0]
+    checar(not rotulo_filho.hasMouseTracking(), "o alvo do teste é um filho sem rastreamento")
+    local = QPointF(3.0, 3.0)
+    QApplication.sendEvent(
+        rotulo_filho,
+        MovimentoMouse(
+            QEvent.Type.MouseMove, local, QPointF(rotulo_filho.mapToGlobal(local)),
+            Qt.MouseButton.NoButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+        ),
+    )
+    esperado_cursor = QPointF(rotulo_filho.mapTo(janela, local.toPoint()))
+    checar(
+        janela._cenario.cursor == esperado_cursor,
+        f"o movimento sobre um rótulo sem rastreamento chega à atmosfera ({janela._cenario.cursor})",
+    )
+    checar(
+        janela._relogios.animando,
+        "e liga o relógio de quadros num ambiente que não tem partícula",
+    )
+    checar(
+        aguardar(lambda: not janela._relogios.animando),
+        "que para sozinho quando a luz assenta",
+    )
+    QApplication.sendEvent(janela, QEvent(QEvent.Type.Leave))
+    checar(janela._cenario.cursor is None, "sair da janela solta o cursor")
+
+    botao_principal = janela.botao_acao
+    perto = botao_principal.mapTo(janela, QPoint(-30, botao_principal.height() // 2))
+    janela._cursor_mudou(QPointF(perto))
+    checar(
+        aguardar(lambda: botao_principal.deslocamento_ima.x() < 0.0),
+        "o INICIAR é puxado na direção do cursor que se aproxima pela esquerda",
+    )
+    janela._cursor_mudou(None)
+
+    # -- O cartão da tela inicial inclina em direção ao cursor.
+    cartao_3d = janela.conversa.tela_inicial.cartao_caderno
+    borda_direita = QPointF(cartao_3d.width() - 2.0, cartao_3d.height() / 2)
+    QApplication.sendEvent(
+        cartao_3d, QEnterEvent(borda_direita, borda_direita, QPointF(cartao_3d.mapToGlobal(borda_direita)))
+    )
+    checar(
+        aguardar(lambda: cartao_3d._holofote.valor == 1.0),
+        "o cartão acende sob o cursor",
+    )
+    giro_y, giro_x = cartao_3d.inclinacao()
+    checar(
+        giro_y < 0.0 and abs(giro_y) <= cartao_3d.INCLINACAO and abs(giro_x) < 1.0,
+        f"e inclina: o lado sob o cursor afasta ({giro_y:.1f}°, {giro_x:.1f}°)",
+    )
+    QApplication.sendEvent(cartao_3d, QEvent(QEvent.Type.Leave))
+    checar(
+        aguardar(lambda: cartao_3d.inclinacao() == (0.0, 0.0)),
+        "ao sair, volta ao plano junto com a luz",
+    )
+    QApplication.sendEvent(
+        cartao_3d, QFocusEvent(QEvent.Type.FocusIn, Qt.FocusReason.TabFocusReason)
+    )
+    checar(
+        aguardar(lambda: cartao_3d._holofote.valor == 1.0) and cartao_3d.inclinacao() == (0.0, 0.0),
+        "pelo teclado o cartão acende, mas não tem de onde inclinar",
+    )
+    QApplication.sendEvent(
+        cartao_3d, QFocusEvent(QEvent.Type.FocusOut, Qt.FocusReason.TabFocusReason)
+    )
+
+    # -- Atmosfera desligada: nada disso existe.
+    janela.campo_atmosfera.setCurrentText("Desligada")
+    aplicacao.processEvents()
+    janela._cursor_mudou(QPointF(400.0, 300.0))
+    checar(janela._cenario.cursor is None, "com a atmosfera desligada o cursor não acende nada")
+    janela.campo_atmosfera.setCurrentText(atmosfera_cursor)
+    aplicacao.processEvents()
+
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()
     # nunca voltaria e a suíte penduraria. O tiro agendado é esse alguém.

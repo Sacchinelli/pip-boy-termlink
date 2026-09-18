@@ -502,9 +502,11 @@ def _palco(janela: Janela, alvo: QWidget) -> Palco:
     botao_mudo.setEnabled(False)
     barra.addWidget(botao_mudo)
 
+    # Magnético: o botão principal é puxado na direção do cursor quando ele
+    # chega perto, e acende antes do toque. É o convite da janela inteira.
     botao_acao = Botao(
         variante="primario", paleta=janela.paleta, forma=janela.atmosfera.forma,
-        largura_min=150,
+        largura_min=150, magnetico=True,
     )
     botao_acao.setFont(janela.fonte("corpo_forte"))
     botao_acao.clicked.connect(janela.alternar_sessao)

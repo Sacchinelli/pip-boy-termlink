@@ -113,6 +113,11 @@ class Botao(QAbstractButton):
 
     DURACAO_HOVER = 160
     DURACAO_PRESSAO = 90
+    # O botão magnético é desenhado com esta folga em volta do corpo, que é o
+    # espaço para onde ele pode ser puxado: um widget não pinta fora de si.
+    FOLGA_IMA = 8
+    # A partir de quantos pixels além da borda o botão começa a sentir o cursor.
+    ALCANCE_IMA = 110.0
 
     def __init__(
         self,
@@ -123,10 +128,13 @@ class Botao(QAbstractButton):
         forma: str = "arredondada",
         largura_min: int = 0,
         alinhamento_esquerdo: bool = False,
+        magnetico: bool = False,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.setText(texto)
+        self._folga = self.FOLGA_IMA if magnetico else 0
+        self._direcao_ima = QPointF()
         self.variante = variante
         self.forma = forma
         self._paleta = paleta or (lambda: {})
@@ -138,7 +146,7 @@ class Botao(QAbstractButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        self.setMinimumHeight(38)
+        self.setMinimumHeight(38 + 2 * self._folga)
 
         self._anim_hover = QPropertyAnimation(self, b"progressoHover", self)
         self._anim_hover.setDuration(self.DURACAO_HOVER)
@@ -148,6 +156,44 @@ class Botao(QAbstractButton):
         self._anim_pressao.setEasingCurve(QEasingCurve.Type.OutQuad)
 
         self._halo = sombra(self, raio=1, alpha=0, deslocamento=0)
+        self._forca_ima = Transicao(
+            self, design.DURACAO_MEDIA, self._repintar_ima, reduzir=lambda: False
+        )
+
+    # -- ímã
+    def atrair(self, ponto: QPointF | None) -> None:
+        """O cursor, em coordenadas deste botão; ``None`` solta o ímã.
+
+        Perto do botão, o corpo é puxado na direção do cursor — mais forte
+        quanto mais perto — e a auréola acende antes de o cursor chegar: o
+        botão principal percebe a intenção, não só o toque. Só vale para o
+        botão construído com ``magnetico=True``.
+        """
+        if not self._folga:
+            return
+        if ponto is None or not self.isEnabled():
+            self._forca_ima.ir(0.0)
+            return
+        corpo = QRectF(self.rect()).adjusted(self._folga, self._folga, -self._folga, -self._folga)
+        falta = ponto - corpo.center()
+        fora = max(
+            0.0, abs(falta.x()) - corpo.width() / 2, abs(falta.y()) - corpo.height() / 2
+        )
+        limite = float(self._folga)
+        self._direcao_ima = QPointF(
+            max(-limite, min(limite, falta.x() * 0.16)),
+            max(-limite, min(limite, falta.y() * 0.30)),
+        )
+        self._forca_ima.ir(max(0.0, 1.0 - fora / self.ALCANCE_IMA))
+        self.update()
+
+    @property
+    def deslocamento_ima(self) -> QPointF:
+        return self._direcao_ima * self._forca_ima.valor
+
+    def _repintar_ima(self, _valor: float) -> None:
+        self._atualizar_halo()
+        self.update()
 
     # -- propriedades animáveis
     def _get_hover(self) -> float:
@@ -204,7 +250,8 @@ class Botao(QAbstractButton):
     def sizeHint(self) -> QSize:
         metricas = QFontMetrics(self.font())
         largura = metricas.horizontalAdvance(self.text()) + 46
-        return QRectF(0, 0, max(self._largura_min, largura), 38).size().toSize()
+        folga = 2 * self._folga
+        return QRectF(0, 0, max(self._largura_min, largura) + folga, 38 + folga).size().toSize()
 
     def minimumSizeHint(self) -> QSize:
         """O texto do botão é um piso, não uma sugestão.
@@ -291,7 +338,11 @@ class Botao(QAbstractButton):
         fixa produziria.
         """
         _, _, _, halo = self._cores()
-        intensidade = self._hover * (1.0 if self.variante in ("primario", "perigo") else 0.6)
+        forca = getattr(self, "_forca_ima", None)
+        proximidade = 0.75 * forca.valor if forca is not None else 0.0
+        intensidade = max(self._hover, proximidade) * (
+            1.0 if self.variante in ("primario", "perigo") else 0.6
+        )
         cor = QColor(halo)
         cor.setAlpha(int(150 * intensidade))
         self._halo.setColor(cor)
@@ -306,7 +357,10 @@ class Botao(QAbstractButton):
 
         # A pressão afunda o botão 1 px e escurece: resposta física ao toque.
         recuo = self._pressao
-        area = QRectF(self.rect()).adjusted(0.5, 0.5 + recuo, -0.5, -0.5 + recuo)
+        folga = self._folga
+        area = QRectF(self.rect()).adjusted(
+            0.5 + folga, 0.5 + folga + recuo, -0.5 - folga, -0.5 - folga + recuo
+        ).translated(self.deslocamento_ima)
         caminho = caminho_forma(area, self.forma, design.RAIO)
 
         if self.isEnabled():
@@ -632,7 +686,7 @@ class Holofote:
             pintor.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
             gradiente = QRadialGradient(centro, self.ALCANCE)
             perto = QColor(cor)
-            perto.setAlphaF(0.11 * luz)
+            perto.setAlphaF(0.16 * luz)
             longe = QColor(perto)
             longe.setAlphaF(0.0)
             gradiente.setColorAt(0.0, perto)
@@ -646,7 +700,7 @@ class Holofote:
         repouso = QColor(borda)
         if luz > 0.005:
             fio = QRadialGradient(centro, self.ALCANCE * 0.8)
-            fio.setColorAt(0.0, QColor(design.misturar(borda, cor, 0.75 * luz)))
+            fio.setColorAt(0.0, QColor(design.misturar(borda, cor, 0.95 * luz)))
             fio.setColorAt(1.0, repouso)
             caneta = QPen(QBrush(fio), 1.2)
         else:

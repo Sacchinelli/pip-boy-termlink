@@ -24,6 +24,7 @@ from PySide6.QtCore import (
     QEasingCurve,
     QEvent,
     QPoint,
+    QPointF,
     QPropertyAnimation,
     Qt,
     QTimer,
@@ -72,6 +73,7 @@ from .componentes import (
     Desvanecer,
     TransicaoDeTema,
 )
+from .cursor import RastreadorDeCursor
 from .dialogo import avisar
 from .estilo import folha_da_janela
 from .moldura import (
@@ -219,6 +221,8 @@ class Janela(QWidget):
             ),
         )
         self._relogios.iniciar()
+        # Depois dos relógios: o primeiro movimento já pede um quadro.
+        self._rastreador = RastreadorDeCursor(self, self._cursor_mudou)
         self._aplicar_preferencias()
         self._aplicar_tema()
         self._registrar_atalhos()
@@ -748,7 +752,7 @@ class Janela(QWidget):
         """
         return (
             self._intensidade_atmosfera > 0.0
-            and self._cenario.tem_camada_viva
+            and self._cenario.precisa_quadros
             and self.isVisible()
             and not self.isMinimized()
         )
@@ -768,6 +772,31 @@ class Janela(QWidget):
             self._sobreposicao.update()
         elif not regiao.isEmpty():
             self._sobreposicao.update(regiao)
+        # A luz do cursor mora no FUNDO da janela: repintá-la é repintar a janela
+        # naquela região, o que leva junto os painéis e o vidro da frente.
+        luz = self._cenario.regiao_da_luz()
+        if not luz.isEmpty():
+            self.update(luz)
+        # Num ambiente sem partícula, só a luz do cursor pedia quadros: assentada
+        # ela, o relógio para, mesmo com o mouse parado em cima da janela.
+        if not self._cenario.tem_camada_viva and not self._cenario.seguindo_cursor:
+            self._relogios.sincronizar_animacao()
+
+    def _cursor_mudou(self, ponto: QPointF | None) -> None:
+        """O cursor andou sobre a janela (ou saiu dela, com ``None``).
+
+        A atmosfera ganha uma luz que o segue e partículas que fogem dele, e o
+        botão principal o sente chegando. Com a atmosfera desligada, nada
+        disso existe: é a mesma régua de todo o movimento do programa.
+        """
+        if self._intensidade_atmosfera <= 0.0:
+            ponto = None
+        self._cenario.definir_cursor(ponto)
+        self.botao_acao.atrair(
+            None if ponto is None else self.botao_acao.mapFrom(self, ponto)
+        )
+        if not self._relogios.animando:
+            self._relogios.sincronizar_animacao()
 
     def _atualizar_medidor(self) -> None:
         self.medidor.definir_ativo(self.sessao_ativa)
