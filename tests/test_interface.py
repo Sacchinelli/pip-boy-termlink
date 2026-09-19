@@ -2073,6 +2073,125 @@ def main() -> int:
     janela.campo_atmosfera.setCurrentText(atmosfera_bordas)
     aplicacao.processEvents()
 
+    print("os títulos se decifram")
+    from PySide6.QtWidgets import QHBoxLayout as LinhaDecifra
+
+    from pipboy.interface.componentes import RotuloDecifravel
+
+    atmosfera_decifra = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    aplicacao.processEvents()
+
+    suporte = QWidget()
+    linha_decifra = LinhaDecifra(suporte)
+    titulo_teste = RotuloDecifravel("PIP-BOY 3000 · Mk iv")
+    linha_decifra.addWidget(titulo_teste)
+    regua_teste = QWidget()
+    linha_decifra.addWidget(regua_teste, 1)
+    suporte.resize(420, 40)
+    suporte.show()
+    aplicacao.processEvents()
+    texto_teste = "PIP-BOY 3000 · Mk iv"
+    largura_antes, regua_antes = titulo_teste.width(), regua_teste.x()
+
+    # -- Sob o cursor, embaralha; o texto de verdade continua sendo o texto.
+    meio_titulo = QPointF(titulo_teste.width() / 2, titulo_teste.height() / 2)
+    QApplication.sendEvent(
+        titulo_teste,
+        QEnterEvent(meio_titulo, meio_titulo, QPointF(titulo_teste.mapToGlobal(meio_titulo))),
+    )
+    checar(
+        aguardar(lambda: titulo_teste.desenhado != texto_teste),
+        f"sob o cursor, o título embaralha ({titulo_teste.desenhado!r})",
+    )
+    embaralhado = titulo_teste.desenhado
+    checar(
+        titulo_teste.text() == texto_teste and titulo_teste.accessibleName() == texto_teste,
+        "e o texto dele, para quem lê e para o leitor de tela, continua o verdadeiro",
+    )
+    checar(
+        len(embaralhado) == len(texto_teste)
+        and all(d == t for d, t in zip(embaralhado, texto_teste, strict=True) if not t.isalnum()),
+        "espaços, hífen e o ponto do meio ficam no lugar: só letras e números embaralham",
+    )
+    trocadas = [d for d, t in zip(embaralhado, texto_teste, strict=True) if d != t]
+    checar(
+        all(ord(d) < 128 for d in trocadas),
+        "com símbolos ASCII, que existem em toda fonte de todo tema",
+    )
+    checar(
+        all(
+            d.islower() or d.isdigit()
+            for d, t in zip(embaralhado, texto_teste, strict=True)
+            if t.islower() and d != t
+        ),
+        "e a minúscula embaralha em minúscula",
+    )
+    # Sem as fontes do sistema, toda letra vira uma caixinha da mesma largura,
+    # e embaralhar nunca mudaria o tamanho: o que se confere é a trava em si.
+    checar(
+        titulo_teste.minimumWidth() == titulo_teste.maximumWidth() == largura_antes
+        and titulo_teste.width() == largura_antes and regua_teste.x() == regua_antes,
+        "a largura fica presa à do texto verdadeiro: a régua ao lado não treme",
+    )
+    checar(
+        aguardar(lambda: not titulo_teste.decifrando)
+        and titulo_teste.desenhado == texto_teste,
+        "e em meio segundo ele se resolve no texto verdadeiro",
+    )
+    checar(
+        titulo_teste.maximumWidth() == 16777215 and titulo_teste.minimumWidth() == 0,
+        "soltando o tamanho que prendeu",
+    )
+
+    # -- Um texto novo no meio do embaralho: é para ele que o embaralho vai.
+    titulo_teste.decifrar()
+    titulo_teste.setText("ÁUDIO")
+    checar(
+        titulo_teste.text() == "ÁUDIO" and titulo_teste.accessibleName() == "ÁUDIO",
+        "trocado no meio do embaralho, o texto já é o novo",
+    )
+    checar(
+        aguardar(lambda: not titulo_teste.decifrando) and titulo_teste.desenhado == "ÁUDIO",
+        "e o embaralho se resolve nele",
+    )
+
+    # -- Movimento reduzido: nada embaralha.
+    janela.campo_atmosfera.setCurrentText("Desligada")
+    aplicacao.processEvents()
+    titulo_teste.decifrar()
+    checar(
+        not titulo_teste.decifrando and titulo_teste.desenhado == "ÁUDIO",
+        "com a atmosfera desligada, o título não embaralha",
+    )
+    janela.campo_atmosfera.setCurrentText("Completa")
+    aplicacao.processEvents()
+    suporte.deleteLater()
+
+    # -- Na janela: a marca e os títulos das seções.
+    checar(
+        all(isinstance(r, RotuloDecifravel) for r in janela._rotulos_secao),
+        f"os {len(janela._rotulos_secao)} títulos de seção se decifram",
+    )
+    janela._trocar_jogo("Skyrim")
+    checar(
+        janela.marca.decifrando and janela.marca.text() == janela.tema.header_title,
+        "trocado o jogo, o nome novo se decifra — e o texto já é o dele",
+    )
+    checar(
+        aguardar(lambda: not janela.marca.decifrando)
+        and janela.marca.desenhado == janela.tema.header_title,
+        "até se resolver nele",
+    )
+    tela_decifra = janela.conversa.tela_inicial
+    checar(tela_decifra.isVisible(), "com a conversa vazia, a tela inicial está à vista")
+    tela_decifra.entrar()
+    checar(tela_decifra.titulo.decifrando, "e chega com o título se decifrando")
+    aguardar(lambda: not tela_decifra.titulo.decifrando)
+
+    janela.campo_atmosfera.setCurrentText(atmosfera_decifra)
+    aplicacao.processEvents()
+
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()
     # nunca voltaria e a suíte penduraria. O tiro agendado é esse alguém.

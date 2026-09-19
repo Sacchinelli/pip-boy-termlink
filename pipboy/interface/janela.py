@@ -556,6 +556,9 @@ class Janela(QWidget):
         self._registrar(f"Ambiente: {tema.name}", Tag.SISTEMA)
         if retrato is not None:
             TransicaoDeTema(self, retrato)
+        # O nome do jogo novo se decifra no lugar do antigo, por baixo da
+        # dissolução — e continua depois dela, que é mais curta.
+        self.marca.decifrar()
 
     def _aplicar_tema(self) -> None:
         t = self._tema
@@ -723,6 +726,9 @@ class Janela(QWidget):
         aplicar_cantos_do_sistema(self)
         if not self._ja_apareceu:
             self._ja_apareceu = True
+            # O aparelho liga: o nome dele se decifra na primeira vez que a
+            # janela aparece.
+            self.marca.decifrar()
             # O aparecimento tem a mesma cortesia do resto: um fade curto em
             # vez de um estalo — a menos que a atmosfera esteja desligada.
             if self._intensidade_atmosfera > 0.0:
