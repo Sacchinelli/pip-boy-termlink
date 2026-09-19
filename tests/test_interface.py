@@ -1450,7 +1450,7 @@ def main() -> int:
     aplicacao.processEvents()
 
     print("a reação ao cursor se espalha")
-    from pipboy.interface.atmosfera import RAIO_ANEL, RAIO_ANEL_CLICAVEL
+    from pipboy.interface.atmosfera import RAIO_ANEL, RAIO_ANEL_CLICAVEL  # noqa: F401
     from pipboy.interface.componentes import CampoSelecao as SeletorLuz
     from pipboy.interface.componentes import movimento_reduzido
 
@@ -1504,16 +1504,33 @@ def main() -> int:
     )
     QApplication.sendEvent(historico_botao, QEvent(QEvent.Type.Leave))
 
-    # -- O anel cresce sobre o que é clicável, e o rastreador sabe o que é.
+    # -- O anel abraça o que é clicável, e o rastreador sabe o que é.
+    from pipboy.interface.cursor import abraco_de
+
+    def anel_abraca(widget: QWidget) -> bool:
+        # O alvo é refeito a cada consulta: o ímã segue puxando o botão.
+        abraco = abraco_de(widget, janela)
+        if abraco is None or not janela._cenario.abracando:
+            return False
+        anel, alvo = janela._cenario.anel, abraco[0]
+        return (
+            abs(anel.x() - alvo.x()) + abs(anel.y() - alvo.y())
+            + abs(anel.width() - alvo.width()) + abs(anel.height() - alvo.height())
+        ) < 1.0
+
     mover_sobre(historico_botao, QPointF(10.0, 10.0))
     checar(
-        aguardar(lambda: abs(janela._cenario.anel[1] - RAIO_ANEL_CLICAVEL) < 0.5),
-        f"sobre um botão, o anel do cursor cresce ({janela._cenario.anel[1]:.1f})",
+        aguardar(lambda: anel_abraca(historico_botao)),
+        f"sobre um botão, o anel abraça o contorno dele ({janela._cenario.anel})",
     )
     mover_sobre(rotulo_filho, QPointF(3.0, 3.0))
     checar(
-        aguardar(lambda: abs(janela._cenario.anel[1] - RAIO_ANEL) < 0.5),
-        "sobre um rótulo, ele volta ao tamanho de repouso",
+        aguardar(
+            lambda: not janela._cenario.abracando
+            and abs(janela._cenario.anel.width() - 2 * RAIO_ANEL) < 0.5
+            and abs(janela._cenario.anel.height() - 2 * RAIO_ANEL) < 0.5
+        ),
+        "sobre um rótulo, ele volta a ser o círculo de repouso",
     )
 
     # -- Cada clique solta UMA onda, mesmo repassado a cada ancestral.
@@ -2422,6 +2439,135 @@ def main() -> int:
     )
     historico.remover_sessao(sessao_viva)
     janela.campo_atmosfera.setCurrentText(atmosfera_historico_vivo)
+    aplicacao.processEvents()
+
+    print("o anel abraça o que se pode clicar")
+    from PySide6.QtCore import QRectF as RetanguloAbraco
+
+    from pipboy import design as design_abraco
+    from pipboy.interface.cursor import FOLGA_ABRACO
+
+    atmosfera_abraco = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    aplicacao.processEvents()
+
+    # -- O contorno abraçado: o corpo do botão, com folga, no canto da forma.
+    botao_abraco = janela.botao_historico
+    abraco_botao = abraco_de(botao_abraco, janela)
+    assert abraco_botao is not None
+    corpo_na_janela = botao_abraco.corpo.translated(QPointF(botao_abraco.mapTo(janela, QPoint(0, 0))))
+    checar(
+        abraco_botao[0] == corpo_na_janela.adjusted(-FOLGA_ABRACO, -FOLGA_ABRACO, FOLGA_ABRACO, FOLGA_ABRACO),
+        "o anel abraça o CORPO do botão, com uma folga em volta, sem a margem do ímã",
+    )
+    canto_da_forma = {"chanfrada": 3.0, "reta": 2.0}.get(botao_abraco.forma, float(design_abraco.RAIO))
+    checar(
+        abraco_botao[1] == canto_da_forma + FOLGA_ABRACO,
+        f"com o canto da forma do tema ({abraco_botao[1]})",
+    )
+    seletor_abraco = janela.campo_nivel
+    abraco_seletor = abraco_de(seletor_abraco, janela)
+    checar(
+        abraco_seletor is not None
+        and abraco_seletor[1] == seletor_abraco.raio_borda + FOLGA_ABRACO,
+        "e o seletor, com o canto que a folha de estilo dá a ele",
+    )
+
+    # -- O ímã puxa o botão, e o contorno vai junto.
+    ima_abraco = BotaoIma("Puxado", largura_min=150, magnetico=True)
+    ima_abraco.resize(ima_abraco.sizeHint())
+    ima_abraco.show()
+    solto = abraco_de(ima_abraco, ima_abraco)
+    ima_abraco.atrair(QPointF(ima_abraco.width() + 30.0, ima_abraco.height() / 2))
+    aguardar(lambda: ima_abraco.deslocamento_ima.x() > 2.0)
+    puxado = abraco_de(ima_abraco, ima_abraco)
+    checar(
+        solto is not None and puxado is not None
+        and abs(puxado[0].x() - solto[0].x() - ima_abraco.deslocamento_ima.x()) < 0.01,
+        "o ímã puxa o botão e o contorno abraçado vai junto",
+    )
+
+    # -- Grande demais para abraçar, o anel só cresce, como antes.
+    largo = BotaoIma("Largo demais", largura_min=900)
+    largo.resize(largo.sizeHint())
+    largo.show()
+    checar(abraco_de(largo, largo) is None, "um alvo grande demais não é abraçado")
+    crescido = CenarioCursor()
+    crescido.definir(TEMAS_CURSOR["Genérico / Outro"], atmosfera_de("Genérico / Outro"))
+    crescido.redimensionar(1000, 800)
+    crescido.definir_cursor(QPointF(300.0, 300.0), sobre_clicavel=True)
+    crescido.definir_abraco(None)
+    for _ in range(60):
+        crescido.avancar(0.033)
+    checar(
+        not crescido.abracando
+        and abs(crescido.anel.width() - 2 * mod_atmosfera.RAIO_ANEL_CLICAVEL) < 0.5,
+        "e sobre ele o anel cresce em círculo",
+    )
+
+    # -- Um botão que já não existe não derruba o quadro seguinte.
+    efemero = BotaoIma("Some logo")
+    efemero.show()
+    efemero.deleteLater()
+    aplicacao.processEvents()
+    aplicacao.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    checar(abraco_de(efemero, janela) is None, "o botão destruído sob o cursor não abraça nem derruba nada")
+
+    # -- O rastreador entrega QUAL clicável está sob o cursor.
+    sob_cursor: list[QWidget | None] = []
+    rastreador_abraco = RastreadorDeCursor(janela, lambda _p, alvo: sob_cursor.append(alvo))
+    mover_sobre(botao_abraco, QPointF(12.0, 12.0))
+    mover_sobre(rotulo_filho, QPointF(5.0, 5.0))
+    checar(
+        len(sob_cursor) >= 2 and sob_cursor[-2] is botao_abraco and sob_cursor[-1] is None,
+        "o rastreador entrega o botão sob o cursor, e nada sobre um rótulo",
+    )
+    aplicacao.removeEventFilter(rastreador_abraco)
+    rastreador_abraco.deleteLater()
+
+    # -- A meio caminho entre o círculo e o contorno, o anel pinta dentro da
+    #    própria caixa: o que vaza fica na tela como rastro.
+    meio_caminho = CenarioCursor()
+    meio_caminho.definir(TEMAS_CURSOR["Cyberpunk 2077"], atmosfera_de("Cyberpunk 2077"))
+    meio_caminho.redimensionar(1000, 800)
+    meio_caminho.definir_cursor(QPointF(200.0, 200.0), sobre_clicavel=True)
+    meio_caminho.definir_abraco((RetanguloAbraco(220.0, 180.0, 220.0, 50.0), 8.0))
+    for _ in range(3):
+        meio_caminho.avancar(0.016)
+    acesos, fora = vazamento(meio_caminho._pintar_anel_e_ondas, meio_caminho._caixas_vivas(), 1000, 800)
+    checar(
+        acesos > 0 and fora == 0,
+        f"a meio caminho, o anel pinta só dentro da caixa que pede ({acesos} pixels, {fora} fora)",
+    )
+    for _ in range(40):
+        meio_caminho.avancar(0.033)
+    checar(
+        meio_caminho.abracando
+        and abs(meio_caminho.anel.x() - 220.0) < 0.5
+        and abs(meio_caminho.anel.width() - 220.0) < 0.5
+        and abs(meio_caminho.anel.height() - 50.0) < 0.5,
+        f"e chega ao contorno inteiro ({meio_caminho.anel})",
+    )
+    meio_caminho.definir_cursor(None)
+    checar(not meio_caminho.abracando, "o cursor que sai solta o abraço")
+
+    # -- O caderno também: o CursorVivo abraça os botões dele.
+    janela.abrir_caderno()
+    aplicacao.processEvents()
+    caderno_abraco = janela._caderno
+    assert caderno_abraco is not None
+    fechar_abraco = caderno_abraco.botao_fechar
+    mover_sobre(fechar_abraco, QPointF(fechar_abraco.width() / 2, fechar_abraco.height() / 2))
+    checar(
+        aguardar(lambda: caderno_abraco._cenario.abracando),
+        "no caderno, o anel abraça o botão sob o cursor",
+    )
+    caderno_abraco.close()
+    aplicacao.processEvents()
+
+    for temporario in (ima_abraco, largo):
+        temporario.deleteLater()
+    janela.campo_atmosfera.setCurrentText(atmosfera_abraco)
     aplicacao.processEvents()
 
     print("atalhos diretos")

@@ -82,7 +82,7 @@ from .componentes import (
     definir_fonte_da_luz,
     definir_movimento_reduzido,
 )
-from .cursor import CampoMagnetico, RastreadorDeCursor
+from .cursor import CampoMagnetico, RastreadorDeCursor, abraco_de
 from .dialogo import avisar
 from .estilo import RAIO_PADRAO, RAIO_POR_FORMA, folha_da_janela
 from .moldura import (
@@ -247,6 +247,7 @@ class Janela(QWidget):
         self._relogios.iniciar()
         # Depois dos relógios: o primeiro movimento já pede um quadro.
         self._campo_magnetico = CampoMagnetico(self)
+        self._alvo_do_anel: QWidget | None = None
         self._rastreador = RastreadorDeCursor(self, self._cursor_mudou, self._clique)
         self._aplicar_preferencias()
         self._aplicar_tema()
@@ -800,6 +801,9 @@ class Janela(QWidget):
         jogo. ``None`` é o pedido explícito do quadro cheio, que a tremulação
         do tubo continua fazendo.
         """
+        # A cada quadro, e não só a cada movimento: o botão magnético segue
+        # andando depois que o cursor para, e o anel que o abraça vai junto.
+        self._cenario.definir_abraco(abraco_de(self._alvo_do_anel, self))
         self._cenario.avancar(passo)
         regiao = self._cenario.regiao_suja()
         if regiao is None:
@@ -862,7 +866,7 @@ class Janela(QWidget):
         tela = self.screen()
         return tela.refreshRate() if tela is not None else 0.0
 
-    def _cursor_mudou(self, ponto: QPointF | None, sobre_clicavel: bool = False) -> None:
+    def _cursor_mudou(self, ponto: QPointF | None, alvo: QWidget | None = None) -> None:
         """O cursor andou sobre a janela (ou saiu dela, com ``None``).
 
         A atmosfera ganha uma luz que o segue e partículas que fogem dele, e o
@@ -871,7 +875,10 @@ class Janela(QWidget):
         """
         if self._intensidade_atmosfera <= 0.0:
             ponto = None
-        self._cenario.definir_cursor(ponto, sobre_clicavel=sobre_clicavel)
+        # O clicável sob o cursor: o anel o abraça, em vez de só crescer.
+        self._alvo_do_anel = alvo if ponto is not None else None
+        self._cenario.definir_cursor(ponto, sobre_clicavel=self._alvo_do_anel is not None)
+        self._cenario.definir_abraco(abraco_de(self._alvo_do_anel, self))
         self._campo_magnetico.mover(ponto)
         # Sempre, e não só com o relógio parado: com ele correndo no passo de
         # repouso, é aqui que ele acelera para acompanhar o cursor.

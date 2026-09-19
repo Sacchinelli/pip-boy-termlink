@@ -326,6 +326,17 @@ class Botao(QAbstractButton):
         self._halo.setEnabled(False)
 
     @property
+    def corpo(self) -> QRectF:
+        """O corpo do botão, já puxado pelo ímã, em coordenadas dele.
+
+        Sem a folga reservada em volta: é o que o anel do cursor abraça.
+        """
+        folga = self._folga
+        return QRectF(self.rect()).adjusted(folga, folga, -folga, -folga).translated(
+            self.deslocamento_ima
+        )
+
+    @property
     def deslocamento_ima(self) -> QPointF:
         return self._direcao_ima * self._forca_ima.valor
 
@@ -928,6 +939,11 @@ class CampoSelecao(QComboBox):
     @property
     def luz(self) -> float:
         return self._luz.valor
+
+    @property
+    def raio_borda(self) -> float:
+        """O canto que a folha de estilo dá à caixa do seletor."""
+        return self._raio_borda
 
     def enterEvent(self, evento: Any) -> None:
         if self.isEnabled():
