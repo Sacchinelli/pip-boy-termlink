@@ -24,6 +24,7 @@ from PySide6.QtCore import (
     QEasingCurve,
     QEvent,
     QPoint,
+    QPointF,
     QPropertyAnimation,
     Qt,
     QTimer,
@@ -71,7 +72,9 @@ from .componentes import (
     CampoSelecao,
     Desvanecer,
     TransicaoDeTema,
+    definir_movimento_reduzido,
 )
+from .cursor import CampoMagnetico, RastreadorDeCursor
 from .dialogo import avisar
 from .estilo import folha_da_janela
 from .moldura import (
@@ -170,6 +173,9 @@ class Janela(QWidget):
         # meia dúzia de leitores usavam getattr com padrão para contornar a
         # janela em que ela não existia.
         self._intensidade_atmosfera = 1.0
+        # A mesma régua para os botões de todas as janelas: sem atmosfera, a luz
+        # dentro deles fica parada e nenhum é puxado pelo cursor.
+        definir_movimento_reduzido(lambda: self._intensidade_atmosfera <= 0.0)
         # O total que a lateral mostra agora. É contra ele que uma palavra
         # salva pela sessão se mede, para o sinal dizer QUANTAS entraram.
         self._total_no_caderno = 0
@@ -219,6 +225,9 @@ class Janela(QWidget):
             ),
         )
         self._relogios.iniciar()
+        # Depois dos relógios: o primeiro movimento já pede um quadro.
+        self._campo_magnetico = CampoMagnetico(self)
+        self._rastreador = RastreadorDeCursor(self, self._cursor_mudou, self._clique)
         self._aplicar_preferencias()
         self._aplicar_tema()
         self._registrar_atalhos()
@@ -563,6 +572,7 @@ class Janela(QWidget):
         self._posicionar_veu()
         for campo in self.campos.values():
             campo.definir_cor_seta(t.text_muted)
+            campo.definir_cor_luz(t.primary)
         self._atualizar_pilula()
         self._campainha.aplicar_tema()
         if self._capsula is not None:
@@ -748,7 +758,7 @@ class Janela(QWidget):
         """
         return (
             self._intensidade_atmosfera > 0.0
-            and self._cenario.tem_camada_viva
+            and self._cenario.precisa_quadros
             and self.isVisible()
             and not self.isMinimized()
         )
@@ -768,6 +778,37 @@ class Janela(QWidget):
             self._sobreposicao.update()
         elif not regiao.isEmpty():
             self._sobreposicao.update(regiao)
+        # A luz do cursor mora no FUNDO da janela: repintá-la é repintar a janela
+        # naquela região, o que leva junto os painéis e o vidro da frente.
+        luz = self._cenario.regiao_da_luz()
+        if not luz.isEmpty():
+            self.update(luz)
+        # Num ambiente sem partícula, só a luz do cursor pedia quadros: assentada
+        # ela, o relógio para, mesmo com o mouse parado em cima da janela.
+        if not self._cenario.tem_camada_viva and not self._cenario.seguindo_cursor:
+            self._relogios.sincronizar_animacao()
+
+    def _cursor_mudou(self, ponto: QPointF | None, sobre_clicavel: bool = False) -> None:
+        """O cursor andou sobre a janela (ou saiu dela, com ``None``).
+
+        A atmosfera ganha uma luz que o segue e partículas que fogem dele, e o
+        botão principal o sente chegando. Com a atmosfera desligada, nada
+        disso existe: é a mesma régua de todo o movimento do programa.
+        """
+        if self._intensidade_atmosfera <= 0.0:
+            ponto = None
+        self._cenario.definir_cursor(ponto, sobre_clicavel=sobre_clicavel)
+        self._campo_magnetico.mover(ponto)
+        if not self._relogios.animando:
+            self._relogios.sincronizar_animacao()
+
+    def _clique(self, ponto: QPointF) -> None:
+        """Todo clique na janela solta uma onda do ponto tocado."""
+        if self._intensidade_atmosfera <= 0.0:
+            return
+        self._cenario.pulsar(ponto)
+        if not self._relogios.animando:
+            self._relogios.sincronizar_animacao()
 
     def _atualizar_medidor(self) -> None:
         self.medidor.definir_ativo(self.sessao_ativa)

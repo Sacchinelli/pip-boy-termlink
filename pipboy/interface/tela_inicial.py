@@ -23,10 +23,11 @@ aparece é a ``Conversa``.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from PySide6.QtCore import QEvent, QRectF, QSize, Qt
+from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import (
     QColor,
     QEnterEvent,
@@ -35,6 +36,7 @@ from PySide6.QtGui import (
     QHoverEvent,
     QPainter,
     QPen,
+    QTransform,
 )
 from PySide6.QtWidgets import (
     QAbstractButton,
@@ -108,6 +110,12 @@ class CartaoAcao(QAbstractButton):
     """
 
     RESPIRO = 14
+    # O cartão inclina em direção ao cursor, até este ângulo em cada eixo, com
+    # uma perspectiva curta o bastante para a inclinação se VER num cartão
+    # pequeno. A folga em volta do corpo é o espaço que a inclinação ocupa.
+    INCLINACAO = 12.0
+    DISTANCIA = 340.0
+    FOLGA_3D = 6
 
     def __init__(
         self, glifo: str, titulo: str, tecla: str, *, janela: Any, parent: QWidget | None = None
@@ -119,14 +127,14 @@ class CartaoAcao(QAbstractButton):
         self._detalhe = ""
         self._destaque = False
         self._sob_cursor = False
+        self._focado = False
         self.setText(titulo)
         self.setAccessibleName(titulo)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self._holofote = Holofote(
-            self, reduzir=lambda: bool(janela.intensidade_atmosfera <= 0.0)
-        )
+        self._reduzir: Callable[[], bool] = lambda: bool(janela.intensidade_atmosfera <= 0.0)
+        self._holofote = Holofote(self, reduzir=self._reduzir)
 
     @property
     def detalhe(self) -> str:
@@ -150,7 +158,7 @@ class CartaoAcao(QAbstractButton):
         # junto quando o tamanho do texto muda.
         titulo = QFontMetrics(self._janela.fonte("corpo_forte")).height()
         detalhe = QFontMetrics(self._janela.fonte("micro")).height()
-        return QSize(190, self.RESPIRO * 2 + titulo + 4 + detalhe)
+        return QSize(190, self.RESPIRO * 2 + titulo + 4 + detalhe + 2 * self.FOLGA_3D)
 
     def minimumSizeHint(self) -> QSize:
         return QSize(150, self.sizeHint().height())
@@ -166,7 +174,41 @@ class CartaoAcao(QAbstractButton):
             m_titulo.horizontalAdvance(self.text()) + 8 + tecla,
             m_micro.horizontalAdvance(self._detalhe),
         )
-        return glifo + conteudo + self.RESPIRO * 2 + 4
+        return glifo + conteudo + self.RESPIRO * 2 + 4 + 2 * self.FOLGA_3D
+
+    def inclinacao(self) -> tuple[float, float]:
+        """Os ângulos, em torno de Y e de X, com que o cartão segue o cursor.
+
+        O lado sob o cursor afunda e o oposto sobe, como um cartão de verdade
+        empurrado com o dedo. A inclinação acompanha a luz: acende junto ao
+        entrar e volta ao plano junto ao sair. Pelo teclado não há de onde
+        inclinar — o cartão só acende.
+        """
+        luz = self._holofote.valor
+        cursor = self._holofote.cursor
+        if luz <= 0.01 or cursor is None or self._reduzir():
+            return 0.0, 0.0
+        if self._focado and not self._sob_cursor:
+            return 0.0, 0.0
+        largura, altura = max(1, self.width()), max(1, self.height())
+        dx = max(-1.0, min(1.0, (cursor.x() / largura - 0.5) * 2))
+        dy = max(-1.0, min(1.0, (cursor.y() / altura - 0.5) * 2))
+        # Sinais escolhidos olhando a tela: com eles, o lado sob o cursor afasta.
+        return -dx * self.INCLINACAO * luz, dy * self.INCLINACAO * luz
+
+    def _transformacao(self) -> QTransform | None:
+        giro_y, giro_x = self.inclinacao()
+        if giro_y == 0.0 and giro_x == 0.0:
+            return None
+        centro = QPointF(self.rect().center())
+        realce = 1.0 + 0.035 * self._holofote.valor
+        transformacao = QTransform()
+        transformacao.translate(centro.x(), centro.y())
+        transformacao.rotate(giro_y, Qt.Axis.YAxis, self.DISTANCIA)
+        transformacao.rotate(giro_x, Qt.Axis.XAxis, self.DISTANCIA)
+        transformacao.scale(realce, realce)
+        transformacao.translate(-centro.x(), -centro.y())
+        return transformacao
 
     # -- presença
     def enterEvent(self, evento: QEnterEvent) -> None:
@@ -187,11 +229,13 @@ class CartaoAcao(QAbstractButton):
 
     def focusInEvent(self, evento: QFocusEvent) -> None:
         super().focusInEvent(evento)
+        self._focado = True
         self._holofote.acender(True)
         self.update()
 
     def focusOutEvent(self, evento: QFocusEvent) -> None:
         super().focusOutEvent(evento)
+        self._focado = False
         self._holofote.acender(self._sob_cursor)
         self.update()
 
@@ -202,10 +246,15 @@ class CartaoAcao(QAbstractButton):
         forma = janela.atmosfera.forma
         pintor = QPainter(self)
         pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pintor.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        transformacao = self._transformacao()
+        if transformacao is not None:
+            pintor.setTransform(transformacao)
 
         # Afunda 1 px enquanto pressionado, como o Botao.
         recuo = 1.0 if self.isDown() else 0.0
-        area = QRectF(self.rect()).adjusted(0.5, 0.5 + recuo, -0.5, -0.5 + recuo)
+        f = self.FOLGA_3D
+        area = QRectF(self.rect()).adjusted(0.5 + f, 0.5 + f + recuo, -0.5 - f, -0.5 - f + recuo)
         fundo = t.surface_alta
         cor = t.accent if self._destaque else t.primary
         borda = design.misturar(t.border, t.accent, 0.45) if self._destaque else t.border
