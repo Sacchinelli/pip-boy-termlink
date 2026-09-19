@@ -168,13 +168,6 @@ def main() -> int:
         area_regiao < area_janela * 0.5,
         f"e ela é MENOR que a janela ({area_regiao} de {area_janela} pixels)",
     )
-    janela._trocar_jogo("Fallout")
-    aplicacao.processEvents()
-    janela._cenario.avancar(1 / 30)
-    checar(
-        janela._cenario.regiao_suja() is None,
-        "a tremulação do tubo continua pedindo o quadro cheio",
-    )
     janela.campo_atmosfera.setCurrentText(atmosfera_anterior)
     aplicacao.processEvents()
 
@@ -1583,6 +1576,245 @@ def main() -> int:
         "e nenhum botão é puxado",
     )
     janela.campo_atmosfera.setCurrentText(atmosfera_espalha)
+    aplicacao.processEvents()
+
+    print("a resposta ao cursor é fluida")
+    from PySide6.QtCore import QObject, QRect
+    from PySide6.QtGui import QColor as CorFluida
+
+    from pipboy.interface.cursor import RastreadorDeCursor
+    from pipboy.interface.relogios import INTERVALO_QUADRO, intervalo_interativo
+
+    atmosfera_fluida = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    aplicacao.processEvents()
+
+    # -- O passo acompanha a tela: um número inteiro de ciclos perto de 15 ms.
+    checar(
+        intervalo_interativo(144.0) == 14,
+        f"numa tela de 144 Hz, 14 ms: cada quadro dura dois ciclos ({intervalo_interativo(144.0)})",
+    )
+    checar(intervalo_interativo(60.0) == 17, "a 60 Hz, um ciclo")
+    checar(intervalo_interativo(120.0) == 17, "a 120 Hz, dois")
+    checar(intervalo_interativo(90.0) == 12, "nunca abaixo do piso, que protege a CPU")
+    checar(intervalo_interativo(0.0) == 17, "e sem saber a frequência, o passo de 60 Hz")
+
+    # -- O relógio comum, no Windows, vira uma mensagem de baixa prioridade
+    #    arredondada ao tique do sistema: 33 ms davam 21 quadros medidos.
+    checar(
+        janela._relogios._quadros.timerType() == Qt.TimerType.PreciseTimer,
+        "o relógio de quadros é preciso",
+    )
+
+    # -- Com o cursor em cima ele acelera; assentada a luz, volta ao repouso.
+    janela._trocar_jogo("Elden Ring")
+    aplicacao.processEvents()
+    janela._cursor_mudou(None)
+    checar(
+        aguardar(lambda: janela._relogios.intervalo == INTERVALO_QUADRO),
+        f"sem cursor, o passo de repouso ({janela._relogios.intervalo} ms)",
+    )
+    janela._cursor_mudou(QPointF(300.0, 300.0))
+    rapido = intervalo_interativo(janela._frequencia_da_tela())
+    checar(
+        janela._relogios.intervalo == rapido,
+        f"com o cursor chegando, o passo da tela ({janela._relogios.intervalo} ms)",
+    )
+    checar(
+        aguardar(lambda: janela._relogios.intervalo == INTERVALO_QUADRO),
+        "e, assentada a luz sob o cursor parado, o de repouso de novo",
+    )
+    janela._cursor_mudou(None)
+
+    # -- A auréola apagada fica DESLIGADA: ligado, o efeito desfoca o botão a
+    #    cada repintura, com alfa zero ou não.
+    botao_fluido = janela.botao_historico
+    halo_fluido = botao_fluido.graphicsEffect()
+    assert halo_fluido is not None
+    checar(not halo_fluido.isEnabled(), "em repouso, a auréola do botão está desligada")
+    meio_fluido = QPointF(botao_fluido.width() / 2, botao_fluido.height() / 2)
+    QApplication.sendEvent(
+        botao_fluido,
+        QEnterEvent(meio_fluido, meio_fluido, QPointF(botao_fluido.mapToGlobal(meio_fluido))),
+    )
+    checar(aguardar(halo_fluido.isEnabled), "ela liga com o cursor em cima")
+    QApplication.sendEvent(botao_fluido, QEvent(QEvent.Type.Leave))
+    checar(aguardar(lambda: not halo_fluido.isEnabled()), "e desliga de novo quando ele sai")
+    suspenso = BotaoIma("Some", paleta=janela.paleta)
+    suspenso.suspender_halo()
+    suspenso._set_hover(1.0)
+    efeito_suspenso = suspenso.graphicsEffect()
+    checar(
+        efeito_suspenso is not None and not efeito_suspenso.isEnabled(),
+        "suspensa para sumir sob outro efeito, nem o hover a religa",
+    )
+    suspenso.deleteLater()
+
+    # -- Longe e já solto, um botão magnético não repinta a cada movimento.
+    janela._trocar_jogo("Genérico / Outro")
+    aplicacao.processEvents()
+    pinturas: list[int] = []
+
+    class ContaPintura(QObject):
+        def eventFilter(self, _alvo: QObject, evento: QEvent) -> bool:
+            if evento.type() == QEvent.Type.Paint:
+                pinturas.append(1)
+            return False
+
+    # O INICIAR, e não o Mudo: o Mudo fica desabilitado fora da sessão, e botão
+    # desabilitado solta o ímã antes de chegar à conta que isto confere.
+    inicio_fluido = janela.botao_acao
+    checar(
+        inicio_fluido.isEnabled() and inicio_fluido.magnetico,
+        "o alvo do teste é um botão magnético habilitado",
+    )
+    contador_pinturas = ContaPintura()
+    inicio_fluido.installEventFilter(contador_pinturas)
+    canto = QPointF(12.0, janela.height() - 12.0)
+    centro_inicio = QPointF(inicio_fluido.mapTo(janela, inicio_fluido.rect().center()))
+    distancia_inicio = (centro_inicio - canto).manhattanLength()
+    janela._cursor_mudou(canto)
+    aguardar(lambda: not janela._cenario.seguindo_cursor)
+    aplicacao.processEvents()
+    pinturas.clear()
+    for passo_fluido in range(6):
+        janela._cursor_mudou(QPointF(12.0 + passo_fluido, janela.height() - 12.0))
+        aplicacao.processEvents()
+    checar(
+        distancia_inicio > 2 * mod_atmosfera.RAIO_LUZ and not pinturas,
+        f"o cursor do outro lado da janela não repinta o INICIAR ({len(pinturas)} pinturas)",
+    )
+    inicio_fluido.removeEventFilter(contador_pinturas)
+    janela._cursor_mudou(None)
+
+    # -- O mesmo movimento chega ao rastreador mais de uma vez — como MouseMove
+    #    e como HoverMove —, e cada aviso refaz luz e ímã. Ele avisa uma vez.
+    avisos: list[QPointF | None] = []
+    rastreador_fluido = RastreadorDeCursor(janela, lambda ponto, _c: avisos.append(ponto))
+    rotulo_fluido = janela._rotulos_campo[0]
+    for _ in range(3):
+        mover_sobre(rotulo_fluido, QPointF(4.0, 4.0))
+    checar(len(avisos) == 1, f"três vezes o mesmo movimento, um aviso ({len(avisos)})")
+    mover_sobre(rotulo_fluido, QPointF(5.0, 4.0))
+    checar(len(avisos) == 2, "e um movimento de verdade avisa de novo")
+    aplicacao.removeEventFilter(rastreador_fluido)
+    rastreador_fluido.deleteLater()
+    QApplication.sendEvent(janela, QEvent(QEvent.Type.Leave))
+
+    # -- A luz e as partículas saem de desenhos prontos. Nenhum pixel deles pode
+    #    cair fora da caixa que a repintura por região pede: o que vaza fica na
+    #    tela como rastro, e nenhuma outra checagem offscreen o enxerga.
+    def vazamento(
+        pintar: Callable[[QPainter], None], caixas: list[QRect], largura: int, altura: int
+    ) -> tuple[int, int]:
+        """Quantos pixels ``pintar`` acende, e quantos deles ficam fora das caixas."""
+        imagem = QImage(largura, altura, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem.fill(0)
+        pintor = QPainter(imagem)
+        pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pintar(pintor)
+        pintor.end()
+        alfas = bytes(imagem.constBits())[3::4]
+        acesos = len(alfas) - alfas.count(0)
+        pintor = QPainter(imagem)
+        pintor.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+        for caixa in caixas:
+            pintor.fillRect(caixa, Qt.GlobalColor.black)
+        pintor.end()
+        restantes = bytes(imagem.constBits())[3::4]
+        return acesos, len(restantes) - restantes.count(0)
+
+    for modo in ("motes", "neve", "estatica", "dados"):
+        enxame_pronto = mod_atmosfera._Enxame(modo, 40, 5)
+        enxame_pronto.redimensionar(800, 600)
+        for _ in range(7):
+            enxame_pronto.avancar(0.13)
+        acesos, fora = vazamento(
+            lambda pintor, e=enxame_pronto: e.pintar(pintor, CorFluida("#ffe08a")),
+            enxame_pronto.caixas(), 800, 600,
+        )
+        checar(
+            acesos > 0 and fora == 0,
+            f"as partículas '{modo}' acendem só dentro das próprias caixas ({acesos} pixels, {fora} fora)",
+        )
+    # -- A mesma partícula um quadro depois vira UMA caixa; a que renasceu longe
+    #    fica com as duas, e não com uma caixa que atravessa a janela.
+    parada, andou, renasceu = QRect(10, 10, 20, 20), QRect(11, 10, 20, 20), QRect(500, 400, 20, 20)
+    juntas = mod_atmosfera._juntar_pares([parada, parada], [andou, renasceu])
+    area_juntas = sum(c.width() * c.height() for c in juntas)
+    cobertas = all(any(j.contains(c) for j in juntas) for c in (parada, andou, renasceu))
+    checar(
+        len(juntas) == 3 and cobertas and area_juntas < 2000,
+        f"antes e agora da mesma partícula viram uma caixa, e a que renasceu fica com as duas ({len(juntas)})",
+    )
+    luz_pronta = CenarioCursor()
+    luz_pronta.definir(TEMAS_CURSOR["Fallout"], atmosfera_de("Fallout"))
+    luz_pronta.redimensionar(1400, 1000)
+    luz_pronta.definir_cursor(QPointF(640.3, 470.6))
+    for _ in range(40):
+        luz_pronta.avancar(0.033)
+    luz_pronta.avancar(0.033)
+    acesos, fora = vazamento(luz_pronta._pintar_luz, list(luz_pronta.regiao_da_luz()), 1400, 1000)
+    checar(
+        acesos > 0 and fora == 0,
+        f"a luz do cursor acende só dentro da caixa que pede ({acesos} pixels, {fora} fora)",
+    )
+
+    # -- O tubo do Fallout treme em rajadas, e só elas pedem o quadro cheio.
+    janela._trocar_jogo("Fallout")
+    # A troca de tema se dissolve sob a foto do tema anterior, que cobre a
+    # janela inteira até sumir: o brilho da rajada ficaria embaixo dela.
+    from pipboy.interface.componentes import TransicaoDeTema as DissolucaoDoTema
+
+    aguardar(lambda: not janela.findChildren(DissolucaoDoTema))
+    tubo = janela._cenario
+    tubo._proxima_rajada = 60.0
+    tubo.avancar(1 / 30)
+    quieto = tubo.regiao_suja()
+    checar(
+        quieto is not None and not tubo.tremendo,
+        "com o tubo quieto, o Fallout pede só a região das partículas",
+    )
+    assert quieto is not None
+    checar(
+        sum(r.width() * r.height() for r in quieto) < janela.width() * janela.height() * 0.5,
+        "que é menor que a janela",
+    )
+
+    def brilho_medio() -> float:
+        foto = janela.grab().toImage()
+        pontos = [
+            foto.pixelColor(foto.width() * (i + 1) // 21, foto.height() * (k + 1) // 21)
+            for i in range(20) for k in range(20)
+        ]
+        return sum(c.red() + c.green() + c.blue() for c in pontos) / len(pontos)
+
+    antes_da_rajada = brilho_medio()
+    tubo._proxima_rajada = 0.0
+    tubo.avancar(1 / 30)
+    checar(tubo.tremendo and tubo.regiao_suja() is None, "chegada a rajada, o quadro é cheio")
+    tubo._rajada = mod_atmosfera.DURACAO_RAJADA / 2
+    durante_a_rajada = brilho_medio()
+    checar(
+        durante_a_rajada > antes_da_rajada + 3.0,
+        f"e o tubo acende a janela inteira enquanto treme ({antes_da_rajada:.1f} → {durante_a_rajada:.1f})",
+    )
+    passos_rajada = 0
+    while tubo.tremendo and passos_rajada < 200:
+        tubo.avancar(1 / 30)
+        passos_rajada += 1
+    checar(
+        not tubo.tremendo and tubo.regiao_suja() is None,
+        "o quadro que encerra a rajada ainda é cheio: ele apaga o brilho que ficou",
+    )
+    tubo.avancar(1 / 30)
+    checar(tubo.regiao_suja() is not None, "e o seguinte volta ao recorte")
+    checar(
+        mod_atmosfera.ESPERA_RAJADA[0] <= tubo._proxima_rajada <= mod_atmosfera.ESPERA_RAJADA[1],
+        f"com a próxima rajada sorteada para daqui a alguns segundos ({tubo._proxima_rajada:.1f} s)",
+    )
+
+    janela.campo_atmosfera.setCurrentText(atmosfera_fluida)
     aplicacao.processEvents()
 
     print("atalhos diretos")

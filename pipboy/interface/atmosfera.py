@@ -168,7 +168,15 @@ FORCA_FUGA: Final = 680.0
 # texto sob o cursor — o lugar para onde a pessoa está olhando. Atrás, ela
 # atravessa os painéis translúcidos, e por isso o brilho é mais alto do que
 # pareceria necessário.
-RAIO_LUZ: Final = 460.0
+#
+# Atrás do conteúdo, o preço dela é repintar a cada quadro TUDO que está sob a
+# caixa que ela ocupa — painéis, rótulos, bolhas, seletores. O halo tinha 460 px
+# de raio, e dos 184 px para fora ele somava menos de 7% de uma cor já
+# atravessando um painel: uma caixa de 920 px por lado para uma borda que não se
+# via. Com 340 px e o degrau do meio no MESMO lugar (a 184 px do centro), a
+# parte visível fica igual e a caixa perde 45% da área.
+RAIO_LUZ: Final = 340.0
+MEIO_LUZ: Final = 184.0 / 340.0
 RAIO_NUCLEO: Final = 150.0
 BRILHO_LUZ: Final = 0.50
 BRILHO_NUCLEO: Final = 0.46
@@ -187,6 +195,17 @@ SEGUIMENTO_ANEL: Final = 22.0
 # A onda que sai de cada clique: o quanto cresce e quanto tempo dura.
 RAIO_ONDA: Final = 46.0
 DURACAO_ONDA: Final = 0.55
+
+# A tremulação do tubo vem em RAJADAS: um soluço de brilho de tempos em tempos,
+# e não uma oscilação sem fim. Ela é a única camada sem recorte possível — um
+# brilho sobre a janela inteira —, e contínua ela repintava TUDO a cada quadro:
+# 10 ms por quadro no tema do Fallout, trinta vezes por segundo, aberto atrás do
+# próprio Fallout. Em rajadas o tubo continua malcuidado, e o quadro cheio só é
+# pago enquanto ele treme. Rara, a rajada pode ser mais forte do que a
+# oscilação contínua podia.
+DURACAO_RAJADA: Final = 0.45
+ESPERA_RAJADA: Final = (2.5, 7.0)
+FORCA_RAJADA: Final = 1.6
 
 
 # ------------------------------------------------------------------- Partículas
@@ -209,6 +228,17 @@ class _Enxame:
     faz a neve cair mais devagar exatamente quando o computador está ocupado.
     """
 
+    # Opacidade de cada modo: base e quanto a oscilação soma a ela.
+    ALFAS: Final = {
+        "motes": (0.18, 0.42),
+        "brasas": (0.20, 0.55),
+        "neve": (0.30, 0.25),
+        "poeira": (0.10, 0.16),
+        "estatica": (0.25, 0.45),
+    }
+    # Lado do desenho de referência de uma partícula redonda, em pixels.
+    LADO_DESENHO = 48
+
     def __init__(self, modo: str, densidade: int, semente: int) -> None:
         self._modo = modo
         self._rng = random.Random(semente)
@@ -216,6 +246,9 @@ class _Enxame:
         self._densidade = densidade
         self._largura = 1
         self._altura = 1
+        # A partícula já desenhada, e em que cor. Ver ``_desenho_na_cor``.
+        self._desenho: QPixmap | None = None
+        self._cor_desenho = ""
 
     def redimensionar(self, largura: int, altura: int) -> None:
         if (largura, altura) == (self._largura, self._altura):
@@ -311,56 +344,100 @@ class _Enxame:
             )
         return caixas
 
+    def _desenho_na_cor(self, cor: QColor) -> QPixmap:
+        """A partícula desenhada UMA vez, em força cheia, na cor das camadas vivas.
+
+        Cada quadro montava um gradiente por partícula — três cores, três
+        paradas, um pincel — para desenhar sempre a mesma forma em outro lugar
+        e com outra força: 0,40 ms por enxame de 46 motes, a 30 quadros por
+        segundo, a tarde inteira, atrás do jogo. Copiado pronto, com a força
+        como opacidade, custa 0,11. A soma é linear, e escalar o desenho é o
+        mesmo que escalar cada cor do gradiente.
+        """
+        if self._desenho is not None and self._cor_desenho == cor.name():
+            return self._desenho
+        transparente = QColor(cor)
+        transparente.setAlpha(0)
+        if self._modo == "dados":
+            # O rastro de um dado: some para cima, acende embaixo.
+            imagem = QImage(4, 64, QImage.Format.Format_ARGB32_Premultiplied)
+            imagem.fill(Qt.GlobalColor.transparent)
+            gradiente = QLinearGradient(0, 0, 0, 64)
+            gradiente.setColorAt(0.0, transparente)
+            gradiente.setColorAt(1.0, cor)
+            pintor = QPainter(imagem)
+            pintor.fillRect(imagem.rect(), gradiente)
+            pintor.end()
+        else:
+            # Halo suave em volta do núcleo: sem ele a partícula vira um
+            # pontinho duro, que é exatamente a aparência de "bolinha desenhada".
+            lado = self.LADO_DESENHO
+            raio = lado / 2
+            imagem = QImage(lado, lado, QImage.Format.Format_ARGB32_Premultiplied)
+            imagem.fill(Qt.GlobalColor.transparent)
+            halo = QRadialGradient(QPointF(raio, raio), raio)
+            halo.setColorAt(0.0, cor)
+            meio = QColor(cor)
+            meio.setAlphaF(0.28)
+            halo.setColorAt(0.45, meio)
+            halo.setColorAt(1.0, transparente)
+            pintor = QPainter(imagem)
+            pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+            pintor.setPen(Qt.PenStyle.NoPen)
+            pintor.setBrush(halo)
+            pintor.drawEllipse(QPointF(raio, raio), raio, raio)
+            pintor.end()
+        self._desenho = QPixmap.fromImage(imagem)
+        self._cor_desenho = cor.name()
+        return self._desenho
+
     def pintar(self, pintor: QPainter, cor: QColor, deslocamento: QPointF | None = None) -> None:
         if not self._particulas:
             return
+        desenho = self._desenho_na_cor(cor)
+        fonte = QRectF(desenho.rect())
         pintor.save()
         if deslocamento is not None:
             pintor.translate(deslocamento)
         # Composição aditiva: partículas de luz SOMAM ao fundo em vez de o
         # cobrir. É a diferença entre uma faísca e um ponto de tinta.
         pintor.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
-        pintor.setPen(Qt.PenStyle.NoPen)
+        pintor.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
 
+        if self._modo == "dados":
+            for p in self._particulas:
+                pintor.setOpacity(min(1.0, 0.25 + 0.35 * (0.5 + 0.5 * math.sin(p.fase))))
+                pintor.drawPixmap(QRectF(p.x, p.y, 1.4, p.tamanho), desenho, fonte)
+            pintor.restore()
+            return
+
+        base, variacao = self.ALFAS.get(self._modo, (0.3, 0.0))
         for p in self._particulas:
-            if self._modo == "dados":
-                brilho = 0.25 + 0.35 * (0.5 + 0.5 * math.sin(p.fase))
-                c = QColor(cor)
-                c.setAlphaF(min(1.0, brilho))
-                gradiente = QLinearGradient(p.x, p.y, p.x, p.y + p.tamanho)
-                transparente = QColor(cor)
-                transparente.setAlpha(0)
-                gradiente.setColorAt(0.0, transparente)
-                gradiente.setColorAt(1.0, c)
-                pintor.setBrush(gradiente)
-                pintor.drawRect(QRectF(p.x, p.y, 1.4, p.tamanho))
-                continue
-
             oscilacao = 0.5 + 0.5 * math.sin(p.fase)
-            alfa = {
-                "motes": 0.18 + 0.42 * oscilacao,
-                "brasas": 0.20 + 0.55 * oscilacao,
-                "neve": 0.30 + 0.25 * oscilacao,
-                "poeira": 0.10 + 0.16 * oscilacao,
-                "estatica": 0.25 + 0.45 * oscilacao,
-            }.get(self._modo, 0.3)
-
-            raio = p.tamanho * (1.0 + 0.25 * oscilacao)
-            c = QColor(cor)
-            c.setAlphaF(min(1.0, alfa))
-            # Halo suave em volta do núcleo: sem ele a partícula vira um
-            # pontinho duro, que é exatamente a aparência de "bolinha desenhada".
-            halo = QRadialGradient(QPointF(p.x, p.y), raio * 3.2)
-            halo.setColorAt(0.0, c)
-            meio = QColor(c)
-            meio.setAlphaF(c.alphaF() * 0.28)
-            halo.setColorAt(0.45, meio)
-            fim = QColor(c)
-            fim.setAlpha(0)
-            halo.setColorAt(1.0, fim)
-            pintor.setBrush(halo)
-            pintor.drawEllipse(QPointF(p.x, p.y), raio * 3.2, raio * 3.2)
+            raio = p.tamanho * (1.0 + 0.25 * oscilacao) * 3.2
+            pintor.setOpacity(min(1.0, base + variacao * oscilacao))
+            pintor.drawPixmap(
+                QRectF(p.x - raio, p.y - raio, raio * 2, raio * 2), desenho, fonte
+            )
         pintor.restore()
+
+
+def _juntar_pares(antes: list[QRect], agora: list[QRect]) -> list[QRect]:
+    """As caixas de antes e de agora, com cada par que se toca numa caixa só.
+
+    A mesma partícula, um quadro depois, está a um pixel de onde estava: as duas
+    caixas quase coincidem, e montar a região com as duas custava o dobro de
+    retângulos. Uma partícula que renasceu longe fica com as duas — a união
+    delas cobriria a janela.
+    """
+    caixas: list[QRect] = []
+    for a, b in zip(antes, agora, strict=False):
+        if a.intersects(b):
+            caixas.append(a.united(b))
+        else:
+            caixas += (a, b)
+    menor = min(len(antes), len(agora))
+    return caixas + antes[menor:] + agora[menor:]
 
 
 # ---------------------------------------------------------------------- Cenário
@@ -402,6 +479,17 @@ class Cenario:
         self._sobre_clicavel = False
         # Cada onda de clique: centro e idade, em segundos.
         self._ondas: list[tuple[QPointF, float]] = []
+        # A luz já desenhada, com a chave (cores e densidade de pixels) de quando
+        # foi feita. Ver ``_desenho_da_luz``.
+        self._desenho_luz: QPixmap | None = None
+        self._chave_luz: tuple[str, str, float] | None = None
+        # A rajada de tremulação em curso (segundos desde o começo; None = o
+        # tubo está quieto), quanto falta para a próxima, e se este quadro é o
+        # que apaga a última. Ver ``_avancar_tremulacao``.
+        self._rajada: float | None = None
+        self._proxima_rajada = 0.0
+        self._apagar_rajada = False
+        self._sorteio_rajada = random.Random(0)
 
     # -- configuração
     def definir_cursor(self, ponto: QPointF | None, *, sobre_clicavel: bool = False) -> None:
@@ -524,6 +612,9 @@ class Cenario:
     def definir(self, tema: GameTheme, atmosfera: Atmosfera) -> None:
         self._tema = tema
         self._atmosfera = atmosfera
+        self._sorteio_rajada = random.Random(atmosfera.semente)
+        self._proxima_rajada = self._sorteio_rajada.uniform(*ESPERA_RAJADA)
+        self._rajada = None
         self._invalidar()
         self._faixas.clear()
 
@@ -608,10 +699,12 @@ class Cenario:
             self._enxame.avancar(dt, fuga)
         if self._efetiva.interferencia > 0:
             self._avancar_interferencia(dt)
+        if self._efetiva.tremulacao > 0:
+            self._avancar_tremulacao(dt)
         # O que mudou é a união de onde as camadas vivas ESTAVAM com onde elas
         # ESTÃO: a caixa nova cobre a partícula desenhada, a velha apaga o
         # rastro que ela deixaria para trás.
-        self._sujas = antes + self._caixas_vivas()
+        self._sujas = _juntar_pares(antes, self._caixas_vivas())
 
     def _caixas_vivas(self) -> list[QRect]:
         """Caixas ocupadas pelas camadas que se movem, no estado atual."""
@@ -644,11 +737,12 @@ class Cenario:
 
         Duas camadas não têm recorte possível e devolvem ``None``, pedindo o
         quadro cheio: a tremulação do tubo, que é uma variação de brilho sobre
-        a imagem inteira, e o primeiro quadro depois de uma troca de tema.
+        a imagem inteira — enquanto dura uma rajada, e no quadro que a apaga —,
+        e o primeiro quadro depois de uma troca de tema.
         """
         if not self.movimento:
             return QRegion()
-        if self._efetiva.tremulacao > 0:
+        if self._efetiva.tremulacao > 0 and (self._rajada is not None or self._apagar_rajada):
             return None
         regiao = QRegion()
         for caixa in self._sujas:
@@ -665,6 +759,26 @@ class Cenario:
         """
         a = self._efetiva
         return bool(a.particulas) or a.tremulacao > 0 or a.interferencia > 0
+
+    @property
+    def tremendo(self) -> bool:
+        """Há uma rajada de tremulação em curso?"""
+        return self._rajada is not None
+
+    def _avancar_tremulacao(self, dt: float) -> None:
+        """Conta o tempo da rajada em curso, ou o que falta para a próxima."""
+        tremia = self._rajada is not None
+        if self._rajada is None:
+            self._proxima_rajada -= dt
+            if self._proxima_rajada <= 0:
+                self._rajada = 0.0
+        else:
+            self._rajada += dt
+            if self._rajada >= DURACAO_RAJADA:
+                self._rajada = None
+                self._proxima_rajada = self._sorteio_rajada.uniform(*ESPERA_RAJADA)
+        # O brilho da rajada ficou na tela: o quadro seguinte também é cheio.
+        self._apagar_rajada = tremia and self._rajada is None
 
     def _avancar_interferencia(self, dt: float) -> None:
         """Faixas de ruído que aparecem em rajadas, não continuamente.
@@ -732,16 +846,18 @@ class Cenario:
                 pintor.drawRect(QRectF(0, y, largura, h))
             pintor.restore()
 
-        if a.tremulacao > 0 and self.movimento:
-            # Tremulação do tubo: uma oscilação lenta somada a um chiado
-            # rápido de amplitude menor. Uma senoide sozinha parece pulsação
-            # de LED, não tela velha.
-            osc = math.sin(self._t * 5.1) * 0.6 + math.sin(self._t * 31.7) * 0.4
-            if osc > 0:
+        if a.tremulacao > 0 and self.movimento and self._rajada is not None:
+            # O soluço do tubo: o brilho sobe e desce dentro da rajada, com um
+            # chiado rápido por cima. Uma senoide sozinha parece pulsação de
+            # LED, não tela velha.
+            envelope = math.sin(math.pi * min(1.0, self._rajada / DURACAO_RAJADA))
+            chiado = 0.6 + 0.4 * math.sin(self._rajada * 43.0)
+            forca = envelope * chiado * a.tremulacao * FORCA_RAJADA
+            if forca > 0:
                 pintor.save()
                 pintor.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
                 c = QColor(self._tema.primary)
-                c.setAlphaF(min(1.0, osc * a.tremulacao))
+                c.setAlphaF(min(1.0, forca))
                 pintor.fillRect(QRectF(0, 0, largura, altura), c)
                 pintor.restore()
 
@@ -785,31 +901,65 @@ class Cenario:
         O halo tem a cor principal do tema e o núcleo, a de destaque: âmbar no
         verde do Fallout, ciano no amarelo do Cyberpunk. Uma luz da mesma cor
         do fundo se confundia com ele; duas cores fazem o ponto quente se ver.
+
+        A força entra como opacidade sobre o desenho pronto: a soma é linear,
+        e escalar o desenho inteiro é o mesmo que escalar cada gradiente.
         """
         if self._tema is None:
             return
-        forca = self._forca_luz * self._intensidade
+        dispositivo = pintor.device()
+        densidade = dispositivo.devicePixelRatioF() if dispositivo is not None else 1.0
+        desenho = self._desenho_da_luz(densidade)
         pintor.save()
         pintor.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
-        pintor.setPen(Qt.PenStyle.NoPen)
-        camadas = (
-            (RAIO_LUZ, BRILHO_LUZ, self._tema.primary),
-            (RAIO_NUCLEO, BRILHO_NUCLEO, self._tema.accent),
+        pintor.setOpacity(min(1.0, self._forca_luz * self._intensidade))
+        pintor.drawPixmap(
+            QPointF(self._luz.x() - RAIO_LUZ, self._luz.y() - RAIO_LUZ), desenho
         )
-        for raio, brilho, cor in camadas:
-            gradiente = QRadialGradient(self._luz, raio)
+        pintor.restore()
+
+    def _desenho_da_luz(self, densidade: float) -> QPixmap:
+        """Halo e núcleo compostos UMA vez por tema, em força cheia.
+
+        Dois gradientes radiais recalculados pixel a pixel a cada quadro
+        custavam 0,59 ms numa caixa de 680 px; copiar o desenho pronto com
+        opacidade custa 0,10. A luz se move a cada quadro, mas o desenho dela
+        não muda.
+        """
+        assert self._tema is not None
+        chave = (self._tema.primary, self._tema.accent, densidade)
+        if self._desenho_luz is not None and self._chave_luz == chave:
+            return self._desenho_luz
+        lado = math.ceil(2 * RAIO_LUZ * densidade)
+        imagem = QImage(lado, lado, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem.setDevicePixelRatio(densidade)
+        imagem.fill(Qt.GlobalColor.transparent)
+        pintor = QPainter(imagem)
+        pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pintor.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
+        pintor.setPen(Qt.PenStyle.NoPen)
+        centro = QPointF(RAIO_LUZ, RAIO_LUZ)
+        camadas = (
+            (RAIO_LUZ, BRILHO_LUZ, self._tema.primary, MEIO_LUZ),
+            (RAIO_NUCLEO, BRILHO_NUCLEO, self._tema.accent, 0.4),
+        )
+        for raio, brilho, cor, degrau in camadas:
+            gradiente = QRadialGradient(centro, raio)
             perto = QColor(cor)
-            perto.setAlphaF(min(1.0, brilho * forca))
+            perto.setAlphaF(min(1.0, brilho))
             meio = QColor(perto)
             meio.setAlphaF(perto.alphaF() * 0.35)
             longe = QColor(perto)
             longe.setAlphaF(0.0)
             gradiente.setColorAt(0.0, perto)
-            gradiente.setColorAt(0.4, meio)
+            gradiente.setColorAt(degrau, meio)
             gradiente.setColorAt(1.0, longe)
             pintor.setBrush(gradiente)
-            pintor.drawEllipse(self._luz, raio, raio)
-        pintor.restore()
+            pintor.drawEllipse(centro, raio, raio)
+        pintor.end()
+        self._desenho_luz = QPixmap.fromImage(imagem)
+        self._chave_luz = chave
+        return self._desenho_luz
 
     def _compor_vidro(self, largura: int, altura: int) -> QPixmap:
         """Camadas fixas da sobreposição, também cacheadas num pixmap."""

@@ -153,6 +153,7 @@ class Botao(QAbstractButton):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self._halo_suspenso = False
         self.setText(texto)
         # A folga é o quanto o botão pode ser puxado. O principal ganha a folga
         # inteira; os secundários, uma menor — o ímã deles é um aceno, e uma
@@ -185,6 +186,7 @@ class Botao(QAbstractButton):
         self._anim_pressao.setEasingCurve(QEasingCurve.Type.OutQuad)
 
         self._halo = sombra(self, raio=1, alpha=0, deslocamento=0)
+        self._halo.setEnabled(False)
         self._forca_ima = Transicao(
             self, design.DURACAO_MEDIA, self._repintar_ima, reduzir=lambda: False
         )
@@ -211,12 +213,20 @@ class Botao(QAbstractButton):
         fora = max(
             0.0, abs(falta.x()) - corpo.width() / 2, abs(falta.y()) - corpo.height() / 2
         )
+        forca = max(0.0, 1.0 - fora / self.ALCANCE_IMA)
+        if forca <= 0.0 and self._forca_ima.valor <= 0.0:
+            # Longe e já solto: nada a desenhar. O campo chama TODO botão a cada
+            # movimento do cursor, e esta repintura de quem nem sente o ímã
+            # custava cinco botões por quadro. O ``ir`` interrompe uma subida
+            # pedida há pouco que ainda não saiu do zero.
+            self._forca_ima.ir(0.0)
+            return
         limite = float(self._folga)
         self._direcao_ima = QPointF(
             max(-limite, min(limite, falta.x() * 0.16)),
             max(-limite, min(limite, falta.y() * 0.30)),
         )
-        self._forca_ima.ir(max(0.0, 1.0 - fora / self.ALCANCE_IMA))
+        self._forca_ima.ir(forca)
         self.update()
 
     @property
@@ -228,6 +238,16 @@ class Botao(QAbstractButton):
         self._folga = folga
         self.setMinimumHeight(38 + 2 * folga)
         self.updateGeometry()
+
+    def suspender_halo(self) -> None:
+        """Apaga a auréola de vez, para um botão que vai sumir sob outro efeito.
+
+        Um efeito do Qt dentro de outro que pega o atalho de pintura direta
+        reclama de dois pintores no mesmo pixmap. Quem desmonta o botão assim
+        o avisa antes, e o hover não a religa mais.
+        """
+        self._halo_suspenso = True
+        self._halo.setEnabled(False)
 
     @property
     def deslocamento_ima(self) -> QPointF:
@@ -400,6 +420,14 @@ class Botao(QAbstractButton):
         )
         cor = QColor(halo)
         cor.setAlpha(int(150 * intensidade))
+        # Apagada, a auréola DESLIGA. Ligado, o efeito desenha o botão num pixmap
+        # à parte e o desfoca a cada repintura, mesmo com alfa zero — e a luz do
+        # cursor repinta os botões sob ela a cada quadro.
+        ligada = cor.alpha() > 0 and not self._halo_suspenso
+        if self._halo.isEnabled() != ligada:
+            self._halo.setEnabled(ligada)
+        if not ligada:
+            return
         self._halo.setColor(cor)
         self._halo.setBlurRadius(6 + 26 * intensidade)
         self._halo.setOffset(0, 0)
