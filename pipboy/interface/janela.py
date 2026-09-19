@@ -193,7 +193,7 @@ class Janela(QWidget):
         # A mesma régua para os botões de todas as janelas: sem atmosfera, a luz
         # dentro deles fica parada e nenhum é puxado pelo cursor.
         definir_movimento_reduzido(lambda: self._intensidade_atmosfera <= 0.0)
-        definir_fonte_da_luz(self._luz_do_cursor)
+        definir_fonte_da_luz(self, self._luz_do_cursor)
         # O total que a lateral mostra agora. É contra ele que uma palavra
         # salva pela sessão se mede, para o sinal dizer QUANTAS entraram.
         self._total_no_caderno = 0

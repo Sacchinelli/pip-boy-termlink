@@ -15,12 +15,31 @@ ligar o rastreamento de nenhum widget.
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any
 
-from PySide6.QtCore import QEvent, QObject, QPointF, Qt
-from PySide6.QtGui import QHoverEvent, QMouseEvent
+from PySide6.QtCore import (
+    QElapsedTimer,
+    QEvent,
+    QObject,
+    QPoint,
+    QPointF,
+    QRectF,
+    QSizeF,
+    Qt,
+    QTimer,
+)
+from PySide6.QtGui import QColor, QHoverEvent, QMouseEvent, QPainter, QPainterPath
 from PySide6.QtWidgets import QAbstractButton, QApplication, QComboBox, QWidget
 
-from .componentes import Botao
+from .atmosfera import Cenario
+from .componentes import (
+    Botao,
+    LuzDoCursor,
+    acender_borda,
+    definir_fonte_da_luz,
+    movimento_reduzido,
+)
+from .relogios import PASSO_MAXIMO, intervalo_interativo
 
 _MOVIMENTOS = (QEvent.Type.MouseMove, QEvent.Type.HoverMove)
 
@@ -123,3 +142,147 @@ class RastreadorDeCursor(QObject):
             self._ultimo_movimento = None
             self._ao_mover(None, False)
         return False
+
+
+class _VidroDoCursor(QWidget):
+    """O vidro de uma janela satélite: o que segue o cursor, por cima de tudo."""
+
+    def __init__(self, vivo: CursorVivo, janela: QWidget) -> None:
+        super().__init__(janela)
+        self._vivo = vivo
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+    def paintEvent(self, _evento: Any) -> None:
+        pintor = QPainter(self)
+        pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self._vivo.pintar_vidro(pintor)
+        pintor.end()
+
+
+class CursorVivo(QObject):
+    """A resposta ao cursor numa janela satélite: luz, anel, ondas, rastro, ímã e bordas.
+
+    A janela principal tem relógio de quadros e vidro próprios, e o caderno era
+    estático: a mesma atmosfera, parada, e só os botões do rodapé sentiam o
+    cursor. Esta peça dá a qualquer janela a mesma resposta da principal, com o
+    cenário DELA.
+
+    O relógio só corre enquanto alguma coisa persegue o cursor — a luz a
+    caminho, o anel, uma onda, uma faísca viva — e para quando tudo assenta:
+    a janela não tem partícula nem tremulação próprias (ver ``so_o_cursor``),
+    e parada ela não custa nada. O passo é o mesmo da janela principal, o da
+    tela. Com a atmosfera desligada, nada disso existe.
+
+    ``cor`` dá a cor das bordas acesas; ``bordas`` lista os contornos que a
+    janela quer acesos no vidro — superfícies da folha de estilo, que não se
+    pintam sozinhas —, cada um com o raio do canto.
+    """
+
+    def __init__(
+        self,
+        janela: QWidget,
+        cenario: Cenario,
+        *,
+        cor: Callable[[], str],
+        bordas: Callable[[], list[tuple[QWidget, float]]] = lambda: [],
+    ) -> None:
+        super().__init__(janela)
+        self._janela = janela
+        self._cenario = cenario
+        self._cor = cor
+        self._bordas = bordas
+        self.vidro = _VidroDoCursor(self, janela)
+        self.campo = CampoMagnetico(janela)
+        self._rastreador = RastreadorDeCursor(janela, self._mover, self._clicar)
+        self._relogio = QTimer(self)
+        self._relogio.setTimerType(Qt.TimerType.PreciseTimer)
+        self._relogio.timeout.connect(self._quadro)
+        self._cronometro = QElapsedTimer()
+        self._cronometro.start()
+        self._ultimo = 0.0
+        definir_fonte_da_luz(janela, self._luz)
+        self.reposicionar()
+
+    @property
+    def animando(self) -> bool:
+        return self._relogio.isActive()
+
+    def reposicionar(self) -> None:
+        """O vidro cobre a janela inteira e fica por cima de tudo."""
+        self.vidro.setGeometry(self._janela.rect())
+        self.vidro.raise_()
+
+    def esquecer(self) -> None:
+        """A janela se escondeu: o cursor que estava nela não está mais."""
+        self._cenario.apagar_cursor()
+        self.campo.mover(None)
+        self.sincronizar()
+
+    def sincronizar(self) -> None:
+        """Liga o relógio se algo persegue o cursor, e o desliga quando assenta."""
+        if (
+            self._cenario.movimento
+            and self._cenario.precisa_quadros
+            and self._janela.isVisible()
+            and not movimento_reduzido()
+        ):
+            tela = self._janela.screen()
+            passo = intervalo_interativo(tela.refreshRate() if tela is not None else 0.0)
+            if not self._relogio.isActive():
+                self._ultimo = self._cronometro.elapsed() / 1000.0
+                self._relogio.start(passo)
+            elif self._relogio.interval() != passo:
+                self._relogio.setInterval(passo)
+        else:
+            self._relogio.stop()
+
+    def _mover(self, ponto: QPointF | None, sobre_clicavel: bool = False) -> None:
+        if movimento_reduzido():
+            ponto = None
+        self._cenario.definir_cursor(ponto, sobre_clicavel=sobre_clicavel)
+        self.campo.mover(ponto)
+        self.sincronizar()
+
+    def _clicar(self, ponto: QPointF) -> None:
+        if movimento_reduzido():
+            return
+        self._cenario.pulsar(ponto)
+        self.sincronizar()
+
+    def _quadro(self) -> None:
+        agora = self._cronometro.elapsed() / 1000.0
+        passo = min(PASSO_MAXIMO, max(0.0, agora - self._ultimo))
+        self._ultimo = agora
+        self._cenario.avancar(passo)
+        # Um pedido só, luz e vidro unidos — o mesmo raciocínio da janela
+        # principal: o vidro é translúcido, e repintá-lo já é repintar o que
+        # está atrás.
+        regiao = self._cenario.regiao_suja()
+        if regiao is None:
+            self._janela.update()
+        else:
+            regiao = regiao.united(self._cenario.regiao_da_luz())
+            if not regiao.isEmpty():
+                self._janela.update(regiao)
+        self.sincronizar()
+
+    def _luz(self) -> LuzDoCursor | None:
+        ponto, forca = self._cenario.luz
+        forca *= self._cenario.intensidade
+        if forca <= 0.01 or not self._cenario.movimento:
+            return None
+        return LuzDoCursor(self._janela, ponto, forca, QColor(self._cor()))
+
+    def pintar_vidro(self, pintor: QPainter) -> None:
+        self._cenario.pintar_cursor(pintor)
+        for widget, canto in self._bordas():
+            if not widget.isVisible():
+                continue
+            caixa = QRectF(
+                QPointF(widget.mapTo(self._janela, QPoint(0, 0))), QSizeF(widget.size())
+            ).adjusted(0.5, 0.5, -0.5, -0.5)
+            contorno = QPainterPath()
+            contorno.addRoundedRect(caixa, canto, canto)
+            acender_borda(pintor, self.vidro, contorno)
