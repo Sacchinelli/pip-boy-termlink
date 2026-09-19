@@ -1272,6 +1272,15 @@ def main() -> int:
     from pipboy.interface.componentes import Botao as BotaoIma
     from pipboy.themes import TEMAS as TEMAS_CURSOR
 
+    # A atmosfera é fixada em Completa ANTES de tudo, e não só antes da janela
+    # inteira: o ímã de um botão avulso também obedece à regra de movimento, que
+    # a janela define pela atmosfera. No runner do CI a animação do Windows vem
+    # desligada, a atmosfera nasce Desligada, e o botão avulso não era puxado —
+    # passava aqui e reprovava lá, a armadilha do relógio de quadros de novo.
+    atmosfera_cursor = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    aplicacao.processEvents()
+
     # -- As partículas fogem: uma partícula parada ao lado do cursor é empurrada
     #    para longe dele, e a chuva de dados só desvia para o lado.
     enxame = mod_atmosfera._Enxame("neve", 1, 7)
@@ -1364,8 +1373,6 @@ def main() -> int:
     ima.deleteLater()
 
     # -- A janela inteira: o rastreador vê o cursor sobre um filho qualquer.
-    atmosfera_cursor = janela.campo_atmosfera.currentText()
-    janela.campo_atmosfera.setCurrentText("Completa")
     janela._trocar_jogo("Genérico / Outro")
     aplicacao.processEvents()
     rotulo_filho = janela._rotulos_campo[0]
