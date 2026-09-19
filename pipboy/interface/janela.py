@@ -1333,6 +1333,26 @@ class Janela(QWidget):
                 f"Áudio do jogo {'ativado' if efetivo else 'desativado'}.", Tag.SISTEMA
             )
 
+    def dica_do_caderno(self, palavra: str) -> str:
+        """O que o caderno sabe sobre ``palavra``, para a dica da fala.
+
+        A conversa passa a reconhecer o próprio vocabulário do jogador: a
+        palavra que ele já ensinou ao caderno chega com a tradução e a data da
+        próxima revisão, sem rede nenhuma — é tudo do banco local. A que ele
+        não tem ensina o gesto, que de outro modo ninguém descobriria.
+        """
+        entrada = self._store.entrada(palavra)
+        if entrada is None:
+            return "Clique para perguntar o que significa"
+        dias = entrada.dias_ate_revisao
+        if dias <= 0:
+            quando = "para revisar"
+        elif dias == 1:
+            quando = "revisar amanhã"
+        else:
+            quando = f"revisar em {dias} dias"
+        return f"{entrada.termo} — {entrada.traducao} · {quando} · do seu caderno"
+
     def perguntar_sobre(self, palavra: str) -> None:
         """Escreve no campo a pergunta sobre ``palavra``, tocada numa fala.
 

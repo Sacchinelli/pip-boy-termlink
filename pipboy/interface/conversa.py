@@ -212,6 +212,7 @@ class Conversa(QScrollArea):
             acento=tema.accent,
             # Só a fala do tutor: é dela que vem a palavra que não se conhece.
             perguntavel=not do_jogador and tag is not Tag.ERRO,
+            dica_da_palavra=self._janela.dica_do_caderno,
         )
         bolha.palavra_tocada.connect(self._janela.perguntar_sobre)
         # O separador só existe se houver os dois lados. A sessão publica TODOS
