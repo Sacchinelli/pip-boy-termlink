@@ -1333,6 +1333,15 @@ class Janela(QWidget):
                 f"Áudio do jogo {'ativado' if efetivo else 'desativado'}.", Tag.SISTEMA
             )
 
+    def perguntar_sobre(self, palavra: str) -> None:
+        """Escreve no campo a pergunta sobre ``palavra``, tocada numa fala.
+
+        A palavra desconhecida está no meio da frase que o tutor acabou de
+        dizer, e perguntar por ela exigia digitá-la de novo. Escreve, e não
+        envia: a mesma regra das fichas da tela inicial.
+        """
+        self.propor_texto(f"O que significa ‘{palavra}’?")
+
     def propor_texto(self, texto: str) -> None:
         """Escreve ``texto`` no campo de digitação, com o foco, e NÃO envia.
 

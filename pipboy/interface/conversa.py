@@ -210,7 +210,10 @@ class Conversa(QScrollArea):
             brilho_texto=0.0 if do_jogador else atmosfera.brilho_texto,
             contorno=contorno,
             acento=tema.accent,
+            # Só a fala do tutor: é dela que vem a palavra que não se conhece.
+            perguntavel=not do_jogador and tag is not Tag.ERRO,
         )
+        bolha.palavra_tocada.connect(self._janela.perguntar_sobre)
         # O separador só existe se houver os dois lados. A sessão publica TODOS
         # os erros sem autor (é o programa falando, não o personagem), e o
         # formato fixo produzia um cabeçalho começando por um ponto órfão:

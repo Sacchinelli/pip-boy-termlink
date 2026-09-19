@@ -2759,6 +2759,104 @@ def main() -> int:
     janela.campo_atmosfera.setCurrentText(atmosfera_satelites)
     aplicacao.processEvents()
 
+    print("as palavras da fala se tocam")
+    from pipboy.interface.componentes import Bolha as BolhaPalavra
+
+    def bolha_de(texto: str, *, perguntavel: bool = True) -> BolhaPalavra:
+        return BolhaPalavra(
+            texto, fundo="#101010", cor_texto="#d8d8d8", fonte=janela.fonte("corpo"),
+            largura_max=420, acento="#ffbb33", perguntavel=perguntavel,
+        )
+
+    falada = bolha_de("Go to the wasteland & find 3 stimpaks <fast>")
+    desenhado_palavra = falada._rotulo.text()
+    checar(
+        '<a href="2"' in desenhado_palavra and ">the<" in desenhado_palavra,
+        "cada palavra da fala do tutor é um alvo",
+    )
+    checar(
+        '<a href="0"' not in desenhado_palavra and '<a href="1"' not in desenhado_palavra,
+        "menos as de uma ou duas letras, que não se pergunta",
+    )
+    checar(
+        "text-decoration:none" in desenhado_palavra and "underline" not in desenhado_palavra,
+        "e em repouso não há marca nenhuma: a fala se lê como texto",
+    )
+    checar(
+        "&amp;" in desenhado_palavra
+        and "&lt;" in desenhado_palavra and "&gt;" in desenhado_palavra
+        and "<fast>" not in desenhado_palavra,
+        "o texto é escapado: um '&' ou um '<' na fala não viram marcação",
+    )
+    checar(
+        falada._rotulo.textInteractionFlags() & Qt.TextInteractionFlag.TextSelectableByMouse
+        and falada._rotulo.textInteractionFlags() & Qt.TextInteractionFlag.LinksAccessibleByKeyboard,
+        "selecionar continua valendo, e o teclado alcança as palavras",
+    )
+
+    # -- A palavra sob o cursor acende na cor de destaque.
+    indice_alvo = falada._palavras.index("wasteland")
+    falada._acender_palavra(str(indice_alvo))
+    aceso_palavra = falada._rotulo.text()
+    checar(
+        falada.palavra_acesa == "wasteland"
+        and 'style="color:#ffbb33;text-decoration:underline;">wasteland<' in aceso_palavra,
+        "a palavra sob o cursor acende no destaque do tema, sublinhada",
+    )
+    checar(
+        aceso_palavra.count("underline") == 1,
+        "e só ela: uma fala inteira sublinhada não se lê",
+    )
+    falada._acender_palavra("")
+    checar(
+        falada.palavra_acesa == "" and "underline" not in falada._rotulo.text(),
+        "o cursor que sai apaga a palavra",
+    )
+
+    # -- Tocar a palavra avisa quem escuta.
+    tocadas: list[str] = []
+    falada.palavra_tocada.connect(tocadas.append)
+    falada._tocar_palavra(str(indice_alvo))
+    checar(tocadas == ["wasteland"], f"tocar a palavra avisa qual foi ({tocadas})")
+    falada.deleteLater()
+
+    curta = bolha_de("ok!")
+    checar(
+        "<a href" not in curta._rotulo.text() and curta._rotulo.text() == "ok!",
+        "uma fala sem palavra grande o bastante fica como era",
+    )
+    curta.deleteLater()
+
+    # -- Na conversa: a fala do tutor pergunta; a do jogador, não.
+    atmosfera_palavras = janela.campo_atmosfera.currentText()
+    janela.conversa.limpar()
+    janela.entrada_texto.clear()
+    janela.conversa.adicionar("Raiders carry ammo and stimpaks.", TagBorda.ASSISTENTE)
+    janela.conversa.adicionar("I would like to buy some ammo", TagBorda.USUARIO)
+    aplicacao.processEvents()
+    fala_tutor = janela.conversa._itens[-2].findChildren(BolhaPalavra)[0]
+    fala_jogador = janela.conversa._itens[-1].findChildren(BolhaPalavra)[0]
+    checar(
+        "<a href" in fala_tutor._rotulo.text() and "<a href" not in fala_jogador._rotulo.text(),
+        "na conversa, só a fala do tutor tem palavras que se tocam",
+    )
+    mensagens_palavra = list(janela.conversa._mensagens)
+    indice_stimpaks = fala_tutor._palavras.index("stimpaks")
+    fala_tutor._tocar_palavra(str(indice_stimpaks))
+    aplicacao.processEvents()
+    checar(
+        janela.entrada_texto.text() == "O que significa ‘stimpaks’?",
+        f"tocar a palavra escreve a pergunta no campo ({janela.entrada_texto.text()})",
+    )
+    checar(
+        janela.conversa._mensagens == mensagens_palavra,
+        "e não envia: quem manda continua sendo quem aperta Enter",
+    )
+    janela.entrada_texto.clear()
+    janela.conversa.limpar()
+    janela.campo_atmosfera.setCurrentText(atmosfera_palavras)
+    aplicacao.processEvents()
+
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()
     # nunca voltaria e a suíte penduraria. O tiro agendado é esse alguém.
