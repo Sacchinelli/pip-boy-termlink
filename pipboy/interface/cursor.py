@@ -85,6 +85,10 @@ class RastreadorDeCursor(QObject):
         # o filtro da aplicação o vê em cada um: um clique virava quatro ondas.
         # Instante e posição na tela identificam o MESMO clique entre as cópias.
         self._ultimo_clique: tuple[int, float, float] | None = None
+        # O mesmo movimento chega mais de uma vez: como MouseMove ao widget sob
+        # o cursor e como HoverMove a ele e a cada ancestral que o acompanha.
+        # Cada aviso refaz a luz e o ímã de todos os botões; repetido, é só custo.
+        self._ultimo_movimento: tuple[float, float, bool] | None = None
         aplicacao = QApplication.instance()
         if aplicacao is not None:
             aplicacao.installEventFilter(self)
@@ -97,7 +101,12 @@ class RastreadorDeCursor(QObject):
                 and isinstance(evento, (QMouseEvent, QHoverEvent))
                 and alvo.window() is self._janela
             ):
-                self._ao_mover(alvo.mapTo(self._janela, evento.position()), clicavel(alvo))
+                ponto = alvo.mapTo(self._janela, evento.position())
+                sobre_clicavel = clicavel(alvo)
+                marca = (ponto.x(), ponto.y(), sobre_clicavel)
+                if marca != self._ultimo_movimento:
+                    self._ultimo_movimento = marca
+                    self._ao_mover(ponto, sobre_clicavel)
         elif tipo == QEvent.Type.MouseButtonPress:
             if (
                 self._ao_clicar is not None
@@ -111,5 +120,6 @@ class RastreadorDeCursor(QObject):
                     self._ultimo_clique = chave
                     self._ao_clicar(alvo.mapTo(self._janela, evento.position()))
         elif tipo == QEvent.Type.Leave and alvo is self._janela:
+            self._ultimo_movimento = None
             self._ao_mover(None, False)
         return False

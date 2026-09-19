@@ -222,6 +222,8 @@ class Janela(QWidget):
                 avancar_cenario=self._avancar_cenario,
                 sondar_jogo=self._sondar_jogo,
                 deve_animar=self._deve_animar,
+                interagindo=lambda: self._cenario.seguindo_cursor,
+                frequencia_da_tela=self._frequencia_da_tela,
             ),
         )
         self._relogios.iniciar()
@@ -783,10 +785,13 @@ class Janela(QWidget):
         luz = self._cenario.regiao_da_luz()
         if not luz.isEmpty():
             self.update(luz)
-        # Num ambiente sem partícula, só a luz do cursor pedia quadros: assentada
-        # ela, o relógio para, mesmo com o mouse parado em cima da janela.
-        if not self._cenario.tem_camada_viva and not self._cenario.seguindo_cursor:
-            self._relogios.sincronizar_animacao()
+        # Assentada a luz, o passo volta ao de repouso — e, num ambiente sem
+        # partícula, o relógio para, mesmo com o mouse parado sobre a janela.
+        self._relogios.sincronizar_animacao()
+
+    def _frequencia_da_tela(self) -> float:
+        tela = self.screen()
+        return tela.refreshRate() if tela is not None else 0.0
 
     def _cursor_mudou(self, ponto: QPointF | None, sobre_clicavel: bool = False) -> None:
         """O cursor andou sobre a janela (ou saiu dela, com ``None``).
@@ -799,16 +804,16 @@ class Janela(QWidget):
             ponto = None
         self._cenario.definir_cursor(ponto, sobre_clicavel=sobre_clicavel)
         self._campo_magnetico.mover(ponto)
-        if not self._relogios.animando:
-            self._relogios.sincronizar_animacao()
+        # Sempre, e não só com o relógio parado: com ele correndo no passo de
+        # repouso, é aqui que ele acelera para acompanhar o cursor.
+        self._relogios.sincronizar_animacao()
 
     def _clique(self, ponto: QPointF) -> None:
         """Todo clique na janela solta uma onda do ponto tocado."""
         if self._intensidade_atmosfera <= 0.0:
             return
         self._cenario.pulsar(ponto)
-        if not self._relogios.animando:
-            self._relogios.sincronizar_animacao()
+        self._relogios.sincronizar_animacao()
 
     def _atualizar_medidor(self) -> None:
         self.medidor.definir_ativo(self.sessao_ativa)

@@ -425,9 +425,7 @@ class CartaoTermo(QFrame):
         # Pelo mesmo atalho, as auréolas dois níveis abaixo reclamariam. Um
         # cartão de saída não precisa de auréola nenhuma.
         for botao in self._acoes.findChildren(Botao):
-            halo = botao.graphicsEffect()
-            if halo is not None:
-                halo.setEnabled(False)
+            botao.suspender_halo()
         efeito = QGraphicsOpacityEffect(self)
         self.setGraphicsEffect(efeito)
         grupo = QParallelAnimationGroup(self)
