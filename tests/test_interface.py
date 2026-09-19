@@ -2341,7 +2341,7 @@ def main() -> int:
     print("o histórico responde ao cursor")
     from PySide6.QtGui import QColor as QColorHistorico
 
-    from pipboy.interface.historico import ATENUACAO_DA_LUZ
+    from pipboy.interface.atmosfera import ATENUACAO_NO_FUNDO_NU
 
     atmosfera_historico_vivo = janela.campo_atmosfera.currentText()
     janela.campo_atmosfera.setCurrentText("Completa")
@@ -2363,7 +2363,7 @@ def main() -> int:
         cor = imagem.pixelColor(200, 200)
         return cor.red() + cor.green() + cor.blue()
 
-    cheia, atenuada = centro_da_luz(1.0), centro_da_luz(ATENUACAO_DA_LUZ)
+    cheia, atenuada = centro_da_luz(1.0), centro_da_luz(ATENUACAO_NO_FUNDO_NU)
     checar(
         atenuada < cheia * 0.6,
         f"no fundo nu do histórico, a luz vem atenuada ({atenuada} contra {cheia})",
@@ -2673,6 +2673,90 @@ def main() -> int:
     )
 
     janela.campo_atmosfera.setCurrentText(atmosfera_fichas)
+    aplicacao.processEvents()
+
+    print("a revisão e o progresso respondem ao cursor")
+    from pipboy.interface.atmosfera import ATENUACAO_NO_FUNDO_NU as ATENUACAO_NUA
+    from pipboy.interface.progresso import JanelaProgresso as ProgressoVivo
+    from pipboy.interface.revisao import JanelaRevisao as RevisaoViva
+
+    atmosfera_satelites = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    aplicacao.processEvents()
+
+    def responde_ao_cursor(satelite: QWidget, alvo: QWidget, nome: str) -> None:
+        """A bateria que toda janela satélite tem de passar."""
+        vivo = satelite._cursor_vivo
+        checar(
+            isinstance(vivo, CursorVivo)
+            and satelite._cenario.movimento
+            and not satelite._cenario.tem_camada_viva
+            and not vivo.animando,
+            f"a {nome} aberta e parada não anima nada",
+        )
+        for passo in range(8):
+            mover_sobre(alvo, QPointF(12.0 + 14.0 * passo, 10.0 + 4.0 * passo))
+            esperar(25)
+        checar(
+            satelite._cenario.cursor is not None
+            and vivo.animando
+            and satelite._cenario.faiscas > 0,
+            f"o cursor sobre a {nome} acende a luz e deixa rastro ({satelite._cenario.faiscas})",
+        )
+        meio_alvo = QPointF(alvo.width() / 2, alvo.height() / 2)
+        mover_sobre(alvo, meio_alvo)
+        checar(aguardar(lambda: not vivo.animando), f"e o relógio da {nome} para quando assenta")
+        checar(acende(alvo), f"o que está sob a luz acende a borda na {nome}")
+        # A luz na margem da janela, e a medida 60 px acima dela: dentro do
+        # alcance da luz, fora do anel, e longe de qualquer botão opaco — a luz
+        # do fundo não aparece por cima de um.
+        margem = QPointF(satelite.width() - 12.0, satelite.height() / 2)
+        mover_sobre(satelite, margem)
+        aguardar(lambda: not vivo.animando)
+        ponto_nu = QPoint(round(margem.x()), round(margem.y()) - 60)
+        aceso = satelite.grab().toImage().pixelColor(ponto_nu)
+        vivo.esquecer()
+        apagado = satelite.grab().toImage().pixelColor(ponto_nu)
+        checar(
+            aceso != apagado,
+            f"e a luz aparece no fundo liso da {nome} ({apagado.name()} → {aceso.name()})",
+        )
+        # Escondida com o cursor em cima, ela não recebe o aviso de saída.
+        mover_sobre(alvo, meio_alvo)
+        satelite.hide()
+        aplicacao.processEvents()
+        checar(
+            satelite._cenario.cursor is None and not vivo.animando,
+            f"escondida com o cursor em cima, a {nome} esquece o cursor",
+        )
+        satelite.show()
+        aplicacao.processEvents()
+
+    revisao_viva = RevisaoViva(janela, store, parent=janela)
+    revisao_viva.show()
+    aplicacao.processEvents()
+    responde_ao_cursor(revisao_viva, revisao_viva._botao_sair, "revisão")
+    checar(
+        revisao_viva._campo_magnetico is revisao_viva._cursor_vivo.campo,
+        "o ímã da revisão é o do próprio CursorVivo, e não um campo à parte",
+    )
+    revisao_viva.close()
+    aplicacao.processEvents()
+
+    progresso_vivo = ProgressoVivo(janela, store, parent=janela)
+    progresso_vivo.show()
+    aplicacao.processEvents()
+    responde_ao_cursor(progresso_vivo, progresso_vivo._botao_fechar, "tela de progresso")
+    progresso_vivo.close()
+    aplicacao.processEvents()
+
+    # -- A atenuação da luz num fundo nu é a mesma para todas elas.
+    checar(
+        0.0 < ATENUACAO_NUA < 1.0,
+        f"a luz num fundo sem painel na frente vem atenuada, em toda janela ({ATENUACAO_NUA})",
+    )
+
+    janela.campo_atmosfera.setCurrentText(atmosfera_satelites)
     aplicacao.processEvents()
 
     print("atalhos diretos")

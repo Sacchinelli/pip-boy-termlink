@@ -35,7 +35,9 @@ from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from .. import design
 from ..vocabulary import DIAS_PARA_DOMINIO, VocabularyStore
-from .componentes import Botao, caminho_forma
+from .atmosfera import ATENUACAO_NO_FUNDO_NU, Cenario, so_o_cursor
+from .componentes import Botao, acender_borda, caminho_forma
+from .cursor import CursorVivo
 from .movimento import Crescimento, Transicao
 
 LARGURA = 640
@@ -480,6 +482,16 @@ class JanelaProgresso(QDialog):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setMinimumWidth(LARGURA)
 
+        # A mesma resposta ao cursor das outras janelas, com o cenário daqui:
+        # sem movimento próprio, ela só se mexe enquanto o cursor se mexe.
+        self._cenario = Cenario()
+        self._cenario.definir_intensidade(janela.intensidade_atmosfera)
+        self._cenario.movimento = janela.intensidade_atmosfera > 0.0
+        self._cenario.definir(tema, so_o_cursor(janela.atmosfera))
+        self._cursor_vivo = CursorVivo(
+            self, self._cenario, cor=lambda: self._janela.tema.accent
+        )
+
         estatisticas = store.estatisticas()
         novas, aprendendo, dominadas = store.dominio()
 
@@ -540,13 +552,28 @@ class JanelaProgresso(QDialog):
 
         acoes = QHBoxLayout()
         acoes.addStretch(1)
-        botao = Botao("Fechar", variante="acento", paleta=janela.paleta, forma=self._forma)
+        botao = self._botao_fechar = Botao(
+            "Fechar", variante="acento", paleta=janela.paleta, forma=self._forma
+        )
         botao.setFont(janela.fonte("corpo_forte"))
         botao.clicked.connect(self.accept)
         acoes.addWidget(botao)
         coluna.addSpacing(8)
         coluna.addLayout(acoes)
         botao.setFocus()
+
+    def resizeEvent(self, evento: Any) -> None:
+        super().resizeEvent(evento)
+        if hasattr(self, "_cursor_vivo"):
+            self._cursor_vivo.reposicionar()
+
+    def showEvent(self, evento: Any) -> None:
+        super().showEvent(evento)
+        self._cursor_vivo.reposicionar()
+
+    def hideEvent(self, evento: Any) -> None:
+        super().hideEvent(evento)
+        self._cursor_vivo.esquecer()
 
     def paintEvent(self, _evento: Any) -> None:
         pintor = QPainter(self)
@@ -557,6 +584,12 @@ class JanelaProgresso(QDialog):
         pintor.setPen(Qt.PenStyle.NoPen)
         pintor.setBrush(QColor(self._fundo))
         pintor.drawPath(caminho)
+        # A luz do cursor sobre o fundo liso, atenuada e recortada na moldura.
+        pintor.save()
+        pintor.setClipPath(caminho)
+        self._cenario.pintar_luz(pintor, atenuacao=ATENUACAO_NO_FUNDO_NU)
+        pintor.restore()
+        acender_borda(pintor, self, caminho)
         caneta = QPen(QColor(self._borda))
         caneta.setWidthF(1.0)
         pintor.setPen(caneta)
