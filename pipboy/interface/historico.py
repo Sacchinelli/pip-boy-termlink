@@ -48,7 +48,7 @@ from PySide6.QtWidgets import (
 
 from .. import design
 from ..historico import Fala, HistoricoStore, ResumoDeSessao
-from .atmosfera import Cenario, so_o_cursor
+from .atmosfera import ATENUACAO_NO_FUNDO_NU, Cenario, so_o_cursor
 from .componentes import Botao, caminho_forma
 from .cursor import CursorVivo
 from .dialogo import Caixa
@@ -75,10 +75,6 @@ def _data_amigavel(iso: str) -> str:
     except ValueError:
         return iso
     return quando.strftime("%d/%m/%Y %H:%M")
-
-
-# O quanto da luz do cursor aparece no fundo liso do histórico. Ver paintEvent.
-ATENUACAO_DA_LUZ = 0.34
 
 
 class LinhaMarcada(QLabel):
@@ -638,14 +634,11 @@ class JanelaHistorico(QDialog):
         pintor.setPen(Qt.PenStyle.NoPen)
         pintor.setBrush(QColor(t.screen))
         pintor.drawPath(caminho)
-        # A luz do cursor sobre o fundo liso, sem vazar pelos cantos da moldura.
-        # Atenuada: aqui não há painel translúcido na frente dela, como na
-        # janela principal e no caderno, e com a força inteira ela virava uma
-        # bola de luz sobre a transcrição. Um terço é o que atravessa o painel
-        # da conversa.
+        # A luz do cursor sobre o fundo liso, sem vazar pelos cantos da moldura,
+        # e atenuada: aqui não há painel translúcido na frente dela.
         pintor.save()
         pintor.setClipPath(caminho)
-        self._cenario.pintar_luz(pintor, atenuacao=ATENUACAO_DA_LUZ)
+        self._cenario.pintar_luz(pintor, atenuacao=ATENUACAO_NO_FUNDO_NU)
         pintor.restore()
         caneta = QPen(QColor(t.border_forte))
         caneta.setWidthF(1.0)

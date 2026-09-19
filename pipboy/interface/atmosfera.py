@@ -178,6 +178,12 @@ FORCA_FUGA: Final = 680.0
 RAIO_LUZ: Final = 340.0
 MEIO_LUZ: Final = 184.0 / 340.0
 RAIO_NUCLEO: Final = 150.0
+# O quanto da luz aparece numa janela de fundo liso — o histórico, a revisão, o
+# progresso. O brilho dela foi medido para ATRAVESSAR os painéis translúcidos
+# da janela principal e do caderno, que deixam passar cerca de um terço; num
+# fundo sem painel na frente, com a força inteira, ela vira uma bola de luz
+# sobre o conteúdo.
+ATENUACAO_NO_FUNDO_NU: Final = 0.34
 # Abaixo disto, em pixels por quadro, a luz é dada como parada: ela é copiada em
 # pixels inteiros, e um vigésimo de pixel não muda nenhum deles.
 LUZ_PARADA: Final = 0.05
