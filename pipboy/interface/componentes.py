@@ -20,6 +20,7 @@ Três ideias sustentam este módulo:
 from __future__ import annotations
 
 import math
+import random
 import time
 from collections.abc import Callable
 from itertools import pairwise
@@ -27,6 +28,7 @@ from typing import Any, NamedTuple
 
 from PySide6.QtCore import (
     Property,
+    QAbstractAnimation,
     QEasingCurve,
     QEvent,
     QPointF,
@@ -35,6 +37,7 @@ from PySide6.QtCore import (
     QSize,
     Qt,
     QTimer,
+    QVariantAnimation,
 )
 from PySide6.QtGui import (
     QBrush,
@@ -1255,6 +1258,117 @@ class RotuloElidido(QLabel):
     def resizeEvent(self, evento: Any) -> None:
         super().resizeEvent(evento)
         self._aplicar()
+
+
+class RotuloDecifravel(QLabel):
+    """Um rótulo que se decifra: as letras embaralham e se resolvem uma a uma.
+
+    O efeito dos terminais nas páginas que respondem ao mouse — e dos próprios
+    jogos: um terminal do Fallout liga assim. Sob o cursor, o nome do aparelho
+    e os títulos das seções embaralham e se resolvem da esquerda para a
+    direita em meio segundo; trocar de jogo decifra o nome novo no lugar do
+    antigo.
+
+    O texto do rótulo é sempre o de verdade. ``text()`` o devolve mesmo no meio
+    do embaralho, e o nome acessível também: um leitor de tela não lê "K#V7".
+    Só o que se DESENHA passa pelo embaralho, e o tamanho fica preso ao do
+    texto verdadeiro enquanto isso — a régua ao lado de um título não pode
+    tremer, nem uma quebra de linha pular.
+    """
+
+    DURACAO = 480
+    # Parte do tempo em que todas as letras ficam embaralhadas antes de a
+    # primeira se resolver: sem ela, a primeira letra nem chegava a mudar.
+    ESPERA = 0.18
+    # De quanto em quanto tempo as letras sorteadas trocam. A cada quadro da
+    # animação, sessenta vezes por segundo, o embaralho vira chiado.
+    TROCA_MS = 45
+    # Só ASCII: existe em toda fonte de todo tema, e nenhuma letra vira caixinha.
+    MAIUSCULAS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#%&*+<>/="
+    MINUSCULAS = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+    def __init__(
+        self, texto: str = "", parent: QWidget | None = None, *, objectName: str = ""
+    ) -> None:
+        super().__init__(texto, parent)
+        if objectName:
+            self.setObjectName(objectName)
+        self._texto = texto
+        self.setAccessibleName(texto)
+        self._limites: tuple[QSize, QSize] | None = None
+        self._animacao = QVariantAnimation(self)
+        self._animacao.setStartValue(0.0)
+        self._animacao.setEndValue(1.0)
+        self._animacao.setDuration(self.DURACAO)
+        self._animacao.valueChanged.connect(self._quadro)
+        # O último quadro já desenha o texto inteiro: no fim, só falta soltar.
+        self._animacao.finished.connect(self._soltar)
+
+    def text(self) -> str:
+        return self._texto
+
+    def setText(self, texto: str) -> None:
+        self._texto = texto
+        self.setAccessibleName(texto)
+        if self.decifrando:
+            # O embaralho continua, agora rumo ao texto novo — e com o tamanho
+            # dele.
+            self._soltar()
+            QLabel.setText(self, texto)
+            self._prender()
+        else:
+            QLabel.setText(self, texto)
+
+    @property
+    def decifrando(self) -> bool:
+        return self._animacao.state() == QAbstractAnimation.State.Running
+
+    @property
+    def desenhado(self) -> str:
+        """O que está desenhado agora, embaralhado ou não."""
+        return QLabel.text(self)
+
+    def decifrar(self) -> None:
+        """Embaralha o texto e o resolve letra a letra. Nada, com movimento reduzido."""
+        if movimento_reduzido() or not self.isVisible() or not self._texto.strip():
+            return
+        if self.decifrando:
+            return
+        self._prender()
+        self._animacao.start()
+
+    def enterEvent(self, evento: Any) -> None:
+        self.decifrar()
+        super().enterEvent(evento)
+
+    def _prender(self) -> None:
+        """Prende o tamanho ao do texto verdadeiro, que já está desenhado."""
+        self._limites = (self.minimumSize(), self.maximumSize())
+        dica = self.sizeHint()
+        self.setFixedSize(max(self.width(), dica.width()), max(self.height(), dica.height()))
+
+    def _soltar(self) -> None:
+        if self._limites is not None:
+            minimo, maximo = self._limites
+            self.setMinimumSize(minimo)
+            self.setMaximumSize(maximo)
+            self._limites = None
+
+    def _quadro(self, valor: Any) -> None:
+        progresso = float(valor)
+        balde = int(progresso * self.DURACAO / self.TROCA_MS)
+        # A mesma semente dentro de um balde: as letras sorteadas ficam paradas
+        # entre uma troca e outra, e o que avança nesse meio-tempo é só quem se
+        # resolveu.
+        sorteio = random.Random(balde * 7919 + len(self._texto))
+        resolvidas = int(max(0.0, (progresso - self.ESPERA) / (1.0 - self.ESPERA)) * len(self._texto))
+        letras = [
+            letra
+            if i < resolvidas or not letra.isalnum()
+            else sorteio.choice(self.MINUSCULAS if letra.islower() else self.MAIUSCULAS)
+            for i, letra in enumerate(self._texto)
+        ]
+        QLabel.setText(self, "".join(letras))
 
 
 class Desvanecer(QWidget):

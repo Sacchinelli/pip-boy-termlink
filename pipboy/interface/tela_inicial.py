@@ -49,7 +49,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import design
-from .componentes import Holofote, acender_borda, caminho_forma
+from .componentes import Holofote, RotuloDecifravel, acender_borda, caminho_forma
 from .movimento import animar_entrada
 
 
@@ -364,8 +364,10 @@ class TelaInicial(QWidget):
             return item
 
         self.glifo = rotulo("inicialGlifo")
-        self.titulo = rotulo("inicialTitulo")
-        self.titulo.setText("Pronto para ouvir")
+        # O título se decifra quando a tela chega, como um terminal que liga.
+        self.titulo = RotuloDecifravel("Pronto para ouvir", objectName="inicialTitulo")
+        self.titulo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.titulo.setWordWrap(True)
         self.corpo = rotulo("inicialCorpo")
         self.sequencia = rotulo("inicialSequencia")
 
@@ -518,8 +520,9 @@ class TelaInicial(QWidget):
         return self._fileira.direction() == QBoxLayout.Direction.TopToBottom
 
     def entrar(self) -> None:
-        """Cascata de cima para baixo, na ordem de leitura."""
+        """Cascata de cima para baixo, na ordem de leitura, e o título se decifrando."""
         animar_entrada(
             [bloco for bloco in self._blocos if not bloco.isHidden()],
             reduzir=bool(self._janela.intensidade_atmosfera <= 0.0),
         )
+        self.titulo.decifrar()

@@ -51,6 +51,7 @@ from .componentes import (
     Desvanecer,
     Medidor,
     Pilula,
+    RotuloDecifravel,
     RotuloElidido,
 )
 from .conversa import Conversa
@@ -116,13 +117,13 @@ class Moldura:
 class Lateral:
     """A coluna de escolhas: tudo que se decide ANTES de falar."""
 
-    marca: QLabel
+    marca: RotuloDecifravel
     submarca: QLabel
     # Os seletores também por nome, além do atributo: é assim que o travamento
     # de sessão percorre todos de uma vez, sem uma lista escrita à mão que
     # esqueceria o campo seguinte.
     campos: dict[str, CampoSelecao]
-    rotulos_secao: list[QLabel]
+    rotulos_secao: list[RotuloDecifravel]
     rotulos_campo: list[QLabel]
     campo_jogo: CampoSelecao
     campo_persona: CampoSelecao
@@ -255,7 +256,8 @@ def _lateral(janela: Janela, alvo: QWidget) -> Lateral:
     coluna.setContentsMargins(24, 22, 24, 16)
     coluna.setSpacing(0)
 
-    marca = QLabel(objectName="marca")
+    # O nome do aparelho e os títulos das seções se decifram sob o cursor.
+    marca = RotuloDecifravel(objectName="marca")
     coluna.addWidget(marca)
     submarca = QLabel(objectName="submarca")
     submarca.setWordWrap(True)
@@ -267,7 +269,7 @@ def _lateral(janela: Janela, alvo: QWidget) -> Lateral:
     # ficavam fora do alcance de qualquer repintura. Enquanto a rampa era fixa
     # isso nunca apareceu; com o tamanho do texto ajustável, seriam os únicos
     # rótulos da coluna a não crescer.
-    rotulos_secao: list[QLabel] = []
+    rotulos_secao: list[RotuloDecifravel] = []
     rotulos_campo: list[QLabel] = []
 
     def secao(titulo: str) -> None:
@@ -279,7 +281,7 @@ def _lateral(janela: Janela, alvo: QWidget) -> Lateral:
         linha = QHBoxLayout()
         linha.setContentsMargins(0, 0, 0, 0)
         linha.setSpacing(10)
-        rotulo = QLabel(titulo.upper(), objectName="secao")
+        rotulo = RotuloDecifravel(titulo.upper(), objectName="secao")
         rotulo.setFont(janela.fonte("secao"))
         rotulos_secao.append(rotulo)
         linha.addWidget(rotulo)
