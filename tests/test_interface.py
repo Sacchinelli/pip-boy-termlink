@@ -1746,6 +1746,8 @@ def main() -> int:
     luz_pronta.definir_cursor(QPointF(640.3, 470.6))
     for _ in range(40):
         luz_pronta.avancar(0.033)
+    # Um último passo com a luz andando: assentada, ela não pede caixa nenhuma.
+    luz_pronta.definir_cursor(QPointF(652.7, 466.2))
     luz_pronta.avancar(0.033)
     acesos, fora = vazamento(luz_pronta._pintar_luz, list(luz_pronta.regiao_da_luz()), 1400, 1000)
     checar(
@@ -1808,6 +1810,260 @@ def main() -> int:
     )
 
     janela.campo_atmosfera.setCurrentText(atmosfera_fluida)
+    aplicacao.processEvents()
+
+    print("a luz chega às bordas e o cursor deixa rastro")
+    from PySide6.QtCore import QRectF as RetanguloBorda
+    from PySide6.QtGui import QPainterPath as QPainterPathBorda
+
+    from pipboy.events import Tag as TagBorda
+    from pipboy.interface.componentes import ALCANCE_BORDA, acender_borda
+    from pipboy.interface.componentes import Bolha as BolhaBorda
+    from pipboy.interface.estilo import RAIO_PADRAO, RAIO_POR_FORMA
+
+    atmosfera_bordas = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    aplicacao.processEvents()
+
+    # -- A borda acesa tem de caber na caixa que a janela repinta em volta da
+    #    luz: fora dela, ninguém a apagaria quando a luz se afasta.
+    checar(
+        ALCANCE_BORDA <= mod_atmosfera.RAIO_LUZ,
+        f"a luz acende bordas só dentro da caixa que ela repinta ({ALCANCE_BORDA} ≤ {mod_atmosfera.RAIO_LUZ})",
+    )
+
+    def assentar_cursor(ponto: QPointF | None) -> None:
+        janela._cursor_mudou(ponto)
+        aguardar(lambda: not janela._cenario.seguindo_cursor)
+
+    def contorno_de(widget: QWidget) -> QPainterPathBorda:
+        caminho = QPainterPathBorda()
+        caminho.addRect(RetanguloBorda(widget.rect()).adjusted(0.5, 0.5, -0.5, -0.5))
+        return caminho
+
+    def acende(widget: QWidget) -> bool:
+        imagem = QImage(8, 8, QImage.Format.Format_ARGB32_Premultiplied)
+        pintor = QPainter(imagem)
+        desenhou = acender_borda(pintor, widget, contorno_de(widget))
+        pintor.end()
+        return desenhou
+
+    janela._trocar_jogo("Cyberpunk 2077")
+    aguardar(lambda: not janela.findChildren(DissolucaoDoTema))
+    botao_borda = janela.botao_acao
+    perto_do_botao = QPointF(botao_borda.mapTo(janela, QPoint(-40, botao_borda.height() // 2)))
+    assentar_cursor(perto_do_botao)
+    checar(acende(botao_borda), "com a luz ao lado do INICIAR, a borda dele acende")
+    longe_do_botao = QPointF(40.0, janela.height() - 40.0)
+    assentar_cursor(longe_do_botao)
+    checar(not acende(botao_borda), "com a luz do outro lado da janela, não")
+    assentar_cursor(perto_do_botao)
+    janela.abrir_caderno()
+    aplicacao.processEvents()
+    caderno_borda = janela._caderno
+    assert caderno_borda is not None
+    # A luz posta EM CIMA do botão do caderno, pela tela: a distância não o
+    # recusa, e só a janela diferente pode.
+    fechar_borda = caderno_borda.botao_fechar
+    sobre_o_caderno = janela.mapFromGlobal(fechar_borda.mapToGlobal(fechar_borda.rect().center()))
+    assentar_cursor(QPointF(sobre_o_caderno))
+    checar(
+        not acende(fechar_borda),
+        "a luz da janela principal não acende o que é de outra janela, nem passando por cima",
+    )
+    caderno_borda.close()
+    aplicacao.processEvents()
+
+    # -- O painel da conversa não tem contorno em repouso: a luz o revela.
+    painel = janela.conversa
+    borda_esquerda = painel.mapTo(janela, QPoint(0, painel.height() // 2))
+    x_borda, y_borda = borda_esquerda.x(), borda_esquerda.y()
+
+    def destaque_da_borda() -> int:
+        """O quanto o fio da borda brilha a mais que o painel logo ao lado.
+
+        A luz do fundo também clareia o painel perto do cursor; a diferença
+        para quatro pixels dentro isola o contorno.
+        """
+        foto = janela.grab().toImage()
+
+        def soma(x: int) -> int:
+            cor = foto.pixelColor(x, y_borda)
+            return cor.red() + cor.green() + cor.blue()
+
+        return soma(x_borda) - soma(x_borda + 4)
+
+    assentar_cursor(QPointF(x_borda + 30.0, y_borda))
+    acesa = destaque_da_borda()
+    assentar_cursor(None)
+    aguardar(lambda: janela._cenario.luz[1] == 0.0)
+    apagada = destaque_da_borda()
+    checar(
+        acesa > apagada + 40,
+        f"o contorno do painel da conversa acende perto do cursor ({apagada} → {acesa})",
+    )
+
+    # -- As falas também: a bolha perto do cursor ganha contorno de luz.
+    janela.conversa.adicionar("Try saying it out loud.", TagBorda.ASSISTENTE)
+    aplicacao.processEvents()
+    fala_borda = janela.conversa._itens[-1]
+    bolhas_fala = fala_borda.findChildren(BolhaBorda)
+    assert bolhas_fala
+    bolha_borda = bolhas_fala[0]
+    aguardar(
+        lambda: fala_borda.graphicsEffect() is None and bolha_borda.graphicsEffect() is None
+    )
+    canto_bolha = bolha_borda.mapTo(janela, QPoint(bolha_borda.width() + 20, bolha_borda.height() // 2))
+    assentar_cursor(QPointF(canto_bolha))
+    checar(acende(bolha_borda), "a bolha ao lado do cursor acende o contorno")
+    foto_acesa = bolha_borda.grab().toImage()
+    assentar_cursor(None)
+    aguardar(lambda: janela._cenario.luz[1] == 0.0)
+    foto_apagada = bolha_borda.grab().toImage()
+    lado_direito = QPoint(bolha_borda.width() - 1, bolha_borda.height() // 2)
+    checar(
+        foto_acesa.pixelColor(lado_direito) != foto_apagada.pixelColor(lado_direito),
+        "e o contorno aceso aparece na própria bolha",
+    )
+    janela.conversa.limpar()
+    aplicacao.processEvents()
+
+    # -- A borda do seletor segue o canto que a folha de estilo dá a ele.
+    raio_esperado = RAIO_POR_FORMA.get(janela.atmosfera.forma, RAIO_PADRAO)
+    checar(
+        janela.campo_jogo._raio_borda == raio_esperado,
+        f"o seletor acende com o canto da própria caixa ({janela.campo_jogo._raio_borda})",
+    )
+
+    # -- Sem atmosfera, a luz não existe — nem para as bordas.
+    assentar_cursor(perto_do_botao)
+    janela.campo_atmosfera.setCurrentText("Desligada")
+    aplicacao.processEvents()
+    checar(not acende(botao_borda), "com a atmosfera desligada, nenhuma borda acende")
+    janela.campo_atmosfera.setCurrentText("Completa")
+    aplicacao.processEvents()
+    assentar_cursor(None)
+
+    # -- Com o cursor descansando sobre a janela, a luz assentada não pede
+    #    repintura, mesmo com as partículas pedindo quadros.
+    parada = CenarioCursor()
+    parada.definir(TEMAS_CURSOR["Elden Ring"], atmosfera_de("Elden Ring"))
+    parada.redimensionar(1000, 800)
+    parada.definir_cursor(QPointF(500.0, 400.0))
+    for _ in range(120):
+        parada.avancar(0.033)
+    checar(
+        parada.precisa_quadros and parada.regiao_da_luz().isEmpty(),
+        "com o cursor descansando, a luz assentada não pede repintura; só as partículas pedem",
+    )
+    parada.definir_cursor(QPointF(520.0, 400.0))
+    parada.avancar(0.033)
+    checar(not parada.regiao_da_luz().isEmpty(), "e o cursor que volta a andar a acorda")
+
+    # -- O rastro: faíscas no caminho do cursor, no material do jogo.
+    rastro = CenarioCursor()
+    rastro.definir(TEMAS_CURSOR["The Witcher 3"], atmosfera_de("The Witcher 3"))
+    rastro.redimensionar(1000, 800)
+    rastro.definir_cursor(QPointF(200.0, 400.0))
+    rastro.avancar(0.016)
+    checar(rastro.faiscas == 0, "o cursor que acabou de chegar não deixa rastro")
+    rastro.definir_cursor(QPointF(400.0, 400.0))
+    rastro.avancar(0.016)
+    checar(
+        rastro.faiscas == mod_atmosfera.SEMEADURA_MAXIMA,
+        f"um puxão de 200 px semeia no máximo {mod_atmosfera.SEMEADURA_MAXIMA} faíscas de uma vez "
+        f"({rastro.faiscas})",
+    )
+    xs = sorted(f.x for f in rastro._rastro)
+    checar(
+        xs[0] < 300.0 < xs[-1],
+        f"espalhadas pelo caminho, e não num tufo no fim ({xs[0]:.0f} a {xs[-1]:.0f})",
+    )
+    alturas = [f.y for f in rastro._rastro]
+    rastro.avancar(0.1)
+    checar(
+        all(f.y < y for f, y in zip(rastro._rastro, alturas, strict=True)),
+        "no Witcher, as faíscas são brasas: sobem",
+    )
+    for passo_rastro in range(30):
+        rastro.definir_cursor(QPointF(200.0 + 150.0 * (passo_rastro % 2), 300.0 + passo_rastro))
+        rastro.avancar(0.016)
+    checar(
+        rastro.faiscas <= mod_atmosfera.MAXIMO_RASTRO,
+        f"e nunca passam de {mod_atmosfera.MAXIMO_RASTRO} vivas ({rastro.faiscas})",
+    )
+    # O relógio tem trabalho enquanto houver faísca viva — mesmo com a luz
+    # assentada e o cursor parado, quando mais nada pediria quadro.
+    sozinha = CenarioCursor()
+    sozinha.definir(TEMAS_CURSOR["Genérico / Outro"], atmosfera_de("Genérico / Outro"))
+    sozinha.redimensionar(1000, 800)
+    sozinha.definir_cursor(QPointF(500.0, 400.0))
+    for _ in range(120):
+        sozinha.avancar(0.033)
+    assentada = not sozinha.seguindo_cursor
+    sozinha._semear(QPointF(480.0, 400.0))
+    checar(
+        assentada and sozinha.seguindo_cursor,
+        "com a luz assentada, uma faísca viva basta para o relógio seguir correndo",
+    )
+    acesos, fora = vazamento(
+        lambda pintor: rastro._pintar_rastro(pintor, CorFluida("#ffe08a")),
+        rastro._caixas_vivas(), 1000, 800,
+    )
+    checar(
+        acesos > 0 and fora == 0,
+        f"cada faísca acende só dentro da caixa que pede ({acesos} pixels, {fora} fora)",
+    )
+    for _ in range(40):
+        rastro.avancar(0.033)
+    checar(rastro.faiscas == 0, "com o cursor parado, o rastro some em pouco mais de meio segundo")
+
+    chuva_rastro = CenarioCursor()
+    chuva_rastro.definir(TEMAS_CURSOR["Cyberpunk 2077"], atmosfera_de("Cyberpunk 2077"))
+    chuva_rastro.redimensionar(1000, 800)
+    chuva_rastro.definir_cursor(QPointF(200.0, 400.0))
+    chuva_rastro.avancar(0.016)
+    chuva_rastro.definir_cursor(QPointF(320.0, 400.0))
+    chuva_rastro.avancar(0.016)
+    gotas = [f.y for f in chuva_rastro._rastro]
+    chuva_rastro.avancar(0.1)
+    checar(
+        gotas and all(f.y > y for f, y in zip(chuva_rastro._rastro, gotas, strict=True)),
+        "no Cyberpunk, dados escorrendo para baixo",
+    )
+    acesos, fora = vazamento(
+        lambda pintor: chuva_rastro._pintar_rastro(pintor, CorFluida("#00f0ff")),
+        chuva_rastro._caixas_vivas(), 1000, 800,
+    )
+    checar(acesos > 0 and fora == 0, f"também dentro das caixas ({acesos} pixels, {fora} fora)")
+
+    quieto_rastro = CenarioCursor()
+    quieto_rastro.definir(TEMAS_CURSOR["The Witcher 3"], atmosfera_de("The Witcher 3"))
+    quieto_rastro.redimensionar(1000, 800)
+    quieto_rastro.movimento = False
+    quieto_rastro.definir_cursor(QPointF(200.0, 400.0))
+    quieto_rastro.avancar(0.016)
+    quieto_rastro.definir_cursor(QPointF(400.0, 400.0))
+    quieto_rastro.avancar(0.016)
+    checar(quieto_rastro.faiscas == 0, "sem movimento, sem rastro")
+
+    # -- Na janela: o cursor atravessando a conversa deixa faíscas.
+    janela._trocar_jogo("The Witcher 3")
+    aguardar(lambda: not janela.findChildren(DissolucaoDoTema))
+    for passo_rastro in range(6):
+        janela._cursor_mudou(QPointF(500.0 + 40.0 * passo_rastro, 400.0))
+        janela._avancar_cenario(0.016)
+    checar(janela._cenario.faiscas > 0, f"na janela, o cursor deixa rastro ({janela._cenario.faiscas})")
+    regiao_rastro = janela._cenario.regiao_suja()
+    checar(
+        regiao_rastro is not None and all(
+            regiao_rastro.contains(QPoint(round(f.x), round(f.y))) for f in janela._cenario._rastro
+        ),
+        "e a região que o vidro repinta cobre cada faísca",
+    )
+    assentar_cursor(None)
+
+    janela.campo_atmosfera.setCurrentText(atmosfera_bordas)
     aplicacao.processEvents()
 
     print("atalhos diretos")

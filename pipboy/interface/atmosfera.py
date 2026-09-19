@@ -178,6 +178,9 @@ FORCA_FUGA: Final = 680.0
 RAIO_LUZ: Final = 340.0
 MEIO_LUZ: Final = 184.0 / 340.0
 RAIO_NUCLEO: Final = 150.0
+# Abaixo disto, em pixels por quadro, a luz é dada como parada: ela é copiada em
+# pixels inteiros, e um vigésimo de pixel não muda nenhum deles.
+LUZ_PARADA: Final = 0.05
 BRILHO_LUZ: Final = 0.50
 BRILHO_NUCLEO: Final = 0.46
 # Quanto o enxame desliza AO CONTRÁRIO do cursor, entre o centro e a borda.
@@ -207,8 +210,89 @@ DURACAO_RAJADA: Final = 0.45
 ESPERA_RAJADA: Final = (2.5, 7.0)
 FORCA_RAJADA: Final = 1.6
 
+# O rastro do cursor: faíscas no material do jogo que ficam para trás quando o
+# mouse anda e somem em menos de um segundo — brasa subindo no Witcher, neve
+# caindo no Skyrim, dados escorrendo no Cyberpunk. Uma a cada PASSO_RASTRO px
+# percorridos, e nunca mais que MAXIMO_RASTRO vivas: o rastro acompanha o
+# gesto, sem encher a janela de fumaça. Cada faísca é uma caixinha a repintar,
+# como uma partícula do enxame.
+PASSO_RASTRO: Final = 16.0
+MAXIMO_RASTRO: Final = 40
+# Por quadro, no máximo: um puxão de mouse de 600 px não despeja trinta de uma vez.
+SEMEADURA_MAXIMA: Final = 6
+VIDA_RASTRO: Final = (0.35, 0.75)
+BRILHO_RASTRO: Final = 0.75
+
 
 # ------------------------------------------------------------------- Partículas
+# Os desenhos prontos de partícula, por forma e cor. Ver ``desenho_de_particula``.
+_DESENHOS: dict[tuple[bool, str], QPixmap] = {}
+
+
+def desenho_de_particula(dados: bool, cor: QColor) -> QPixmap:
+    """A partícula desenhada UMA vez, em força cheia, na cor das camadas vivas.
+
+    Cada quadro montava um gradiente por partícula — três cores, três paradas,
+    um pincel — para desenhar sempre a mesma forma em outro lugar e com outra
+    força: 0,40 ms por enxame de 46 motes, a 30 quadros por segundo, a tarde
+    inteira, atrás do jogo. Copiado pronto, com a força como opacidade, custa
+    0,11. A soma é linear, e escalar o desenho é o mesmo que escalar cada cor
+    do gradiente. ``dados`` pede o rastro vertical da chuva de dados; o resto
+    é redondo.
+    """
+    chave = (dados, cor.name())
+    pronto = _DESENHOS.get(chave)
+    if pronto is not None:
+        return pronto
+    transparente = QColor(cor)
+    transparente.setAlpha(0)
+    if dados:
+        # O rastro de um dado: some para cima, acende embaixo.
+        imagem = QImage(4, 64, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem.fill(Qt.GlobalColor.transparent)
+        gradiente = QLinearGradient(0, 0, 0, 64)
+        gradiente.setColorAt(0.0, transparente)
+        gradiente.setColorAt(1.0, cor)
+        pintor = QPainter(imagem)
+        pintor.fillRect(imagem.rect(), gradiente)
+        pintor.end()
+    else:
+        # Halo suave em volta do núcleo: sem ele a partícula vira um pontinho
+        # duro, que é exatamente a aparência de "bolinha desenhada".
+        lado = 48
+        raio = lado / 2
+        imagem = QImage(lado, lado, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem.fill(Qt.GlobalColor.transparent)
+        halo = QRadialGradient(QPointF(raio, raio), raio)
+        halo.setColorAt(0.0, cor)
+        meio = QColor(cor)
+        meio.setAlphaF(0.28)
+        halo.setColorAt(0.45, meio)
+        halo.setColorAt(1.0, transparente)
+        pintor = QPainter(imagem)
+        pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pintor.setPen(Qt.PenStyle.NoPen)
+        pintor.setBrush(halo)
+        pintor.drawEllipse(QPointF(raio, raio), raio, raio)
+        pintor.end()
+    pronto = QPixmap.fromImage(imagem)
+    _DESENHOS[chave] = pronto
+    return pronto
+
+
+@dataclass(slots=True)
+class _Faisca:
+    """Uma faísca do rastro do cursor. ``vida`` é o que resta; ``duracao``, com quanto nasceu."""
+
+    x: float
+    y: float
+    vx: float
+    vy: float
+    tamanho: float
+    vida: float
+    duracao: float
+
+
 @dataclass(slots=True)
 class _Particula:
     x: float
@@ -236,9 +320,6 @@ class _Enxame:
         "poeira": (0.10, 0.16),
         "estatica": (0.25, 0.45),
     }
-    # Lado do desenho de referência de uma partícula redonda, em pixels.
-    LADO_DESENHO = 48
-
     def __init__(self, modo: str, densidade: int, semente: int) -> None:
         self._modo = modo
         self._rng = random.Random(semente)
@@ -246,9 +327,6 @@ class _Enxame:
         self._densidade = densidade
         self._largura = 1
         self._altura = 1
-        # A partícula já desenhada, e em que cor. Ver ``_desenho_na_cor``.
-        self._desenho: QPixmap | None = None
-        self._cor_desenho = ""
 
     def redimensionar(self, largura: int, altura: int) -> None:
         if (largura, altura) == (self._largura, self._altura):
@@ -344,57 +422,10 @@ class _Enxame:
             )
         return caixas
 
-    def _desenho_na_cor(self, cor: QColor) -> QPixmap:
-        """A partícula desenhada UMA vez, em força cheia, na cor das camadas vivas.
-
-        Cada quadro montava um gradiente por partícula — três cores, três
-        paradas, um pincel — para desenhar sempre a mesma forma em outro lugar
-        e com outra força: 0,40 ms por enxame de 46 motes, a 30 quadros por
-        segundo, a tarde inteira, atrás do jogo. Copiado pronto, com a força
-        como opacidade, custa 0,11. A soma é linear, e escalar o desenho é o
-        mesmo que escalar cada cor do gradiente.
-        """
-        if self._desenho is not None and self._cor_desenho == cor.name():
-            return self._desenho
-        transparente = QColor(cor)
-        transparente.setAlpha(0)
-        if self._modo == "dados":
-            # O rastro de um dado: some para cima, acende embaixo.
-            imagem = QImage(4, 64, QImage.Format.Format_ARGB32_Premultiplied)
-            imagem.fill(Qt.GlobalColor.transparent)
-            gradiente = QLinearGradient(0, 0, 0, 64)
-            gradiente.setColorAt(0.0, transparente)
-            gradiente.setColorAt(1.0, cor)
-            pintor = QPainter(imagem)
-            pintor.fillRect(imagem.rect(), gradiente)
-            pintor.end()
-        else:
-            # Halo suave em volta do núcleo: sem ele a partícula vira um
-            # pontinho duro, que é exatamente a aparência de "bolinha desenhada".
-            lado = self.LADO_DESENHO
-            raio = lado / 2
-            imagem = QImage(lado, lado, QImage.Format.Format_ARGB32_Premultiplied)
-            imagem.fill(Qt.GlobalColor.transparent)
-            halo = QRadialGradient(QPointF(raio, raio), raio)
-            halo.setColorAt(0.0, cor)
-            meio = QColor(cor)
-            meio.setAlphaF(0.28)
-            halo.setColorAt(0.45, meio)
-            halo.setColorAt(1.0, transparente)
-            pintor = QPainter(imagem)
-            pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
-            pintor.setPen(Qt.PenStyle.NoPen)
-            pintor.setBrush(halo)
-            pintor.drawEllipse(QPointF(raio, raio), raio, raio)
-            pintor.end()
-        self._desenho = QPixmap.fromImage(imagem)
-        self._cor_desenho = cor.name()
-        return self._desenho
-
     def pintar(self, pintor: QPainter, cor: QColor, deslocamento: QPointF | None = None) -> None:
         if not self._particulas:
             return
-        desenho = self._desenho_na_cor(cor)
+        desenho = desenho_de_particula(self._modo == "dados", cor)
         fonte = QRectF(desenho.rect())
         pintor.save()
         if deslocamento is not None:
@@ -490,6 +521,12 @@ class Cenario:
         self._proxima_rajada = 0.0
         self._apagar_rajada = False
         self._sorteio_rajada = random.Random(0)
+        # O rastro: as faíscas vivas, onde o cursor estava no quadro anterior
+        # e quanto ele andou desde a última faísca. Ver ``_avancar_rastro``.
+        self._rastro: list[_Faisca] = []
+        self._cursor_anterior: QPointF | None = None
+        self._percorrido = 0.0
+        self._sorteio_rastro = random.Random(0)
 
     # -- configuração
     def definir_cursor(self, ponto: QPointF | None, *, sobre_clicavel: bool = False) -> None:
@@ -559,7 +596,7 @@ class Cenario:
         alvo_forca = 1.0 if self._cursor is not None else 0.0
         if abs(self._forca_luz - alvo_forca) > 0.001:
             return True
-        if self._ondas:
+        if self._ondas or self._rastro:
             return True
         if self._cursor is None:
             return False
@@ -609,12 +646,78 @@ class Cenario:
             self._raio_anel += (alvo_raio - self._raio_anel) * passo_anel
         self._paralaxe += (self._alvo_paralaxe() - self._paralaxe) * passo
         self._ondas = [(c, idade + dt) for c, idade in self._ondas if idade + dt < DURACAO_ONDA]
+        self._avancar_rastro(dt)
+
+    @property
+    def faiscas(self) -> int:
+        """Quantas faíscas do rastro estão vivas."""
+        return len(self._rastro)
+
+    def _avancar_rastro(self, dt: float) -> None:
+        """Envelhece as faíscas e semeia novas no caminho que o cursor fez.
+
+        As novas nascem ao longo do segmento entre onde o cursor estava no
+        quadro anterior e onde está agora, e não todas no ponto final: um
+        movimento rápido deixa um traço, e não um tufo.
+        """
+        vivas: list[_Faisca] = []
+        for faisca in self._rastro:
+            faisca.vida -= dt
+            if faisca.vida > 0.0:
+                faisca.x += faisca.vx * dt
+                faisca.y += faisca.vy * dt
+                vivas.append(faisca)
+        self._rastro = vivas
+        if self._cursor is None:
+            self._cursor_anterior = None
+            self._percorrido = 0.0
+            return
+        if self._cursor_anterior is not None:
+            falta = self._cursor - self._cursor_anterior
+            self._percorrido += math.hypot(falta.x(), falta.y())
+            quantas = int(self._percorrido // PASSO_RASTRO)
+            if quantas:
+                self._percorrido -= quantas * PASSO_RASTRO
+                semeadas = min(quantas, SEMEADURA_MAXIMA)
+                for k in range(semeadas):
+                    self._semear(self._cursor_anterior + falta * ((k + 1) / semeadas))
+                # Passou do teto: saem as mais velhas, que já estão sumindo.
+                excesso = len(self._rastro) - MAXIMO_RASTRO
+                if excesso > 0:
+                    del self._rastro[:excesso]
+        self._cursor_anterior = QPointF(self._cursor)
+
+    def _semear(self, ponto: QPointF) -> None:
+        """Uma faísca no material do jogo: ela se move como as partículas dele."""
+        r = self._sorteio_rastro
+        modo = self._efetiva.particulas
+        if modo == "brasas":
+            vx, vy = r.uniform(-14, 14), r.uniform(-46, -22)
+        elif modo == "motes":
+            vx, vy = r.uniform(-9, 9), r.uniform(-24, -8)
+        elif modo == "neve":
+            vx, vy = r.uniform(-12, 6), r.uniform(24, 52)
+        elif modo == "dados":
+            vx, vy = 0.0, r.uniform(90, 200)
+        else:
+            # Poeira, estática ou nenhuma partícula: um brilho que se espalha.
+            vx, vy = r.uniform(-16, 16), r.uniform(-16, 16)
+        tamanho = r.uniform(5.0, 11.0) if modo == "dados" else r.uniform(1.0, 2.1)
+        duracao = r.uniform(*VIDA_RASTRO)
+        self._rastro.append(
+            _Faisca(
+                ponto.x() + r.uniform(-3, 3), ponto.y() + r.uniform(-3, 3),
+                vx, vy, tamanho, duracao, duracao,
+            )
+        )
     def definir(self, tema: GameTheme, atmosfera: Atmosfera) -> None:
         self._tema = tema
         self._atmosfera = atmosfera
         self._sorteio_rajada = random.Random(atmosfera.semente)
         self._proxima_rajada = self._sorteio_rajada.uniform(*ESPERA_RAJADA)
         self._rajada = None
+        self._sorteio_rastro = random.Random(atmosfera.semente * 3)
+        self._rastro.clear()
         self._invalidar()
         self._faixas.clear()
 
@@ -688,10 +791,22 @@ class Cenario:
             return
         antes = self._caixas_vivas()
         luz_antes = self._caixa_luz()
+        onde_estava, forca_antes = QPointF(self._luz), self._forca_luz
         self._t += dt
         self._seguir_cursor(dt)
         luz_agora = self._caixa_luz()
-        self._luz_suja = [c for c in (luz_antes, luz_agora) if c is not None]
+        andou = self._luz - onde_estava
+        if (
+            abs(andou.x()) + abs(andou.y()) < LUZ_PARADA
+            and abs(self._forca_luz - forca_antes) < 1e-4
+        ):
+            # Parada e acesa por igual, a luz não tem o que repintar. Com o
+            # cursor descansando sobre a janela — lendo a conversa, com a mão no
+            # mouse —, a caixa inteira dela era repintada a cada quadro das
+            # partículas, trinta vezes por segundo, idêntica.
+            self._luz_suja = []
+        else:
+            self._luz_suja = [c for c in (luz_antes, luz_agora) if c is not None]
         if self._enxame is not None:
             # O cursor está em coordenadas da janela; o enxame é desenhado
             # deslocado pelo parallax, e é contra ESSA posição que ele foge.
@@ -717,6 +832,14 @@ class Cenario:
         for centro, _ in self._ondas:
             r = RAIO_ONDA + 4
             caixas.append(QRectF(centro.x() - r, centro.y() - r, 2 * r, 2 * r).toAlignedRect())
+        dados = self._efetiva.particulas == "dados"
+        for faisca in self._rastro:
+            if dados:
+                area = QRectF(faisca.x, faisca.y, 1.4, faisca.tamanho)
+            else:
+                raio = faisca.tamanho * 3.2
+                area = QRectF(faisca.x - raio, faisca.y - raio, raio * 2, raio * 2)
+            caixas.append(area.adjusted(-3, -3, 3, 3).toAlignedRect())
         if self._faixas:
             largura = self._tamanho[0] or 1
             for y, altura, _ in self._faixas:
@@ -832,6 +955,9 @@ class Cenario:
         if self._enxame is not None and self.movimento:
             self._enxame.pintar(pintor, cor_viva, self._paralaxe)
 
+        if self._rastro and self.movimento:
+            self._pintar_rastro(pintor, cor_viva)
+
         if self.movimento:
             self._pintar_anel_e_ondas(pintor)
 
@@ -860,6 +986,26 @@ class Cenario:
                 c.setAlphaF(min(1.0, forca))
                 pintor.fillRect(QRectF(0, 0, largura, altura), c)
                 pintor.restore()
+
+    def _pintar_rastro(self, pintor: QPainter, cor: QColor) -> None:
+        """As faíscas do rastro: somem apagando e encolhendo, como brasa."""
+        dados = self._efetiva.particulas == "dados"
+        desenho = desenho_de_particula(dados, cor)
+        fonte = QRectF(desenho.rect())
+        pintor.save()
+        pintor.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
+        pintor.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        for faisca in self._rastro:
+            resta = faisca.vida / faisca.duracao
+            pintor.setOpacity(min(1.0, BRILHO_RASTRO * resta * self._intensidade))
+            if dados:
+                pintor.drawPixmap(QRectF(faisca.x, faisca.y, 1.4, faisca.tamanho), desenho, fonte)
+                continue
+            raio = faisca.tamanho * 3.2 * (0.6 + 0.4 * resta)
+            pintor.drawPixmap(
+                QRectF(faisca.x - raio, faisca.y - raio, raio * 2, raio * 2), desenho, fonte
+            )
+        pintor.restore()
 
     def _pintar_anel_e_ondas(self, pintor: QPainter) -> None:
         """O anel que persegue o cursor e as ondas dos cliques, no vidro."""

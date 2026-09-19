@@ -17,6 +17,7 @@ import logging
 import queue
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -26,14 +27,18 @@ from PySide6.QtCore import (
     QPoint,
     QPointF,
     QPropertyAnimation,
+    QRectF,
+    QSizeF,
     Qt,
     QTimer,
 )
 from PySide6.QtGui import (
+    QColor,
     QFont,
     QFontDatabase,
     QFontMetrics,
     QPainter,
+    QPainterPath,
 )
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -71,12 +76,15 @@ from .caderno import JanelaCaderno
 from .componentes import (
     CampoSelecao,
     Desvanecer,
+    LuzDoCursor,
     TransicaoDeTema,
+    acender_borda,
+    definir_fonte_da_luz,
     definir_movimento_reduzido,
 )
 from .cursor import CampoMagnetico, RastreadorDeCursor
 from .dialogo import avisar
-from .estilo import folha_da_janela
+from .estilo import RAIO_PADRAO, RAIO_POR_FORMA, folha_da_janela
 from .moldura import (
     GripsRedimensionamento,
     aplicar_cantos_do_sistema,
@@ -114,12 +122,19 @@ class Sobreposicao(QWidget):
     """Vidro do aparelho: a camada que fica na frente de tudo.
 
     Transparente a eventos de mouse, para não roubar cliques. É o único widget
-    que repinta a cada quadro.
+    que repinta a cada quadro. ``pintar_bordas`` desenha, por cima do vidro, os
+    contornos que a luz do cursor acende nos painéis da janela.
     """
 
-    def __init__(self, cenario: Cenario, parent: QWidget) -> None:
+    def __init__(
+        self,
+        cenario: Cenario,
+        parent: QWidget,
+        pintar_bordas: Callable[[QPainter], None] | None = None,
+    ) -> None:
         super().__init__(parent)
         self._cenario = cenario
+        self._pintar_bordas = pintar_bordas
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -128,6 +143,8 @@ class Sobreposicao(QWidget):
         pintor = QPainter(self)
         pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
         self._cenario.pintar_sobreposicao(pintor, self.width(), self.height())
+        if self._pintar_bordas is not None:
+            self._pintar_bordas(pintor)
         pintor.end()
 
 
@@ -176,6 +193,7 @@ class Janela(QWidget):
         # A mesma régua para os botões de todas as janelas: sem atmosfera, a luz
         # dentro deles fica parada e nenhum é puxado pelo cursor.
         definir_movimento_reduzido(lambda: self._intensidade_atmosfera <= 0.0)
+        definir_fonte_da_luz(self._luz_do_cursor)
         # O total que a lateral mostra agora. É contra ele que uma palavra
         # salva pela sessão se mede, para o sinal dizer QUANTAS entraram.
         self._total_no_caderno = 0
@@ -201,7 +219,7 @@ class Janela(QWidget):
 
         self._configurar_janela()
         self._montar()
-        self._sobreposicao = Sobreposicao(self._cenario, self)
+        self._sobreposicao = Sobreposicao(self._cenario, self, self._pintar_bordas_de_luz)
         self._sobreposicao.setGeometry(self.rect())
         self._sobreposicao.raise_()
         # As alças vêm depois da sobreposição: precisam do mouse, e ela é
@@ -572,9 +590,10 @@ class Janela(QWidget):
         )
         self.setStyleSheet(folha_da_janela(self._tema, self._atmosfera.forma))
         self._posicionar_veu()
+        raio = RAIO_POR_FORMA.get(self._atmosfera.forma, RAIO_PADRAO)
         for campo in self.campos.values():
             campo.definir_cor_seta(t.text_muted)
-            campo.definir_cor_luz(t.primary)
+            campo.definir_cor_luz(t.primary, raio_borda=raio)
         self._atualizar_pilula()
         self._campainha.aplicar_tema()
         if self._capsula is not None:
@@ -778,16 +797,59 @@ class Janela(QWidget):
         regiao = self._cenario.regiao_suja()
         if regiao is None:
             self._sobreposicao.update()
-        elif not regiao.isEmpty():
-            self._sobreposicao.update(regiao)
-        # A luz do cursor mora no FUNDO da janela: repintá-la é repintar a janela
-        # naquela região, o que leva junto os painéis e o vidro da frente.
-        luz = self._cenario.regiao_da_luz()
-        if not luz.isEmpty():
-            self.update(luz)
+        else:
+            # A luz do cursor mora no FUNDO da janela: repintá-la é repintar a
+            # janela naquela região, o que leva junto os painéis e o vidro da
+            # frente. E o vidro é translúcido: repintar um pedaço dele já era
+            # repintar tudo o que está atrás. Por isso um pedido só, com as duas
+            # regiões unidas — as caixinhas de partícula e de faísca que caem
+            # dentro da caixa da luz somem nela. A área é a mesma, em muito menos
+            # retângulos, e cada retângulo a mais é um recorte a mais em cada
+            # desenho de cada widget embaixo dele.
+            regiao = regiao.united(self._cenario.regiao_da_luz())
+            if not regiao.isEmpty():
+                self.update(regiao)
         # Assentada a luz, o passo volta ao de repouso — e, num ambiente sem
         # partícula, o relógio para, mesmo com o mouse parado sobre a janela.
         self._relogios.sincronizar_animacao()
+
+    def _luz_do_cursor(self) -> LuzDoCursor | None:
+        """A luz que anda pelo fundo, para os componentes acenderem as bordas.
+
+        A força já vem multiplicada pela intensidade da atmosfera: desligada,
+        ela é zero, e a luz não existe — nem para as bordas.
+        """
+        ponto, forca = self._cenario.luz
+        forca *= self._intensidade_atmosfera
+        if forca <= 0.01:
+            return None
+        return LuzDoCursor(self, ponto, forca, QColor(self._tema.accent))
+
+    def _pintar_bordas_de_luz(self, pintor: QPainter) -> None:
+        """Os contornos dos painéis, acesos pela luz do cursor, no vidro da janela.
+
+        O painel da conversa e o campo de texto não têm contorno em repouso —
+        são superfícies translúcidas sobre a atmosfera — e é justamente isso
+        que a luz revela quando o cursor se aproxima. Desenhados no vidro, e
+        não por eles: a folha de estilo pinta as duas superfícies, e o vidro é
+        a camada que já repinta junto com a luz.
+        """
+        raio = RAIO_POR_FORMA.get(self._atmosfera.forma, RAIO_PADRAO)
+        for painel, canto in ((self.conversa, raio + 4), (self.entrada_texto, raio + 2)):
+            if not painel.isVisible():
+                continue
+            caixa = QRectF(
+                QPointF(painel.mapTo(self, QPoint(0, 0))), QSizeF(painel.size())
+            ).adjusted(0.5, 0.5, -0.5, -0.5)
+            contorno = QPainterPath()
+            contorno.addRoundedRect(caixa, canto, canto)
+            acender_borda(pintor, self._sobreposicao, contorno)
+        # O fio que separa a coluna lateral do palco.
+        if self.coluna_lateral.isVisible():
+            topo = self.coluna_lateral.mapTo(self, QPoint(self.coluna_lateral.width(), 0))
+            fio = QPainterPath(QPointF(topo.x() - 0.5, topo.y()))
+            fio.lineTo(QPointF(topo.x() - 0.5, topo.y() + self.coluna_lateral.height()))
+            acender_borda(pintor, self._sobreposicao, fio, largura=1.6)
 
     def _frequencia_da_tela(self) -> float:
         tela = self.screen()
