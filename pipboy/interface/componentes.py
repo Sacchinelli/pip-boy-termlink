@@ -1542,6 +1542,7 @@ class Bolha(QFrame):
         contorno: str = "",
         acento: str = "",
         perguntavel: bool = False,
+        dica_da_palavra: Callable[[str], str] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -1553,6 +1554,7 @@ class Bolha(QFrame):
         self._acento = acento or cor_texto
         self._palavras = [achado.group() for achado in self._PALAVRA.finditer(texto)]
         self._acesa: int | None = None
+        self._dica_da_palavra = dica_da_palavra
 
         caixa = QVBoxLayout(self)
         caixa.setContentsMargins(15, 11, 15, 11)
@@ -1655,9 +1657,16 @@ class Bolha(QFrame):
 
     def _acender_palavra(self, referencia: str) -> None:
         acesa = int(referencia) if referencia.isdigit() else None
-        if acesa != self._acesa:
-            self._acesa = acesa
-            self._escrever()
+        if acesa == self._acesa:
+            return
+        self._acesa = acesa
+        self._escrever()
+        # A dica é da PALAVRA, e o Qt mostra a do rótulo: ela é trocada a cada
+        # palavra que o cursor alcança. Vazia, o rótulo não mostra nada.
+        if self._dica_da_palavra is not None:
+            self._rotulo.setToolTip(
+                "" if acesa is None else self._dica_da_palavra(self._palavras[acesa])
+            )
 
     def _tocar_palavra(self, referencia: str) -> None:
         if referencia.isdigit():

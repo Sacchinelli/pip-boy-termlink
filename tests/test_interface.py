@@ -2852,6 +2852,28 @@ def main() -> int:
         janela.conversa._mensagens == mensagens_palavra,
         "e não envia: quem manda continua sendo quem aperta Enter",
     )
+
+    # -- A fala reconhece o que já está no caderno.
+    checar(
+        janela.dica_do_caderno("stimpaks") == "Clique para perguntar o que significa",
+        "a palavra que não está no caderno ensina o gesto",
+    )
+    store.registrar("stimpaks", "estimulantes", "Use a stimpak.", "Fallout")
+    dica_salva = janela.dica_do_caderno("STIMPAKS")
+    checar(
+        "estimulantes" in dica_salva and "do seu caderno" in dica_salva
+        and ("revisar" in dica_salva),
+        f"e a que já foi ensinada chega com a tradução e a próxima revisão ({dica_salva})",
+    )
+    fala_tutor._acender_palavra(str(indice_stimpaks))
+    checar(
+        fala_tutor._rotulo.toolTip() == dica_salva,
+        "a dica da fala é a da PALAVRA sob o cursor, trocada a cada uma",
+    )
+    fala_tutor._acender_palavra("")
+    checar(fala_tutor._rotulo.toolTip() == "", "e some quando o cursor sai dela")
+    store.remover("stimpaks")
+
     janela.entrada_texto.clear()
     janela.conversa.limpar()
     janela.campo_atmosfera.setCurrentText(atmosfera_palavras)
