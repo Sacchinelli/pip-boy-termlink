@@ -1756,7 +1756,7 @@ def main() -> int:
     # Um último passo com a luz andando: assentada, ela não pede caixa nenhuma.
     luz_pronta.definir_cursor(QPointF(652.7, 466.2))
     luz_pronta.avancar(0.033)
-    acesos, fora = vazamento(luz_pronta._pintar_luz, list(luz_pronta.regiao_da_luz()), 1400, 1000)
+    acesos, fora = vazamento(luz_pronta.pintar_luz, list(luz_pronta.regiao_da_luz()), 1400, 1000)
     checar(
         acesos > 0 and fora == 0,
         f"a luz do cursor acende só dentro da caixa que pede ({acesos} pixels, {fora} fora)",
@@ -2319,6 +2319,109 @@ def main() -> int:
     )
     caderno_vivo.close()
     janela.campo_atmosfera.setCurrentText(atmosfera_caderno_vivo)
+    aplicacao.processEvents()
+
+    print("o histórico responde ao cursor")
+    from PySide6.QtGui import QColor as QColorHistorico
+
+    from pipboy.interface.historico import ATENUACAO_DA_LUZ
+
+    atmosfera_historico_vivo = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    aplicacao.processEvents()
+
+    # -- A luz atenuada para um fundo sem painel na frente: um terço.
+    def centro_da_luz(atenuacao: float) -> int:
+        cena = CenarioCursor()
+        cena.definir(TEMAS_CURSOR["Fallout"], so_o_cursor(atmosfera_de("Fallout")))
+        cena.redimensionar(400, 400)
+        cena.definir_cursor(QPointF(200.0, 200.0))
+        for _ in range(60):
+            cena.avancar(0.033)
+        imagem = QImage(400, 400, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem.fill(QColorHistorico("#101010"))
+        pintor = QPainter(imagem)
+        cena.pintar_luz(pintor, atenuacao=atenuacao)
+        pintor.end()
+        cor = imagem.pixelColor(200, 200)
+        return cor.red() + cor.green() + cor.blue()
+
+    cheia, atenuada = centro_da_luz(1.0), centro_da_luz(ATENUACAO_DA_LUZ)
+    checar(
+        atenuada < cheia * 0.6,
+        f"no fundo nu do histórico, a luz vem atenuada ({atenuada} contra {cheia})",
+    )
+
+    janela._trocar_jogo("Cyberpunk 2077")
+    aguardar(lambda: not janela.findChildren(DissolucaoDoTema))
+    sessao_viva = historico.iniciar_sessao(jogo="Cyberpunk 2077")
+    historico.registrar_fala(sessao_viva, autor="VOCÊ", tag="usuario", texto="what is a fixer?")
+    historico.registrar_fala(sessao_viva, autor="RELIC", tag="assistente", texto="Um intermediário.")
+    janela.abrir_historico()
+    aplicacao.processEvents()
+    visor = janela._visor_historico
+    assert visor is not None
+    vivo_historico = visor._cursor_vivo
+    checar(isinstance(vivo_historico, CursorVivo), "o histórico tem a resposta ao cursor")
+    checar(
+        visor._cenario.movimento
+        and not visor._cenario.tem_camada_viva
+        and not vivo_historico.animando,
+        "aberto e parado, o histórico não anima nada",
+    )
+
+    # -- O cursor sobre ele: luz, rastro, e a borda da sessão sob a luz.
+    item_sessao = next(iter(visor._itens_lista.values()))
+    for passo_historico in range(8):
+        mover_sobre(item_sessao, QPointF(10.0 + 20.0 * passo_historico, 12.0))
+        esperar(25)
+    checar(
+        visor._cenario.cursor is not None and vivo_historico.animando
+        and visor._cenario.faiscas > 0,
+        f"o cursor sobre o histórico acende a luz e deixa rastro ({visor._cenario.faiscas})",
+    )
+    checar(aguardar(lambda: not vivo_historico.animando), "e o relógio dele para quando tudo assenta")
+    checar(acende(item_sessao), "a sessão sob a luz acende a borda")
+
+    # -- A luz aparece no fundo liso: na parte vazia da transcrição, onde o
+    #    fundo é o que se vê.
+    vazio_falas = visor._rolagem_falas.viewport()
+    ponto_vazio = QPoint(vazio_falas.width() // 2, vazio_falas.height() * 3 // 4)
+    mover_sobre(vazio_falas, QPointF(ponto_vazio))
+    aguardar(lambda: not vivo_historico.animando)
+    ponto_fundo = vazio_falas.mapTo(visor, ponto_vazio)
+    fundo_aceso = visor.grab().toImage().pixelColor(ponto_fundo)
+    vivo_historico.esquecer()
+    fundo_apagado = visor.grab().toImage().pixelColor(ponto_fundo)
+    checar(
+        fundo_aceso != fundo_apagado,
+        f"a luz aparece no fundo do histórico ({fundo_apagado.name()} → {fundo_aceso.name()})",
+    )
+
+    # -- A atmosfera da janela principal chega ao histórico.
+    janela.campo_atmosfera.setCurrentText("Desligada")
+    aplicacao.processEvents()
+    mover_sobre(item_sessao, QPointF(20.0, 12.0))
+    checar(
+        not visor._cenario.movimento and visor._cenario.cursor is None
+        and not vivo_historico.animando,
+        "com a atmosfera desligada, o histórico também não acende nada",
+    )
+    janela.campo_atmosfera.setCurrentText(atmosfera_historico_vivo)
+    aplicacao.processEvents()
+
+    # -- Escondido com o cursor em cima, ele esquece o cursor.
+    janela.campo_atmosfera.setCurrentText("Completa")
+    aplicacao.processEvents()
+    mover_sobre(item_sessao, QPointF(30.0, 12.0))
+    visor.close()
+    aplicacao.processEvents()
+    checar(
+        visor._cenario.cursor is None and not vivo_historico.animando,
+        "fechado com o cursor em cima, o histórico esquece o cursor",
+    )
+    historico.remover_sessao(sessao_viva)
+    janela.campo_atmosfera.setCurrentText(atmosfera_historico_vivo)
     aplicacao.processEvents()
 
     print("atalhos diretos")

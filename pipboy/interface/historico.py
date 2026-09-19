@@ -48,7 +48,9 @@ from PySide6.QtWidgets import (
 
 from .. import design
 from ..historico import Fala, HistoricoStore, ResumoDeSessao
+from .atmosfera import Cenario, so_o_cursor
 from .componentes import Botao, caminho_forma
+from .cursor import CursorVivo
 from .dialogo import Caixa
 from .moldura import BarraDeTitulo, GripsRedimensionamento, aplicar_cantos_do_sistema
 from .movimento import animar_entrada
@@ -73,6 +75,10 @@ def _data_amigavel(iso: str) -> str:
     except ValueError:
         return iso
     return quando.strftime("%d/%m/%Y %H:%M")
+
+
+# O quanto da luz do cursor aparece no fundo liso do histórico. Ver paintEvent.
+ATENUACAO_DA_LUZ = 0.34
 
 
 class LinhaMarcada(QLabel):
@@ -246,6 +252,22 @@ class JanelaHistorico(QDialog):
 
         self._grips = GripsRedimensionamento(self)
         self._grips.reposicionar()
+        # A mesma resposta ao cursor do caderno e da janela principal: a luz
+        # pelo fundo, o anel, as ondas, o rastro, e as bordas acesas — a lista
+        # de sessões, que é de botões, e os dois campos de busca. O fundo
+        # continua liso; o cenário daqui existe só para o que segue o cursor, e
+        # só se mexe enquanto ele se mexe.
+        self._cenario = Cenario()
+        self._cenario.definir_intensidade(janela.intensidade_atmosfera)
+        self._cenario.movimento = janela.intensidade_atmosfera > 0.0
+        self._raio_busca = 10.0
+        self._cursor_vivo = CursorVivo(
+            self, self._cenario,
+            cor=lambda: self._janela.tema.accent,
+            bordas=lambda: [
+                (self._busca_sessoes, self._raio_busca), (self._busca, self._raio_busca),
+            ],
+        )
         self.aplicar_tema()
         self._recarregar()
 
@@ -263,6 +285,8 @@ class JanelaHistorico(QDialog):
             botao.setFont(janela.fonte("corpo_forte"))
             botao.forma = janela.atmosfera.forma
         raio = {"chanfrada": 3, "reta": 2}.get(janela.atmosfera.forma, 8)
+        self._raio_busca = float(raio + 2)
+        self._cenario.definir(t, so_o_cursor(janela.atmosfera))
         self.setStyleSheet(f"""
         QDialog {{ background: {t.screen}; }}
         QWidget {{ color: {t.primary}; }}
@@ -564,15 +588,30 @@ class JanelaHistorico(QDialog):
         self._sessao_aberta = None
         self._recarregar()
 
+    def definir_intensidade(self, valor: float) -> None:
+        """Acompanha o controle de atmosfera da janela principal."""
+        self._cenario.definir_intensidade(valor)
+        self._cenario.movimento = valor > 0.0
+        self._cursor_vivo.sincronizar()
+        self.update()
+
     # ------------------------------------------------------------- Moldura
     def resizeEvent(self, evento: Any) -> None:
         super().resizeEvent(evento)
         if hasattr(self, "_grips"):
             self._grips.reposicionar()
+        if hasattr(self, "_cursor_vivo"):
+            self._cursor_vivo.reposicionar()
 
     def showEvent(self, evento: Any) -> None:
         super().showEvent(evento)
         aplicar_cantos_do_sistema(self)
+        self._cursor_vivo.reposicionar()
+
+    def hideEvent(self, evento: Any) -> None:
+        super().hideEvent(evento)
+        # Escondido, o cursor que estava aqui não vai avisar que saiu.
+        self._cursor_vivo.esquecer()
 
     def closeEvent(self, evento: Any) -> None:
         """Fechar também desarma a busca pendente.
@@ -599,6 +638,15 @@ class JanelaHistorico(QDialog):
         pintor.setPen(Qt.PenStyle.NoPen)
         pintor.setBrush(QColor(t.screen))
         pintor.drawPath(caminho)
+        # A luz do cursor sobre o fundo liso, sem vazar pelos cantos da moldura.
+        # Atenuada: aqui não há painel translúcido na frente dela, como na
+        # janela principal e no caderno, e com a força inteira ela virava uma
+        # bola de luz sobre a transcrição. Um terço é o que atravessa o painel
+        # da conversa.
+        pintor.save()
+        pintor.setClipPath(caminho)
+        self._cenario.pintar_luz(pintor, atenuacao=ATENUACAO_DA_LUZ)
+        pintor.restore()
         caneta = QPen(QColor(t.border_forte))
         caneta.setWidthF(1.0)
         pintor.setPen(caneta)
