@@ -23,7 +23,7 @@ import math
 import time
 from collections.abc import Callable
 from itertools import pairwise
-from typing import Any
+from typing import Any, NamedTuple
 
 from PySide6.QtCore import (
     Property,
@@ -120,6 +120,75 @@ def definir_movimento_reduzido(regra: Callable[[], bool]) -> None:
 
 def movimento_reduzido() -> bool:
     return bool(_regra_do_movimento())
+
+
+# ------------------------------------------------------------- Luz do cursor
+class LuzDoCursor(NamedTuple):
+    """A luz que segue o cursor pela janela principal, como os componentes a veem."""
+
+    janela: QWidget
+    ponto: QPointF  # em coordenadas da janela
+    forca: float  # de 0 a 1, já com a intensidade da atmosfera
+    cor: QColor
+
+
+# Até onde a luz acende as bordas, em pixels. Tem de caber na caixa que a janela
+# repinta em volta da luz a cada quadro (o raio da luz, na atmosfera): uma borda
+# acesa fora dela não seria repintada quando a luz se afasta, e ficaria acesa.
+ALCANCE_BORDA = 230.0
+
+# Quem acende as bordas é a janela principal, que tem a atmosfera e o cursor:
+# ela define a fonte ao nascer, como define a regra do movimento.
+_fonte_da_luz: Callable[[], LuzDoCursor | None] = lambda: None  # noqa: E731
+
+
+def definir_fonte_da_luz(fonte: Callable[[], LuzDoCursor | None]) -> None:
+    global _fonte_da_luz
+    _fonte_da_luz = fonte
+
+
+def acender_borda(
+    pintor: QPainter,
+    widget: QWidget,
+    caminho: QPainterPath,
+    *,
+    largura: float = 1.3,
+    forca_maxima: float = 0.85,
+) -> bool:
+    """Acende o contorno ``caminho`` de ``widget`` onde a luz do cursor chega.
+
+    É o efeito das páginas que respondem ao mouse: as bordas perto do cursor
+    se acendem antes de ele tocar em nada, e a interface inteira parece
+    iluminada por ele. A luz é a MESMA que anda pelo fundo da janela, com o
+    mesmo atraso, e por isso a borda nunca adianta nem fica para trás dela.
+    Um contorno invisível em repouso também acende: a luz revela a forma.
+    Devolve se desenhou alguma coisa.
+    """
+    luz = _fonte_da_luz()
+    if luz is None or luz.forca <= 0.01 or widget.window() is not luz.janela:
+        return False
+    local = widget.mapFrom(luz.janela, luz.ponto)
+    alcance = caminho.boundingRect().adjusted(
+        -ALCANCE_BORDA, -ALCANCE_BORDA, ALCANCE_BORDA, ALCANCE_BORDA
+    )
+    if not alcance.contains(local):
+        return False
+    gradiente = QRadialGradient(local, ALCANCE_BORDA)
+    perto = QColor(luz.cor)
+    perto.setAlphaF(min(1.0, forca_maxima * luz.forca))
+    meio = QColor(perto)
+    meio.setAlphaF(perto.alphaF() * 0.35)
+    longe = QColor(perto)
+    longe.setAlphaF(0.0)
+    gradiente.setColorAt(0.0, perto)
+    gradiente.setColorAt(0.45, meio)
+    gradiente.setColorAt(1.0, longe)
+    pintor.save()
+    pintor.setBrush(Qt.BrushStyle.NoBrush)
+    pintor.setPen(QPen(QBrush(gradiente), largura))
+    pintor.drawPath(caminho)
+    pintor.restore()
+    return True
 
 
 # ---------------------------------------------------------------------- Botão
@@ -467,6 +536,8 @@ class Botao(QAbstractButton):
             pintor.setPen(caneta)
             pintor.setBrush(Qt.BrushStyle.NoBrush)
             pintor.drawPath(caminho)
+        if self.isEnabled():
+            acender_borda(pintor, self, caminho)
 
         # Realce interno aditivo: um véu uniforme que dá volume e, por cima dele,
         # uma luz que acompanha o cursor DENTRO do botão — o ponto que ele toca
@@ -826,6 +897,8 @@ class CampoSelecao(QComboBox):
         super().__init__(parent)
         self._cor_seta = QColor("#888888")
         self._cor_luz = QColor("#888888")
+        # O canto que a folha de estilo dá à caixa: a borda acesa segue o mesmo.
+        self._raio_borda = 8.0
         self._cursor_local: QPointF | None = None
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         # O seletor também acende sob o cursor, como os botões: numa coluna de
@@ -839,8 +912,10 @@ class CampoSelecao(QComboBox):
         self._cor_seta = QColor(cor)
         self.update()
 
-    def definir_cor_luz(self, cor: str) -> None:
+    def definir_cor_luz(self, cor: str, raio_borda: float | None = None) -> None:
         self._cor_luz = QColor(cor)
+        if raio_borda is not None:
+            self._raio_borda = raio_borda
         self.update()
 
     @property
@@ -886,6 +961,13 @@ class CampoSelecao(QComboBox):
             pintor.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
             pintor.fillRect(self.rect(), luz)
             pintor.restore()
+        if self.isEnabled():
+            contorno = QPainterPath()
+            contorno.addRoundedRect(
+                QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5),
+                self._raio_borda, self._raio_borda,
+            )
+            acender_borda(pintor, self, contorno)
         caneta = QPen(self._cor_seta)
         caneta.setWidthF(1.6)
         caneta.setCapStyle(Qt.PenCapStyle.RoundCap)
@@ -1362,6 +1444,7 @@ class Bolha(QFrame):
             pintor.setPen(caneta)
             pintor.setBrush(Qt.BrushStyle.NoBrush)
             pintor.drawPath(caminho)
+        acender_borda(pintor, self, caminho)
         pintor.end()
 
     def animar_entrada(self) -> None:

@@ -49,7 +49,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import design
-from .componentes import Holofote, caminho_forma
+from .componentes import Holofote, acender_borda, caminho_forma
 from .movimento import animar_entrada
 
 
@@ -259,11 +259,12 @@ class CartaoAcao(QAbstractButton):
         cor = t.accent if self._destaque else t.primary
         borda = design.misturar(t.border, t.accent, 0.45) if self._destaque else t.border
         focado = self.hasFocus()
+        contorno = caminho_forma(area, forma, design.RAIO)
         self._holofote.pintar(
-            pintor, caminho_forma(area, forma, design.RAIO),
-            fundo=fundo, cor=cor, borda=borda,
+            pintor, contorno, fundo=fundo, cor=cor, borda=borda,
             foco=self if focado and not self._sob_cursor else None,
         )
+        acender_borda(pintor, self, contorno)
         if focado:
             anel = QPen(QColor(design.garantir_contraste(cor, fundo, 3.0)))
             anel.setWidthF(1.6)
