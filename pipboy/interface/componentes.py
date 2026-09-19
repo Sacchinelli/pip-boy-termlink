@@ -140,14 +140,17 @@ class LuzDoCursor(NamedTuple):
 # acesa fora dela não seria repintada quando a luz se afasta, e ficaria acesa.
 ALCANCE_BORDA = 230.0
 
-# Quem acende as bordas é a janela principal, que tem a atmosfera e o cursor:
-# ela define a fonte ao nascer, como define a regra do movimento.
-_fonte_da_luz: Callable[[], LuzDoCursor | None] = lambda: None  # noqa: E731
+# Cada janela com luz própria registra de onde ela vem, e acende só os seus
+# widgets: a luz de uma janela não tem por que acender os botões de outra.
+_fontes_da_luz: dict[QWidget, Callable[[], LuzDoCursor | None]] = {}
 
 
-def definir_fonte_da_luz(fonte: Callable[[], LuzDoCursor | None]) -> None:
-    global _fonte_da_luz
-    _fonte_da_luz = fonte
+def definir_fonte_da_luz(janela: QWidget, fonte: Callable[[], LuzDoCursor | None]) -> None:
+    """``janela`` passa a acender as bordas dos seus widgets com a luz de ``fonte``."""
+    novo = janela not in _fontes_da_luz
+    _fontes_da_luz[janela] = fonte
+    if novo:
+        janela.destroyed.connect(lambda *_: _fontes_da_luz.pop(janela, None))
 
 
 def acender_borda(
@@ -167,8 +170,9 @@ def acender_borda(
     Um contorno invisível em repouso também acende: a luz revela a forma.
     Devolve se desenhou alguma coisa.
     """
-    luz = _fonte_da_luz()
-    if luz is None or luz.forca <= 0.01 or widget.window() is not luz.janela:
+    fonte = _fontes_da_luz.get(widget.window())
+    luz = fonte() if fonte is not None else None
+    if luz is None or luz.forca <= 0.01:
         return False
     local = widget.mapFrom(luz.janela, luz.ponto)
     alcance = caminho.boundingRect().adjusted(

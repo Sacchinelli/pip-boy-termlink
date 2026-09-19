@@ -67,17 +67,18 @@ from ..vocabulary import (
     Entrada,
     VocabularyStore,
 )
-from .atmosfera import Cenario
+from .atmosfera import Cenario, so_o_cursor
 from .componentes import (
     Botao,
     BotaoDeEstado,
     CampoSelecao,
     Desvanecer,
     Holofote,
+    acender_borda,
     caminho_forma,
     css_campo_selecao,
 )
-from .cursor import CampoMagnetico, RastreadorDeCursor
+from .cursor import CursorVivo
 from .dialogo import avisar, confirmar_remocao, pedir_correcao
 from .moldura import (
     BarraDeTitulo,
@@ -448,14 +449,16 @@ class CartaoTermo(QFrame):
         pintor = QPainter(self)
         pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
         area = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        contorno = caminho_forma(area, self._forma, design.RAIO)
         self._holofote.pintar(
             pintor,
-            caminho_forma(area, self._forma, design.RAIO),
+            contorno,
             fundo=self._fundo,
             cor=self._tema.primary,
             borda=self._tema.border,
             foco=None if self._sob_cursor else self._foco,
         )
+        acender_borda(pintor, self, contorno)
         pintor.end()
 
 
@@ -470,17 +473,20 @@ class JanelaCaderno(QDialog):
         self._jogo = ""
         self._cartoes: list[CartaoTermo] = []
 
-        # Só a camada estática do cenário: o mesmo material da janela
-        # principal, sem o relógio de quadros. Um catálogo se lê parado, e uma
-        # segunda animação a 30 fps competiria com o áudio pela CPU.
+        # O mesmo material da janela principal, sem o movimento próprio dela:
+        # nem partícula, nem tremulação, nem interferência (ver ``aplicar_tema``).
+        # Um catálogo se lê parado, e uma segunda animação a 30 fps competiria
+        # com o áudio pela CPU. O que se mexe aqui é só o que segue o cursor —
+        # a luz, o anel, as ondas, o rastro —, e só enquanto ele se mexe.
         #
         # A intensidade vem da janela, e não do padrão: parar o movimento não é
         # o mesmo que atenuar a atmosfera. Quem escolheu 'Discreta' ou
         # 'Desligada' fez isso pelos olhos, e a escolha não pode parar na porta
         # desta janela.
         self._cenario = Cenario()
-        self._cenario.movimento = False
         self._cenario.definir_intensidade(janela.intensidade_atmosfera)
+        self._cenario.movimento = janela.intensidade_atmosfera > 0.0
+        self._raio_busca = 10.0
 
         self.setWindowTitle("Caderno de vocabulário")
         # A mesma moldura própria da janela principal: um caderno com barra
@@ -639,13 +645,22 @@ class JanelaCaderno(QDialog):
             self.botao_importar, self.botao_fechar,
         ):
             botao.tornar_magnetico(4)
-        self._campo_magnetico = CampoMagnetico(self)
-        self._rastreador = RastreadorDeCursor(self, self._campo_magnetico.mover)
+        # A mesma resposta ao cursor da janela principal, com o cenário daqui:
+        # luz, anel, ondas, rastro e as bordas dos cartões acesas por onde ele
+        # passa — e o campo de busca, que a folha de estilo pinta, aceso no vidro.
+        self._cursor_vivo = CursorVivo(
+            self, self._cenario,
+            cor=lambda: self._janela.tema.accent,
+            bordas=lambda: [(self.busca, self._raio_busca)],
+        )
+        self._campo_magnetico = self._cursor_vivo.campo
 
     # ---------------------------------------------------------------- tema
     def definir_intensidade(self, valor: float) -> None:
         """Acompanha o controle de atmosfera da janela principal."""
         self._cenario.definir_intensidade(valor)
+        self._cenario.movimento = valor > 0.0
+        self._cursor_vivo.sincronizar()
         self.update()
 
     def aplicar_tema(self) -> None:
@@ -656,7 +671,8 @@ class JanelaCaderno(QDialog):
 
         # `definir` recalcula a receita preservando a intensidade corrente, então
         # trocar de jogo não devolve a atmosfera cheia a quem a tinha atenuado.
-        self._cenario.definir(t, janela.atmosfera)
+        self._cenario.definir(t, so_o_cursor(janela.atmosfera))
+        self._raio_busca = float(raio + 2)
         self.barra_titulo.aplicar_tema()
         self.titulo.setFont(janela.fonte("display", ui=False))
         self.resumo.setFont(janela.fonte("legenda"))
@@ -668,6 +684,7 @@ class JanelaCaderno(QDialog):
             chip.forma = forma
         self.campo_jogo.setFont(janela.fonte("legenda"))
         self.campo_jogo.definir_cor_seta(t.text_muted)
+        self.campo_jogo.definir_cor_luz(t.primary, raio_borda=raio)
         for botao in (
             self.botao_progresso, self.botao_revisar, self.botao_exportar,
             self.botao_importar, self.botao_fechar,
@@ -714,6 +731,8 @@ class JanelaCaderno(QDialog):
         self._posicionar_veu()
         if hasattr(self, "_grips"):
             self._grips.reposicionar()
+        if hasattr(self, "_cursor_vivo"):
+            self._cursor_vivo.reposicionar()
 
     def showEvent(self, evento: Any) -> None:
         super().showEvent(evento)
@@ -722,6 +741,14 @@ class JanelaCaderno(QDialog):
         # caderno é uma troca de lugar, e a cascata diz de onde para onde.
         # Reabrir anima de novo; um Ctrl+B com ele já aberto, não.
         animar_entrada(self._cartoes[:CASCATA_MAXIMA], reduzir=self._movimento_reduzido())
+        self._cursor_vivo.reposicionar()
+
+    def hideEvent(self, evento: Any) -> None:
+        super().hideEvent(evento)
+        # Escondido, o caderno não tem para quem desenhar, e o cursor que estava
+        # nele não vai avisar que saiu: tudo que o seguia se apaga, e o relógio
+        # para.
+        self._cursor_vivo.esquecer()
 
     def _movimento_reduzido(self) -> bool:
         # A mesma régua da janela principal: animação também é atmosfera.
@@ -740,18 +767,21 @@ class JanelaCaderno(QDialog):
         super().closeEvent(evento)
 
     def paintEvent(self, _evento: Any) -> None:
-        """Fundo + vidro, as duas camadas estáticas do cenário.
+        """Fundo + vidro, as camadas do cenário atrás dos cartões.
 
         Só o fundo deixava o caderno parecendo outro programa: no Fallout, a
         janela principal está dentro de um tubo de raios catódicos e o caderno
-        era um retângulo liso. Como ``movimento`` é falso, ``pintar_sobreposicao``
-        desenha apenas o pixmap cacheado de grão, varredura e vinheta — sem
-        partícula, sem tremulação e sem custo por quadro.
+        era um retângulo liso. Sem camada viva na receita, ``pintar_sobreposicao``
+        desenha só o pixmap cacheado de grão, varredura e vinheta. A luz do
+        cursor vem no fundo; o anel, as ondas e o rastro, no vidro do
+        ``CursorVivo``, por cima dos cartões.
         """
         pintor = QPainter(self)
         pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
         self._cenario.pintar_fundo(pintor, self.width(), self.height())
-        self._cenario.pintar_sobreposicao(pintor, self.width(), self.height())
+        self._cenario.pintar_sobreposicao(
+            pintor, self.width(), self.height(), com_cursor=False
+        )
         pintor.end()
 
     # -------------------------------------------------------------- conteúdo

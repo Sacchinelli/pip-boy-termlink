@@ -224,6 +224,16 @@ VIDA_RASTRO: Final = (0.35, 0.75)
 BRILHO_RASTRO: Final = 0.75
 
 
+def so_o_cursor(atmosfera: Atmosfera) -> Atmosfera:
+    """A receita sem movimento próprio: sem partícula, tremulação ou interferência.
+
+    Para as janelas que só se mexem quando o cursor mexe: o material do jogo
+    fica — o fundo, o vidro, a cor da luz, e o tipo de partícula, que é o que o
+    rastro do cursor imita —, e a janela fica parada até alguém passar por ela.
+    """
+    return replace(atmosfera, densidade=0, tremulacao=0.0, interferencia=0.0)
+
+
 # ------------------------------------------------------------------- Partículas
 # Os desenhos prontos de partícula, por forma e cor. Ver ``desenho_de_particula``.
 _DESENHOS: dict[tuple[bool, str], QPixmap] = {}
@@ -543,6 +553,20 @@ class Cenario:
         self._cursor = None if ponto is None else QPointF(ponto)
         self._sobre_clicavel = sobre_clicavel and ponto is not None
 
+    def apagar_cursor(self) -> None:
+        """Esquece o cursor de uma vez: luz apagada, sem anel, onda ou faísca.
+
+        Para a janela que se esconde com o cursor em cima dela: fechada, ela
+        não recebe o aviso de que o cursor saiu, e reaberta mostraria a luz
+        acesa onde ele estava da última vez.
+        """
+        self._cursor = None
+        self._cursor_anterior = None
+        self._forca_luz = 0.0
+        self._ondas.clear()
+        self._rastro.clear()
+        self._luz_suja = []
+
     def pulsar(self, ponto: QPointF) -> None:
         """Uma onda sai do ponto do clique: a resposta imediata a qualquer toque."""
         if self.movimento:
@@ -565,6 +589,10 @@ class Cenario:
     def luz(self) -> tuple[QPointF, float]:
         """Posição e força atuais da luz que segue o cursor."""
         return QPointF(self._luz), self._forca_luz
+
+    @property
+    def intensidade(self) -> float:
+        return self._intensidade
 
     @property
     def paralaxe(self) -> QPointF:
@@ -880,8 +908,12 @@ class Cenario:
         interferência: para eles o relógio de quadros repintava,
         indefinidamente, uma imagem idêntica à anterior.
         """
+        # O enxame, e não o nome das partículas: com densidade zero — a receita
+        # só do cursor, ou uma intensidade tão baixa que zera a contagem — o
+        # nome continua lá e nenhuma partícula existe, e o relógio corria por
+        # nada.
         a = self._efetiva
-        return bool(a.particulas) or a.tremulacao > 0 or a.interferencia > 0
+        return self._enxame is not None or a.tremulacao > 0 or a.interferencia > 0
 
     @property
     def tremendo(self) -> bool:
@@ -933,7 +965,21 @@ class Cenario:
         if self._forca_luz > 0.001 and self.movimento:
             self._pintar_luz(pintor)
 
-    def pintar_sobreposicao(self, pintor: QPainter, largura: int, altura: int) -> None:
+    def pintar_cursor(self, pintor: QPainter) -> None:
+        """O que acompanha o cursor no vidro: o rastro, o anel e as ondas.
+
+        Separado do resto do vidro para quem desenha o vidro estático por
+        baixo do conteúdo e quer o cursor por cima dele, como o caderno.
+        """
+        if self._tema is None or not self.movimento:
+            return
+        if self._rastro:
+            self._pintar_rastro(pintor, QColor(self._efetiva.cor_viva or self._tema.accent))
+        self._pintar_anel_e_ondas(pintor)
+
+    def pintar_sobreposicao(
+        self, pintor: QPainter, largura: int, altura: int, *, com_cursor: bool = True
+    ) -> None:
         """Camada de vidro, desenhada POR CIMA de todo o conteúdo.
 
         É aqui que mora a diferença entre "um fundo bonito atrás da janela" e
@@ -955,11 +1001,8 @@ class Cenario:
         if self._enxame is not None and self.movimento:
             self._enxame.pintar(pintor, cor_viva, self._paralaxe)
 
-        if self._rastro and self.movimento:
-            self._pintar_rastro(pintor, cor_viva)
-
-        if self.movimento:
-            self._pintar_anel_e_ondas(pintor)
+        if com_cursor:
+            self.pintar_cursor(pintor)
 
         if self._faixas and self.movimento:
             pintor.save()

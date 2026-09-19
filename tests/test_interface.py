@@ -2192,6 +2192,135 @@ def main() -> int:
     janela.campo_atmosfera.setCurrentText(atmosfera_decifra)
     aplicacao.processEvents()
 
+    print("o caderno responde ao cursor")
+    from dataclasses import replace as substituir
+
+    from pipboy.interface.atmosfera import so_o_cursor
+    from pipboy.interface.cursor import CursorVivo
+
+    atmosfera_caderno_vivo = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    aplicacao.processEvents()
+
+    # -- A receita só do cursor: o material do jogo fica, o movimento próprio sai.
+    receita = so_o_cursor(atmosfera_de("The Witcher 3"))
+    checar(
+        receita.particulas == "brasas" and receita.densidade == 0
+        and receita.tremulacao == 0.0 and receita.interferencia == 0.0,
+        "a receita só do cursor guarda o material (brasas, para o rastro) e tira o movimento",
+    )
+    parado = CenarioCursor()
+    parado.definir(TEMAS_CURSOR["Fallout"], so_o_cursor(atmosfera_de("Fallout")))
+    parado.redimensionar(800, 600)
+    checar(
+        not parado.tem_camada_viva and not parado.precisa_quadros,
+        "com ela, parado, nem o Fallout pede quadro",
+    )
+    rala = CenarioCursor()
+    rala.definir(TEMAS_CURSOR["Elden Ring"], substituir(atmosfera_de("Elden Ring"), densidade=0))
+    checar(
+        not rala.tem_camada_viva,
+        "partícula com densidade zero não é camada viva: o relógio corria por nada",
+    )
+
+    # -- O caderno aberto e parado não anima nada.
+    janela._trocar_jogo("The Witcher 3")
+    aguardar(lambda: not janela.findChildren(DissolucaoDoTema))
+    janela.abrir_caderno()
+    aplicacao.processEvents()
+    caderno_vivo = janela._caderno
+    assert caderno_vivo is not None
+    vivo = caderno_vivo._cursor_vivo
+    checar(isinstance(vivo, CursorVivo), "o caderno tem a resposta ao cursor da janela principal")
+    checar(
+        caderno_vivo._cenario.movimento
+        and not caderno_vivo._cenario.tem_camada_viva
+        and not vivo.animando,
+        "aberto e parado, o caderno não anima nada",
+    )
+    filhos_caderno = [w for w in caderno_vivo.children() if isinstance(w, QWidget)]
+    checar(
+        vivo.vidro.geometry() == caderno_vivo.rect()
+        and vivo.vidro.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        and filhos_caderno[-1] is vivo.vidro,
+        "o vidro do cursor cobre o caderno, por cima de tudo, sem roubar clique",
+    )
+
+    # -- O cursor sobre o caderno: luz, relógio e rastro, na janela dele.
+    viewport_caderno = caderno_vivo.rolagem.viewport()
+    for passo_caderno in range(10):
+        mover_sobre(viewport_caderno, QPointF(40.0 + 30.0 * passo_caderno, 30.0 + 8.0 * passo_caderno))
+        # Um quadro entre um movimento e outro: o rastro nasce do caminho
+        # que o cursor fez de um quadro para o seguinte.
+        esperar(25)
+    checar(
+        caderno_vivo._cenario.cursor is not None and vivo.animando,
+        "o cursor sobre o caderno acende a luz dele, e o relógio corre",
+    )
+    checar(caderno_vivo._cenario.faiscas > 0, f"e ele deixa rastro ({caderno_vivo._cenario.faiscas})")
+    checar(
+        vivo._relogio.timerType() == Qt.TimerType.PreciseTimer,
+        "com relógio preciso, como o da janela principal",
+    )
+
+    # -- A borda do cartão sob a luz acende; parado tudo, o relógio para.
+    cartao_vivo = caderno_vivo._cartoes[0]
+    mover_sobre(cartao_vivo, QPointF(cartao_vivo.width() / 2, cartao_vivo.height() / 2))
+    checar(
+        aguardar(lambda: not vivo.animando),
+        "parado o cursor e assentada a luz, o relógio do caderno para",
+    )
+    checar(acende(cartao_vivo), "o cartão sob a luz do caderno acende a borda")
+    # E a borda acesa aparece no próprio cartão: o fio de cima, logo acima da luz.
+    fio_de_cima = QPoint(cartao_vivo.width() // 2, 0)
+    cartao_aceso = cartao_vivo.grab().toImage().pixelColor(fio_de_cima)
+    vivo.esquecer()
+    cartao_apagado = cartao_vivo.grab().toImage().pixelColor(fio_de_cima)
+    checar(
+        cartao_aceso != cartao_apagado,
+        f"e aparece no próprio cartão ({cartao_apagado.name()} → {cartao_aceso.name()})",
+    )
+    mover_sobre(cartao_vivo, QPointF(cartao_vivo.width() / 2, cartao_vivo.height() / 2))
+
+    # -- Cada clique solta uma onda, como na janela principal.
+    ponto_clique_caderno = QPointF(12.0, 12.0)
+    QApplication.sendEvent(
+        viewport_caderno,
+        MovimentoMouse(
+            QEvent.Type.MouseButtonPress, ponto_clique_caderno,
+            QPointF(viewport_caderno.mapToGlobal(ponto_clique_caderno)),
+            Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+        ),
+    )
+    checar(caderno_vivo._cenario.ondas == 1, "um clique no caderno solta uma onda")
+
+    # -- Fechado com o cursor em cima, ele não recebe o aviso de que o cursor
+    #    saiu: tudo que o seguia se apaga na hora.
+    caderno_vivo.close()
+    aplicacao.processEvents()
+    checar(
+        caderno_vivo._cenario.cursor is None
+        and caderno_vivo._cenario.luz[1] == 0.0
+        and caderno_vivo._cenario.ondas == 0
+        and caderno_vivo._cenario.faiscas == 0
+        and not vivo.animando,
+        "fechado com o cursor em cima, o caderno esquece o cursor na hora",
+    )
+
+    # -- Sem atmosfera, nada disso existe no caderno.
+    janela.campo_atmosfera.setCurrentText("Desligada")
+    aplicacao.processEvents()
+    janela.abrir_caderno()
+    aplicacao.processEvents()
+    mover_sobre(viewport_caderno, QPointF(50.0, 50.0))
+    checar(
+        caderno_vivo._cenario.cursor is None and not vivo.animando,
+        "com a atmosfera desligada, o cursor não acende nada no caderno",
+    )
+    caderno_vivo.close()
+    janela.campo_atmosfera.setCurrentText(atmosfera_caderno_vivo)
+    aplicacao.processEvents()
+
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()
     # nunca voltaria e a suíte penduraria. O tiro agendado é esse alguém.
