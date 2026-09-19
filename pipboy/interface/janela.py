@@ -1333,6 +1333,18 @@ class Janela(QWidget):
                 f"Áudio do jogo {'ativado' if efetivo else 'desativado'}.", Tag.SISTEMA
             )
 
+    def propor_texto(self, texto: str) -> None:
+        """Escreve ``texto`` no campo de digitação, com o foco, e NÃO envia.
+
+        As fichas de exemplo da tela inicial chegam aqui. Enviar é um gesto de
+        quem digita: abre a conversa com a API, e sem sessão só responde
+        "Inicie uma sessão".
+        """
+        # setText já leva o cursor ao fim da linha: a frase fica pronta para
+        # continuar sendo escrita, e não para ser sobrescrita.
+        self.entrada_texto.setText(texto)
+        self.entrada_texto.setFocus()
+
     def enviar_texto(self) -> None:
         texto = self.entrada_texto.text().strip()
         if not texto:

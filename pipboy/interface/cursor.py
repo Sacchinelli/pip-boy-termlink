@@ -55,9 +55,11 @@ def clicavel(widget: QWidget) -> bool:
 
 # Quanto o anel abraçando fica afastado do corpo do que abraça.
 FOLGA_ABRACO = 5.0
-# Acima disto o alvo é grande demais para abraçar — um contorno em volta de um
-# painel inteiro lê como moldura, e não como alvo —, e o anel só cresce.
-LARGURA_MAXIMA_ABRACO = 520.0
+# Acima disto o alvo é grande demais para abraçar: um contorno em volta de um
+# painel inteiro lê como moldura, e não como alvo, e o anel só cresce. A conta
+# é de ÁREA, e não de largura: uma ficha de sugestão é larga e baixa, e abraçar
+# uma ficha é exatamente o que se quer.
+AREA_MAXIMA_ABRACO = 88_000.0
 ALTURA_MAXIMA_ABRACO = 170.0
 
 
@@ -74,11 +76,13 @@ def abraco_de(widget: QWidget | None, janela: QWidget) -> tuple[QRectF, float] |
     try:
         if not widget.isVisible() or widget.window() is not janela:
             return None
+        # O corpo que o widget diz ter — o botão puxado pelo ímã, a ficha que
+        # subiu —, ou o retângulo inteiro de quem não diz nada.
+        corpo_declarado = getattr(widget, "corpo", None)
+        corpo = corpo_declarado if isinstance(corpo_declarado, QRectF) else QRectF(widget.rect())
         if isinstance(widget, Botao):
-            corpo = widget.corpo
             canto = {"chanfrada": 3.0, "reta": 2.0}.get(widget.forma, float(design.RAIO))
         else:
-            corpo = QRectF(widget.rect())
             canto = float(getattr(widget, "raio_borda", design.RAIO))
         origem = QPointF(widget.mapTo(janela, QPoint(0, 0)))
     except RuntimeError:
@@ -88,7 +92,7 @@ def abraco_de(widget: QWidget | None, janela: QWidget) -> tuple[QRectF, float] |
     caixa = corpo.translated(origem).adjusted(
         -FOLGA_ABRACO, -FOLGA_ABRACO, FOLGA_ABRACO, FOLGA_ABRACO
     )
-    if caixa.width() > LARGURA_MAXIMA_ABRACO or caixa.height() > ALTURA_MAXIMA_ABRACO:
+    if caixa.height() > ALTURA_MAXIMA_ABRACO or caixa.width() * caixa.height() > AREA_MAXIMA_ABRACO:
         return None
     return caixa, canto + FOLGA_ABRACO
 
