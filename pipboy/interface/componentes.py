@@ -19,8 +19,10 @@ Três ideias sustentam este módulo:
 
 from __future__ import annotations
 
+import html
 import math
 import random
+import re
 import time
 from collections.abc import Callable
 from itertools import pairwise
@@ -38,6 +40,7 @@ from PySide6.QtCore import (
     Qt,
     QTimer,
     QVariantAnimation,
+    Signal,
 )
 from PySide6.QtGui import (
     QBrush,
@@ -1506,7 +1509,25 @@ class Pilula(QWidget):
 
 # --------------------------------------------------------------------- Bolha
 class Bolha(QFrame):
-    """Uma fala. Forma temática, sombra, brilho de fósforo e entrada animada."""
+    """Uma fala. Forma temática, sombra, brilho de fósforo e entrada animada.
+
+    Na fala do tutor, cada palavra é um ALVO: passar o cursor acende a palavra
+    na cor de destaque, e tocá-la pergunta por ela. Em repouso não há marca
+    nenhuma — nem sublinhado, nem cor de link —, porque uma fala inteira
+    sublinhada não se lê. Quem diz que ali há algo a tocar é o cursor.
+
+    É o gesto que faltava para um tutor de idioma: a palavra desconhecida está
+    no meio da frase, e perguntar por ela exigia digitá-la de novo.
+    """
+
+    # Abaixo de três letras é artigo e preposição: perguntar por elas não
+    # ensina nada, e transformá-las em alvo só polui a fala de pontos quentes.
+    MINIMO_DA_PALAVRA = 3
+    # Letras (com acento) e o que une uma palavra composta: "going to" são
+    # duas, "self-taught" e "don't" são uma.
+    _PALAVRA = re.compile(r"[^\W\d_]+(?:['’-][^\W\d_]+)*")
+
+    palavra_tocada = Signal(str)
 
     def __init__(
         self,
@@ -1520,22 +1541,39 @@ class Bolha(QFrame):
         brilho_texto: float = 0.0,
         contorno: str = "",
         acento: str = "",
+        perguntavel: bool = False,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._fundo = QColor(fundo)
         self._contorno = QColor(contorno) if contorno else None
         self._forma = forma
+        self._texto = texto
+        self._cor_texto = cor_texto
+        self._acento = acento or cor_texto
+        self._palavras = [achado.group() for achado in self._PALAVRA.finditer(texto)]
+        self._acesa: int | None = None
 
         caixa = QVBoxLayout(self)
         caixa.setContentsMargins(15, 11, 15, 11)
 
-        rotulo = QLabel(texto)
+        rotulo = self._rotulo = QLabel(texto)
         rotulo.setWordWrap(True)
         rotulo.setFont(fonte)
         realce = design.css_selecao(fundo, acento or cor_texto, cor_texto)
         rotulo.setStyleSheet(f"color: {cor_texto}; background: transparent; {realce}")
         rotulo.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        if perguntavel and self._alvos():
+            # Selecionar continua valendo: quem quer copiar a frase copia.
+            rotulo.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+                | Qt.TextInteractionFlag.LinksAccessibleByMouse
+                | Qt.TextInteractionFlag.LinksAccessibleByKeyboard
+            )
+            rotulo.setTextFormat(Qt.TextFormat.RichText)
+            rotulo.linkHovered.connect(self._acender_palavra)
+            rotulo.linkActivated.connect(self._tocar_palavra)
+            self._escrever()
 
         # A largura precisa ser calculada: um QLabel com quebra de linha dentro
         # de um layout colapsa para a largura mínima, e a bolha sairia estreita
@@ -1580,6 +1618,50 @@ class Bolha(QFrame):
             pintor.drawPath(caminho)
         acender_borda(pintor, self, caminho)
         pintor.end()
+
+    # -- palavras que se tocam
+    def _alvos(self) -> list[int]:
+        """Os índices das palavras grandes o bastante para virar alvo."""
+        return [
+            i for i, palavra in enumerate(self._palavras)
+            if len(palavra) >= self.MINIMO_DA_PALAVRA
+        ]
+
+    @property
+    def palavra_acesa(self) -> str:
+        """A palavra sob o cursor agora, ou vazio."""
+        return "" if self._acesa is None else self._palavras[self._acesa]
+
+    def _escrever(self) -> None:
+        """Refaz o texto com cada palavra-alvo como um link sem decoração."""
+        pedacos: list[str] = []
+        fim = 0
+        alvos = set(self._alvos())
+        for indice, achado in enumerate(self._PALAVRA.finditer(self._texto)):
+            pedacos.append(html.escape(self._texto[fim:achado.start()]))
+            fim = achado.end()
+            palavra = html.escape(achado.group())
+            if indice not in alvos:
+                pedacos.append(palavra)
+                continue
+            estilo = (
+                f"color:{self._acento};text-decoration:underline;"
+                if indice == self._acesa
+                else f"color:{self._cor_texto};text-decoration:none;"
+            )
+            pedacos.append(f'<a href="{indice}" style="{estilo}">{palavra}</a>')
+        pedacos.append(html.escape(self._texto[fim:]))
+        self._rotulo.setText("".join(pedacos).replace(chr(10), "<br>"))
+
+    def _acender_palavra(self, referencia: str) -> None:
+        acesa = int(referencia) if referencia.isdigit() else None
+        if acesa != self._acesa:
+            self._acesa = acesa
+            self._escrever()
+
+    def _tocar_palavra(self, referencia: str) -> None:
+        if referencia.isdigit():
+            self.palavra_tocada.emit(self._palavras[int(referencia)])
 
     def animar_entrada(self) -> None:
         """Aparecimento suave, com o efeito descartado ao fim.
