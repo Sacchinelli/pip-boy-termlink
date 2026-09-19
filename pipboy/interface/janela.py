@@ -669,12 +669,13 @@ class Janela(QWidget):
         self._relogios.sincronizar_animacao()
         # O controle é de ACESSIBILIDADE, não de gosto: quem o baixa por causa
         # de cintilação ou baixa visão precisa que ele valha em toda superfície
-        # do programa. O caderno tem cenário próprio (sem relógio de quadros) e
-        # ficava de fora — desligar a atmosfera na janela principal continuava
-        # entregando varredura, grão e vinheta em intensidade cheia lá dentro,
-        # porque `movimento = False` só suprime as camadas VIVAS.
-        if self._caderno is not None:
-            self._caderno.definir_intensidade(self._intensidade_atmosfera)
+        # do programa. O caderno e o histórico têm cenário próprio e ficavam de
+        # fora — desligar a atmosfera na janela principal continuava entregando,
+        # lá dentro, varredura, grão e vinheta em intensidade cheia e, depois,
+        # a luz e o rastro do cursor.
+        for satelite in (self._caderno, self._visor_historico):
+            if satelite is not None:
+                satelite.definir_intensidade(self._intensidade_atmosfera)
         self.update()
         self._sobreposicao.update()
 

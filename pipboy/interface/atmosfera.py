@@ -962,8 +962,7 @@ class Cenario:
         if self._estatico is None:
             self._estatico = self._compor_estatico(largura, altura)
         pintor.drawPixmap(0, 0, self._estatico)
-        if self._forca_luz > 0.001 and self.movimento:
-            self._pintar_luz(pintor)
+        self.pintar_luz(pintor)
 
     def pintar_cursor(self, pintor: QPainter) -> None:
         """O que acompanha o cursor no vidro: o rastro, o anel e as ondas.
@@ -1084,8 +1083,13 @@ class Cenario:
             pintor.drawEllipse(centro, raio, raio)
         pintor.restore()
 
-    def _pintar_luz(self, pintor: QPainter) -> None:
+    def pintar_luz(self, pintor: QPainter, *, atenuacao: float = 1.0) -> None:
         """A luz que segue o cursor: um halo largo e um núcleo, somados.
+
+        Pública para quem tem fundo próprio e quer só a luz por cima dele, como
+        o histórico; o fundo do cenário a chama sozinho. ``atenuacao`` é para
+        quem a mostra sem painel nenhum na frente: o brilho foi medido para
+        atravessar os painéis translúcidos, e num fundo nu ele estoura.
 
         O halo tem a cor principal do tema e o núcleo, a de destaque: âmbar no
         verde do Fallout, ciano no amarelo do Cyberpunk. Uma luz da mesma cor
@@ -1094,14 +1098,14 @@ class Cenario:
         A força entra como opacidade sobre o desenho pronto: a soma é linear,
         e escalar o desenho inteiro é o mesmo que escalar cada gradiente.
         """
-        if self._tema is None:
+        if self._tema is None or self._forca_luz <= 0.001 or not self.movimento:
             return
         dispositivo = pintor.device()
         densidade = dispositivo.devicePixelRatioF() if dispositivo is not None else 1.0
         desenho = self._desenho_da_luz(densidade)
         pintor.save()
         pintor.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
-        pintor.setOpacity(min(1.0, self._forca_luz * self._intensidade))
+        pintor.setOpacity(min(1.0, self._forca_luz * self._intensidade * atenuacao))
         pintor.drawPixmap(
             QPointF(self._luz.x() - RAIO_LUZ, self._luz.y() - RAIO_LUZ), desenho
         )
