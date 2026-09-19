@@ -2487,11 +2487,21 @@ def main() -> int:
         "o ímã puxa o botão e o contorno abraçado vai junto",
     )
 
-    # -- Grande demais para abraçar, o anel só cresce, como antes.
-    largo = BotaoIma("Largo demais", largura_min=900)
-    largo.resize(largo.sizeHint())
+    # -- Grande demais para abraçar, o anel só cresce, como antes. Um painel
+    #    inteiro: largo E alto, que é o que lê como moldura em vez de alvo.
+    largo = QWidget()
+    largo.setCursor(Qt.CursorShape.PointingHandCursor)
+    largo.resize(700, 300)
     largo.show()
-    checar(abraco_de(largo, largo) is None, "um alvo grande demais não é abraçado")
+    checar(abraco_de(largo, largo) is None, "um painel inteiro não é abraçado")
+    faixa = BotaoIma("Larga e baixa", largura_min=700)
+    faixa.resize(faixa.sizeHint())
+    faixa.show()
+    checar(
+        abraco_de(faixa, faixa) is not None,
+        "mas uma faixa larga e baixa, como uma ficha de sugestão, é",
+    )
+    faixa.deleteLater()
     crescido = CenarioCursor()
     crescido.definir(TEMAS_CURSOR["Genérico / Outro"], atmosfera_de("Genérico / Outro"))
     crescido.redimensionar(1000, 800)
@@ -2568,6 +2578,101 @@ def main() -> int:
     for temporario in (ima_abraco, largo):
         temporario.deleteLater()
     janela.campo_atmosfera.setCurrentText(atmosfera_abraco)
+    aplicacao.processEvents()
+
+    print("as sugestões se tocam")
+    from pipboy.interface.tela_inicial import FichaSugestao
+
+    atmosfera_fichas = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    aplicacao.processEvents()
+    tela_fichas = janela.conversa.tela_inicial
+    tela_fichas.atualizar()
+    aplicacao.processEvents()
+
+    fichas = tela_fichas.fichas
+    checar(
+        len(fichas) == 3 and all(isinstance(f, FichaSugestao) for f in fichas),
+        "os três exemplos viraram fichas",
+    )
+    palavra_ficha = janela.resumo_inicial().palavra or "loot"
+    checar(
+        fichas[0].frase == f"O que significa ‘{palavra_ficha}’?"
+        and fichas[0].text() == f"“{fichas[0].frase}”",
+        f"a primeira pergunta pela palavra do caderno ({fichas[0].frase})",
+    )
+    checar(
+        all(f.frase in f.accessibleName() for f in fichas),
+        "e cada ficha diz ao leitor de tela o que vai escrever",
+    )
+
+    # -- O clique escreve no campo de texto, e não envia.
+    janela.entrada_texto.clear()
+    mensagens_antes = list(janela.conversa._mensagens)
+    fichas[1].click()
+    aplicacao.processEvents()
+    checar(
+        janela.entrada_texto.text() == fichas[1].frase
+        and janela.entrada_texto.cursorPosition() == len(fichas[1].frase),
+        "o clique escreve a pergunta no campo de texto, com o cursor no fim",
+    )
+    checar(
+        janela.conversa._mensagens == mensagens_antes and janela._worker is None,
+        "e não envia nada: nem a mensagem, nem o aviso de sessão",
+    )
+    janela.entrada_texto.clear()
+
+    # -- Sob o cursor, a ficha sobe; o anel abraça o corpo já subido.
+    ficha_viva = fichas[2]
+    meio_ficha = QPointF(ficha_viva.width() / 2, ficha_viva.height() / 2)
+    topo_repouso = ficha_viva.corpo.top()
+    QApplication.sendEvent(
+        ficha_viva, QEnterEvent(meio_ficha, meio_ficha, QPointF(ficha_viva.mapToGlobal(meio_ficha)))
+    )
+    checar(
+        aguardar(lambda: ficha_viva.elevacao == FichaSugestao.SUBIDA),
+        "sob o cursor, a ficha sobe",
+    )
+    checar(
+        abs(topo_repouso - ficha_viva.corpo.top() - FichaSugestao.SUBIDA) < 0.01,
+        "o corpo dela sobe junto",
+    )
+    abraco_ficha = abraco_de(ficha_viva, janela)
+    corpo_ficha = ficha_viva.corpo.translated(QPointF(ficha_viva.mapTo(janela, QPoint(0, 0))))
+    checar(
+        abraco_ficha is not None
+        and abraco_ficha[0] == corpo_ficha.adjusted(-FOLGA_ABRACO, -FOLGA_ABRACO, FOLGA_ABRACO, FOLGA_ABRACO)
+        and abraco_ficha[1] == ficha_viva.raio_borda + FOLGA_ABRACO,
+        "e o anel do cursor abraça a ficha subida, no canto dela",
+    )
+    QApplication.sendEvent(ficha_viva, QEvent(QEvent.Type.Leave))
+    checar(aguardar(lambda: ficha_viva.elevacao == 0.0), "e desce quando o cursor sai")
+
+    # -- Movimento reduzido: acende, mas não sobe.
+    janela.campo_atmosfera.setCurrentText("Desligada")
+    aplicacao.processEvents()
+    QApplication.sendEvent(
+        ficha_viva, QEnterEvent(meio_ficha, meio_ficha, QPointF(ficha_viva.mapToGlobal(meio_ficha)))
+    )
+    aplicacao.processEvents()
+    checar(ficha_viva.elevacao == 0.0, "com a atmosfera desligada, a ficha não sobe")
+    QApplication.sendEvent(ficha_viva, QEvent(QEvent.Type.Leave))
+    janela.campo_atmosfera.setCurrentText("Completa")
+    aplicacao.processEvents()
+
+    # -- Sem espaço para as três numa linha, uma sobre a outra.
+    largura_tela = tela_fichas.width()
+    tela_fichas.resize(300, tela_fichas.height())
+    tela_fichas._ajustar_fileira()
+    checar(tela_fichas.fichas_empilhadas, "numa tela estreita, as fichas se empilham")
+    tela_fichas.resize(largura_tela, tela_fichas.height())
+    tela_fichas._ajustar_fileira()
+    checar(
+        not tela_fichas.fichas_empilhadas or sum(f.sizeHint().width() for f in fichas) > largura_tela,
+        "e voltam para a linha quando cabem",
+    )
+
+    janela.campo_atmosfera.setCurrentText(atmosfera_fichas)
     aplicacao.processEvents()
 
     print("atalhos diretos")
