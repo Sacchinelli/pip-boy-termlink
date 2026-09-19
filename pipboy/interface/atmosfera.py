@@ -195,6 +195,11 @@ SEGUIMENTO: Final = 11.0
 RAIO_ANEL: Final = 13.0
 RAIO_ANEL_CLICAVEL: Final = 22.0
 SEGUIMENTO_ANEL: Final = 22.0
+# Sobre um botão, um seletor ou um cartão, o anel deixa de ser círculo e ABRAÇA
+# o contorno do que vai ser clicado — o cursor das páginas que respondem ao
+# mouse. Ele se transforma com a mesma pressa com que persegue o cursor; o
+# miolo, quase nada, só para o contorno ler como alvo e não como moldura.
+MIOLO_ABRACO: Final = 0.07
 # A onda que sai de cada clique: o quanto cresce e quanto tempo dura.
 RAIO_ONDA: Final = 46.0
 DURACAO_ONDA: Final = 0.55
@@ -463,6 +468,24 @@ class _Enxame:
         pintor.restore()
 
 
+def _aproximar(atual: QRectF, alvo: QRectF, passo: float) -> QRectF:
+    """``atual`` andando ``passo`` (de 0 a 1) do caminho até ``alvo``, lado a lado."""
+    return QRectF(
+        atual.x() + (alvo.x() - atual.x()) * passo,
+        atual.y() + (alvo.y() - atual.y()) * passo,
+        atual.width() + (alvo.width() - atual.width()) * passo,
+        atual.height() + (alvo.height() - atual.height()) * passo,
+    )
+
+
+def _distancia(a: QRectF, b: QRectF) -> float:
+    """Quanto falta, somando os quatro lados, de uma caixa até a outra."""
+    return (
+        abs(a.x() - b.x()) + abs(a.y() - b.y())
+        + abs(a.width() - b.width()) + abs(a.height() - b.height())
+    )
+
+
 def _juntar_pares(antes: list[QRect], agora: list[QRect]) -> list[QRect]:
     """As caixas de antes e de agora, com cada par que se toca numa caixa só.
 
@@ -518,6 +541,13 @@ class Cenario:
         self._anel = QPointF()
         self._raio_anel = RAIO_ANEL
         self._sobre_clicavel = False
+        # A forma desenhada do anel — uma caixa e o canto dela: círculo quando o
+        # canto é metade do lado —, o contorno que ele abraça, quando há um, e o
+        # quanto ele já abraçou. Ver ``definir_abraco``.
+        self._caixa_anel = QRectF()
+        self._canto_anel = RAIO_ANEL
+        self._abraco: tuple[QRectF, float] | None = None
+        self._forca_abraco = 0.0
         # Cada onda de clique: centro e idade, em segundos.
         self._ondas: list[tuple[QPointF, float]] = []
         # A luz já desenhada, com a chave (cores e densidade de pixels) de quando
@@ -550,8 +580,35 @@ class Cenario:
         if ponto is not None and self._forca_luz <= 0.001:
             self._luz = QPointF(ponto)
             self._anel = QPointF(ponto)
+            self._caixa_anel = QRectF(
+                ponto.x() - RAIO_ANEL, ponto.y() - RAIO_ANEL, 2 * RAIO_ANEL, 2 * RAIO_ANEL
+            )
+            self._canto_anel = RAIO_ANEL
         self._cursor = None if ponto is None else QPointF(ponto)
         self._sobre_clicavel = sobre_clicavel and ponto is not None
+        if ponto is None:
+            self._abraco = None
+
+    def definir_abraco(self, abraco: tuple[QRectF, float] | None) -> None:
+        """O contorno que o anel abraça, em coordenadas da janela, e o canto dele.
+
+        ``None`` solta: o anel volta a ser círculo em volta do cursor. Quem
+        chama a cada quadro é a janela, e não só a cada movimento, porque o
+        botão magnético continua andando depois que o cursor para — e o anel
+        vai junto com ele.
+        """
+        self._abraco = None if abraco is None or self._cursor is None else abraco
+
+    @property
+    def abracando(self) -> bool:
+        return self._abraco is not None
+
+    def _alvo_do_anel(self) -> tuple[QRectF, float]:
+        """A forma que o anel persegue: o contorno abraçado, ou o círculo."""
+        if self._abraco is not None:
+            return self._abraco
+        r = self._raio_anel
+        return QRectF(self._anel.x() - r, self._anel.y() - r, 2 * r, 2 * r), r
 
     def apagar_cursor(self) -> None:
         """Esquece o cursor de uma vez: luz apagada, sem anel, onda ou faísca.
@@ -573,9 +630,9 @@ class Cenario:
             self._ondas.append((QPointF(ponto), 0.0))
 
     @property
-    def anel(self) -> tuple[QPointF, float]:
-        """Posição e raio atuais do anel do cursor."""
-        return QPointF(self._anel), self._raio_anel
+    def anel(self) -> QRectF:
+        """A caixa do anel como está desenhado agora: círculo, ou o contorno abraçado."""
+        return QRectF(self._caixa_anel)
 
     @property
     def ondas(self) -> int:
@@ -634,6 +691,11 @@ class Cenario:
         falta_anel = self._cursor - self._anel
         if abs(falta_anel.x()) + abs(falta_anel.y()) > 0.5:
             return True
+        alvo_caixa, alvo_canto = self._alvo_do_anel()
+        if _distancia(self._caixa_anel, alvo_caixa) > 0.5 or abs(self._canto_anel - alvo_canto) > 0.1:
+            return True
+        if abs(self._forca_abraco - (1.0 if self._abraco is not None else 0.0)) > 0.01:
+            return True
         falta = self._cursor - self._luz
         falta_paralaxe = self._alvo_paralaxe() - self._paralaxe
         return (
@@ -672,6 +734,11 @@ class Cenario:
             self._anel += (self._cursor - self._anel) * passo_anel
             alvo_raio = RAIO_ANEL_CLICAVEL if self._sobre_clicavel else RAIO_ANEL
             self._raio_anel += (alvo_raio - self._raio_anel) * passo_anel
+            alvo_caixa, alvo_canto = self._alvo_do_anel()
+            self._caixa_anel = _aproximar(self._caixa_anel, alvo_caixa, passo_anel)
+            self._canto_anel += (alvo_canto - self._canto_anel) * passo_anel
+            alvo_abraco = 1.0 if self._abraco is not None else 0.0
+            self._forca_abraco += (alvo_abraco - self._forca_abraco) * passo_anel
         self._paralaxe += (self._alvo_paralaxe() - self._paralaxe) * passo
         self._ondas = [(c, idade + dt) for c, idade in self._ondas if idade + dt < DURACAO_ONDA]
         self._avancar_rastro(dt)
@@ -855,8 +922,7 @@ class Cenario:
         if self._enxame is not None:
             caixas += self._enxame.caixas(self._paralaxe)
         if self._forca_luz > 0.001:
-            r = RAIO_ANEL_CLICAVEL + 4
-            caixas.append(QRectF(self._anel.x() - r, self._anel.y() - r, 2 * r, 2 * r).toAlignedRect())
+            caixas.append(self._caixa_anel.adjusted(-4, -4, 4, 4).toAlignedRect())
         for centro, _ in self._ondas:
             r = RAIO_ONDA + 4
             caixas.append(QRectF(centro.x() - r, centro.y() - r, 2 * r, 2 * r).toAlignedRect())
@@ -1058,18 +1124,26 @@ class Cenario:
         cor = QColor(self._tema.accent)
         forca = self._forca_luz * self._intensidade
         if forca > 0.001:
-            crescido = (self._raio_anel - RAIO_ANEL) / (RAIO_ANEL_CLICAVEL - RAIO_ANEL)
+            crescido = max(0.0, (self._raio_anel - RAIO_ANEL) / (RAIO_ANEL_CLICAVEL - RAIO_ANEL))
             contorno = QColor(cor)
             contorno.setAlphaF(min(1.0, 0.85 * forca))
             caneta = QPen(contorno)
             caneta.setWidthF(1.6)
             pintor.setPen(caneta)
-            if crescido > 0.01:
-                # Sobre o que é clicável, o anel ganha um miolo: vira alvo.
+            # Sobre o que é clicável, o anel ganha um miolo: vira alvo. Crescido
+            # em círculo — sobre um alvo grande demais para abraçar — o miolo
+            # é o de sempre; abraçando, quase nada, para não lavar o rótulo do
+            # botão por baixo dele.
+            alfa_miolo = max(
+                0.14 * crescido * (1.0 - self._forca_abraco), MIOLO_ABRACO * self._forca_abraco
+            )
+            if alfa_miolo > 0.002:
                 miolo = QColor(cor)
-                miolo.setAlphaF(min(1.0, 0.14 * crescido * forca))
+                miolo.setAlphaF(min(1.0, alfa_miolo * forca))
                 pintor.setBrush(miolo)
-            pintor.drawEllipse(self._anel, self._raio_anel, self._raio_anel)
+            # Um retângulo de canto igual à metade do lado é um círculo: a
+            # mesma chamada desenha o anel solto e o anel abraçando.
+            pintor.drawRoundedRect(self._caixa_anel, self._canto_anel, self._canto_anel)
             pintor.setBrush(Qt.BrushStyle.NoBrush)
         curva = QEasingCurve(QEasingCurve.Type.OutCubic)
         for centro, idade in self._ondas:

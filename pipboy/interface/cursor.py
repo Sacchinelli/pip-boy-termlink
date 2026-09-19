@@ -31,6 +31,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QColor, QHoverEvent, QMouseEvent, QPainter, QPainterPath
 from PySide6.QtWidgets import QAbstractButton, QApplication, QComboBox, QWidget
 
+from .. import design
 from .atmosfera import Cenario
 from .componentes import (
     Botao,
@@ -50,6 +51,46 @@ def clicavel(widget: QWidget) -> bool:
         isinstance(widget, (QAbstractButton, QComboBox))
         or widget.cursor().shape() == Qt.CursorShape.PointingHandCursor
     )
+
+
+# Quanto o anel abraçando fica afastado do corpo do que abraça.
+FOLGA_ABRACO = 5.0
+# Acima disto o alvo é grande demais para abraçar — um contorno em volta de um
+# painel inteiro lê como moldura, e não como alvo —, e o anel só cresce.
+LARGURA_MAXIMA_ABRACO = 520.0
+ALTURA_MAXIMA_ABRACO = 170.0
+
+
+def abraco_de(widget: QWidget | None, janela: QWidget) -> tuple[QRectF, float] | None:
+    """O contorno que o anel abraça sobre ``widget``, em coordenadas de ``janela``.
+
+    Com o canto do próprio widget: arredondado, chanfrado ou reto conforme o
+    tema, e no seletor, o que a folha de estilo dá a ele. Do botão magnético,
+    o corpo JÁ PUXADO pelo ímã: o anel vai junto com ele. ``None`` para quem
+    não está à vista, é de outra janela, já foi destruído ou é grande demais.
+    """
+    if widget is None:
+        return None
+    try:
+        if not widget.isVisible() or widget.window() is not janela:
+            return None
+        if isinstance(widget, Botao):
+            corpo = widget.corpo
+            canto = {"chanfrada": 3.0, "reta": 2.0}.get(widget.forma, float(design.RAIO))
+        else:
+            corpo = QRectF(widget.rect())
+            canto = float(getattr(widget, "raio_borda", design.RAIO))
+        origem = QPointF(widget.mapTo(janela, QPoint(0, 0)))
+    except RuntimeError:
+        # A lista do histórico se refaz a cada busca: o botão que estava sob o
+        # cursor pode já não existir quando o quadro seguinte pergunta por ele.
+        return None
+    caixa = corpo.translated(origem).adjusted(
+        -FOLGA_ABRACO, -FOLGA_ABRACO, FOLGA_ABRACO, FOLGA_ABRACO
+    )
+    if caixa.width() > LARGURA_MAXIMA_ABRACO or caixa.height() > ALTURA_MAXIMA_ABRACO:
+        return None
+    return caixa, canto + FOLGA_ABRACO
 
 
 class CampoMagnetico:
@@ -77,13 +118,16 @@ class CampoMagnetico:
             ]
         return self._botoes
 
-    def mover(self, ponto: QPointF | None, _clicavel: bool = False) -> None:
+    def mover(self, ponto: QPointF | None, _alvo: QWidget | None = None) -> None:
         for botao in self.botoes:
             botao.atrair(None if ponto is None else botao.mapFrom(self._janela, ponto))
 
 
 class RastreadorDeCursor(QObject):
     """Avisa ``ao_mover`` a cada movimento sobre a janela, e ``None`` ao sair.
+
+    Com o ponto vai o widget clicável sob o cursor — ``None`` sobre o que não
+    responde a clique —, que é o que o anel abraça.
 
     O filtro recebe TODO evento da aplicação — pintura, relógio, teclado —, e
     por isso a primeira coisa que ele olha é o tipo: tudo que não é movimento
@@ -93,7 +137,7 @@ class RastreadorDeCursor(QObject):
     def __init__(
         self,
         janela: QWidget,
-        ao_mover: Callable[[QPointF | None, bool], None],
+        ao_mover: Callable[[QPointF | None, QWidget | None], None],
         ao_clicar: Callable[[QPointF], None] | None = None,
     ) -> None:
         super().__init__(janela)
@@ -107,7 +151,7 @@ class RastreadorDeCursor(QObject):
         # O mesmo movimento chega mais de uma vez: como MouseMove ao widget sob
         # o cursor e como HoverMove a ele e a cada ancestral que o acompanha.
         # Cada aviso refaz a luz e o ímã de todos os botões; repetido, é só custo.
-        self._ultimo_movimento: tuple[float, float, bool] | None = None
+        self._ultimo_movimento: tuple[float, float, int] | None = None
         aplicacao = QApplication.instance()
         if aplicacao is not None:
             aplicacao.installEventFilter(self)
@@ -121,11 +165,11 @@ class RastreadorDeCursor(QObject):
                 and alvo.window() is self._janela
             ):
                 ponto = alvo.mapTo(self._janela, evento.position())
-                sobre_clicavel = clicavel(alvo)
-                marca = (ponto.x(), ponto.y(), sobre_clicavel)
+                sob_o_cursor = alvo if clicavel(alvo) else None
+                marca = (ponto.x(), ponto.y(), id(sob_o_cursor) if sob_o_cursor else 0)
                 if marca != self._ultimo_movimento:
                     self._ultimo_movimento = marca
-                    self._ao_mover(ponto, sobre_clicavel)
+                    self._ao_mover(ponto, sob_o_cursor)
         elif tipo == QEvent.Type.MouseButtonPress:
             if (
                 self._ao_clicar is not None
@@ -140,7 +184,7 @@ class RastreadorDeCursor(QObject):
                     self._ao_clicar(alvo.mapTo(self._janela, evento.position()))
         elif tipo == QEvent.Type.Leave and alvo is self._janela:
             self._ultimo_movimento = None
-            self._ao_mover(None, False)
+            self._ao_mover(None, None)
         return False
 
 
@@ -202,6 +246,8 @@ class CursorVivo(QObject):
         self._cronometro = QElapsedTimer()
         self._cronometro.start()
         self._ultimo = 0.0
+        # O clicável sob o cursor, que o anel abraça. Ver ``abraco_de``.
+        self._alvo: QWidget | None = None
         definir_fonte_da_luz(janela, self._luz)
         self.reposicionar()
 
@@ -217,6 +263,7 @@ class CursorVivo(QObject):
     def esquecer(self) -> None:
         """A janela se escondeu: o cursor que estava nela não está mais."""
         self._cenario.apagar_cursor()
+        self._alvo = None
         self.campo.mover(None)
         self.sincronizar()
 
@@ -238,10 +285,12 @@ class CursorVivo(QObject):
         else:
             self._relogio.stop()
 
-    def _mover(self, ponto: QPointF | None, sobre_clicavel: bool = False) -> None:
+    def _mover(self, ponto: QPointF | None, alvo: QWidget | None = None) -> None:
         if movimento_reduzido():
             ponto = None
-        self._cenario.definir_cursor(ponto, sobre_clicavel=sobre_clicavel)
+        self._alvo = alvo if ponto is not None else None
+        self._cenario.definir_cursor(ponto, sobre_clicavel=self._alvo is not None)
+        self._cenario.definir_abraco(abraco_de(self._alvo, self._janela))
         self.campo.mover(ponto)
         self.sincronizar()
 
@@ -255,6 +304,9 @@ class CursorVivo(QObject):
         agora = self._cronometro.elapsed() / 1000.0
         passo = min(PASSO_MAXIMO, max(0.0, agora - self._ultimo))
         self._ultimo = agora
+        # A cada quadro, e não só a cada movimento: o botão magnético segue
+        # andando depois que o cursor para, e o anel vai junto.
+        self._cenario.definir_abraco(abraco_de(self._alvo, self._janela))
         self._cenario.avancar(passo)
         # Um pedido só, luz e vidro unidos — o mesmo raciocínio da janela
         # principal: o vidro é translúcido, e repintá-lo já é repintar o que
