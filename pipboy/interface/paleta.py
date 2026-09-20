@@ -80,6 +80,16 @@ ALTURA_RELATIVA = 0.14
 # quase tanto quanto a primeira de todas.
 SEPARADORES = " -–—/:,.()[]"
 
+# Antes de duas letras, a paleta não vai ao caderno: uma letra só traria a
+# primeira palavra qualquer do banco, e cobraria uma consulta por tecla para
+# mostrar o que ninguém pediu.
+MINIMO_PARA_BUSCAR_FORA = 2
+
+# Quantas palavras do caderno a paleta pede ao banco de cada vez. Seis cabem
+# entre as sete linhas sem expulsar todas as ações; o resto é trabalho do banco
+# para ninguém ver.
+PALAVRAS_DO_CADERNO = 6
+
 # Um trecho achado fora do título — no grupo ou nas palavras-chave — conta,
 # mas vale menos: quem digita "jogo" quer a lista de jogos antes de qualquer
 # rótulo que por acaso contenha a palavra.
@@ -119,6 +129,21 @@ class Achado(NamedTuple):
     marcas: tuple[int, ...]
 
 
+def _inicio_do_trecho(alvo: str, busca: str) -> int:
+    """Onde ``busca`` aparece INTEIRA em ``alvo``; -1 se ela não aparece.
+
+    Entre duas aparições, ganha a que começa uma palavra: "am" em "teams ammo"
+    é o "ammo", e não o miolo de "teams".
+    """
+    onde = alvo.find(busca)
+    primeira = onde
+    while onde >= 0:
+        if onde == 0 or alvo[onde - 1] in SEPARADORES:
+            return onde
+        onde = alvo.find(busca, onde + 1)
+    return primeira
+
+
 def pontuar(consulta: str, texto: str) -> tuple[int, tuple[int, ...]] | None:
     """Quanto ``texto`` casa com ``consulta``, e quais letras dele casaram.
 
@@ -139,14 +164,23 @@ def pontuar(consulta: str, texto: str) -> tuple[int, tuple[int, ...]] | None:
     if not busca:
         return None
 
-    posicoes: list[int] = []
-    procurar_de = 0
-    for letra in busca:
-        onde = alvo.find(letra, procurar_de)
-        if onde < 0:
-            return None
-        posicoes.append(onde)
-        procurar_de = onde + 1
+    # Casar INTEIRO vale mais do que casar salteado, e a varredura gulosa
+    # sozinha perdia isso: em "ammo Caderno municao", a busca "muni" prendia o
+    # 'm' no primeiro "ammo" e o resto virava um casamento esfarrapado — a
+    # palavra que o banco tinha achado pela tradução ficava atrás de qualquer
+    # rótulo que casasse de raspão.
+    inteiro = _inicio_do_trecho(alvo, busca)
+    if inteiro >= 0:
+        posicoes = list(range(inteiro, inteiro + len(busca)))
+    else:
+        posicoes = []
+        procurar_de = 0
+        for letra in busca:
+            onde = alvo.find(letra, procurar_de)
+            if onde < 0:
+                return None
+            posicoes.append(onde)
+            procurar_de = onde + 1
 
     pontos = 0
     anterior = -2
@@ -378,10 +412,17 @@ class Paleta(QDialog):
     executa com a janela principal de volta no comando.
     """
 
-    def __init__(self, janela: Any, comandos: Sequence[Comando]) -> None:
+    def __init__(
+        self,
+        janela: Any,
+        comandos: Sequence[Comando],
+        *,
+        extras: Callable[[str], list[Comando]] | None = None,
+    ) -> None:
         super().__init__(janela)
         self._janela = janela
         self._comandos = list(comandos)
+        self._extras = extras
         self._achados: list[Achado] = []
         self._indice = 0
         self.escolhido: Callable[[], None] | None = None
@@ -458,7 +499,15 @@ class Paleta(QDialog):
 
     # -- busca
     def _buscar(self, consulta: str) -> None:
-        self._achados = filtrar(self._comandos, consulta)
+        # Os comandos fixos são os mesmos desde a abertura; os de fora — as
+        # palavras do caderno — são perguntados A CADA TECLA, porque um caderno
+        # de mil palavras não cabe numa lista montada de véspera. Eles entram
+        # no MESMO ranqueamento: uma palavra digitada por inteiro ganha da ação
+        # que casou de raspão, e é isso que se espera de quem digitou a palavra.
+        reserva = self._comandos
+        if self._extras is not None and len(consulta.strip()) >= MINIMO_PARA_BUSCAR_FORA:
+            reserva = [*reserva, *self._extras(consulta)]
+        self._achados = filtrar(reserva, consulta)
         for posicao, linha in enumerate(self.linhas):
             if posicao < len(self._achados):
                 achado = self._achados[posicao]

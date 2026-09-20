@@ -788,6 +788,28 @@ class JanelaCaderno(QDialog):
     def _agendar_busca(self, _texto: str) -> None:
         self._espera.start()
 
+    def procurar(self, termo: str) -> None:
+        """Mostra ``termo`` na lista, venha ele de onde vier.
+
+        Escrever na busca não basta: o caderno guarda o filtro e o jogo da
+        última visita, e uma palavra dominada procurada com "Para revisar"
+        ligado daria lista vazia — quem pediu a palavra pediu a palavra, e não
+        a interseção dela com o que estava marcado da visita passada.
+
+        A busca acontece agora, sem os 180 ms do amortecedor: ele existe para
+        quem digita letra a letra, e aqui o termo chega inteiro de uma vez.
+        """
+        self.campo_jogo.blockSignals(True)
+        self.campo_jogo.setCurrentText(TODOS_OS_JOGOS)
+        self.campo_jogo.blockSignals(False)
+        self._filtro = FILTRO_TODAS
+        for chave, chip in self.chips.items():
+            chip.setChecked(chave == FILTRO_TODAS)
+        self.busca.setText(termo)
+        self._espera.stop()
+        self.busca.setFocus()
+        self.atualizar(animar=True)
+
     def _escolher_filtro(self, valor: str) -> None:
         self._filtro = valor
         for chave, chip in self.chips.items():

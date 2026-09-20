@@ -18,6 +18,7 @@ import queue
 import threading
 import time
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -102,7 +103,7 @@ from .montagem import (
     NIVEIS_GANHO_JOGO,
 )
 from .movimento import SinalFlutuante
-from .paleta import Comando, Paleta
+from .paleta import PALAVRAS_DO_CADERNO, Comando, Paleta
 from .preferencias import Escolha, Marca, VinculoDePreferencias
 from .relogios import Batidas, Relogios
 from .tela_inicial import Resumo
@@ -1467,6 +1468,35 @@ class Janela(QWidget):
                 ))
         return lista
 
+    def palavras_do_caderno(self, consulta: str) -> list[Comando]:
+        """As palavras do caderno que casam com ``consulta``, como comandos.
+
+        A paleta pergunta isto a cada tecla em vez de receber o caderno inteiro
+        na abertura: mil palavras viram mil objetos para mostrar sete, e o
+        banco já sabe procurar — por termo, tradução E exemplo, sem acento e
+        sem caixa, que é o mesmo caminho da busca do caderno.
+
+        A tradução e o exemplo vão nas CHAVES do comando, e não só na dica.
+        Foi o banco quem casou a busca com eles; sem isso o ranqueador da
+        paleta, que olha o título e as chaves, jogaria fora justamente a
+        palavra que o banco achou por "munição".
+        """
+        return [
+            Comando(
+                entrada.termo, "Caderno",
+                partial(self.procurar_no_caderno, entrada.termo),
+                entrada.traducao,
+                f"{entrada.traducao} {entrada.exemplo}",
+            )
+            for entrada in self._store.listar(busca=consulta, limite=PALAVRAS_DO_CADERNO)
+        ]
+
+    def procurar_no_caderno(self, termo: str) -> None:
+        """Abre o caderno já mostrando ``termo``."""
+        self.abrir_caderno()
+        if self._caderno is not None:
+            self._caderno.procurar(termo)
+
     def abrir_paleta(self) -> None:
         """A paleta de comandos (Ctrl+K).
 
@@ -1474,7 +1504,7 @@ class Janela(QWidget):
         "Revisar cartões" abre um modal, e um modal nascido dentro de outro
         que está se fechando fica órfão de janela-mãe na hora de se posicionar.
         """
-        paleta = Paleta(self, self.comandos())
+        paleta = Paleta(self, self.comandos(), extras=self.palavras_do_caderno)
         paleta.exec()
         escolhido = paleta.escolhido
         paleta.deleteLater()
