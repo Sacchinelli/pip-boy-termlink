@@ -3165,6 +3165,118 @@ def main() -> int:
         janela._caderno.close()
     aplicacao.processEvents()
 
+    print("a paleta acha as palavras do caderno")
+    from pipboy.vocabulary import FILTRO_DOMINADAS
+
+    # -- O caderno entra na paleta pelo BANCO, a cada tecla: uma lista montada
+    #    na abertura viraria mil objetos para mostrar sete.
+    achadas = janela.palavras_do_caderno("wast")
+    palavra = next((c for c in achadas if c.titulo == "wasteland"), None)
+    checar(
+        palavra is not None and palavra.grupo == "Caderno",
+        f"uma palavra do caderno vira comando ({[c.titulo for c in achadas]})",
+    )
+    # A tradução vem do banco, e não da constante do começo da suíte: as seções
+    # anteriores editam o caderno, e uma tradução escrita à mão aqui envelhece.
+    entrada_w = janela._store.entrada("wasteland")
+    assert entrada_w is not None
+    checar(
+        palavra is not None and palavra.dica == entrada_w.traducao,
+        f"com a tradução como dica ({None if palavra is None else palavra.dica})",
+    )
+    checar(
+        any(
+            c.titulo == "wasteland"
+            for c in janela.palavras_do_caderno(entrada_w.traducao)
+        ),
+        f"e o banco a acha também pela tradução ({entrada_w.traducao})",
+    )
+
+    # -- Casar INTEIRO vale mais que casar salteado. Sem esta regra, "muni"
+    #    prendia o 'm' no primeiro "ammo" do texto procurável e a palavra que o
+    #    banco achou pela tradução ficava atrás de qualquer rótulo de raspão.
+    trecho = pontuar("muni", "ammo Caderno municao")
+    checar(
+        trecho is not None and trecho[1] == (13, 14, 15, 16),
+        f"o trecho que aparece inteiro vence a varredura gulosa ({trecho})",
+    )
+    checar(
+        (pontuar("muni", "ammo Caderno municao") or (0, ()))[0]
+        > (pontuar("muni", "Médio Volume do jogo na mistura") or (0, ()))[0],
+        "e por isso a palavra do caderno passa na frente do rótulo salteado",
+    )
+    checar(
+        (pontuar("am", "teams ammo") or (0, ()))[1] == (6, 7),
+        "e entre duas aparições inteiras ganha a que começa uma palavra",
+    )
+
+    # -- A tradução precisa estar nas CHAVES, e não só na dica: sem isso o
+    #    ranqueador da paleta descartaria justamente o que o banco achou.
+    quantas = [0]
+
+    def extras_contadas(consulta: str) -> list[Comando]:
+        quantas[0] += 1
+        return janela.palavras_do_caderno(consulta)
+
+    paleta_palavras = Paleta(janela, janela.comandos(), extras=extras_contadas)
+    paleta_palavras.show()
+    aplicacao.processEvents()
+    paleta_palavras.campo.setText(entrada_w.traducao)
+    aplicacao.processEvents()
+    escolha_palavra = paleta_palavras.escolha
+    checar(
+        escolha_palavra is not None and escolha_palavra.titulo == "wasteland",
+        f"procurar pela tradução acha a palavra na paleta "
+        f"({None if escolha_palavra is None else escolha_palavra.titulo})",
+    )
+    paleta_palavras.campo.setText("wasteland")
+    aplicacao.processEvents()
+    checar(
+        paleta_palavras.escolha is not None
+        and paleta_palavras.escolha.titulo == "wasteland",
+        "e a palavra digitada por inteiro ganha das ações que casaram de raspão",
+    )
+
+    # -- Uma letra só não vai ao banco: traria a primeira palavra qualquer, e
+    #    cobraria uma consulta por tecla para mostrar o que ninguém pediu.
+    quantas[0] = 0
+    paleta_palavras.campo.setText("w")
+    aplicacao.processEvents()
+    checar(quantas[0] == 0, f"com uma letra, a paleta não pergunta ao caderno ({quantas[0]})")
+    paleta_palavras.campo.setText("wa")
+    aplicacao.processEvents()
+    checar(quantas[0] == 1, f"com duas, pergunta ({quantas[0]})")
+    paleta_palavras.close()
+
+    # -- Escolher a palavra abre o caderno MOSTRANDO ela, e não o caderno como
+    #    ele ficou da última visita.
+    caderno_paleta = janela._caderno
+    if caderno_paleta is None:
+        janela.abrir_caderno()
+        caderno_paleta = janela._caderno
+    assert caderno_paleta is not None
+    caderno_paleta._escolher_filtro(FILTRO_DOMINADAS)
+    aplicacao.processEvents()
+    checar(
+        "wasteland" not in [c._entrada.termo for c in caderno_paleta._cartoes],
+        "com 'dominadas' ligado, a palavra não aparece",
+    )
+    assert palavra is not None
+    palavra.acao()
+    aplicacao.processEvents()
+    checar(
+        caderno_paleta.isVisible() and caderno_paleta.busca.text() == "wasteland",
+        "a palavra da paleta abre o caderno com ela na busca",
+    )
+    checar(
+        [c._entrada.termo for c in caderno_paleta._cartoes] == ["wasteland"],
+        f"e o filtro guardado da visita passada não a esconde "
+        f"({[c._entrada.termo for c in caderno_paleta._cartoes]})",
+    )
+    caderno_paleta.busca.clear()
+    caderno_paleta.close()
+    aplicacao.processEvents()
+
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()
     # nunca voltaria e a suíte penduraria. O tiro agendado é esse alguém.
