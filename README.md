@@ -47,10 +47,12 @@ Cada jogo tem o seu ambiente. A troca é imediata, sem reiniciar o programa.
 | GTA | Rádio pirata em neon rosa e ciano |
 | Cyberpunk 2077 | Interface netrunner em amarelo e ciano |
 | RPG / Aventura (geral) | Grimório arcano em violeta e ouro |
-| FPS / Multiplayer | Comms tático em cinza e laranja |
+| FPS / Multiplayer | Rede tática de esquadrão: grafite de oliva, laranja de sinalização e o enquadramento de um visor |
 | Genérico / Outro | Tema neutro escuro para qualquer jogo |
 
 Cada ambiente tem também uma **atmosfera** — varredura, grão, vinheta, partículas, interferência e a forma dos cantos — sintetizada com o QPainter. Não há textura, arte, logotipo ou fonte de terceiros no repositório: o que caracteriza um jogo na tela não é a cor, é o material, e material se desenha. A intensidade tem três níveis na coluna lateral (**Completa**, **Discreta**, **Desligada**), porque varredura e cintilação são obstáculo real para baixa visão.
+
+O ambiente de **FPS** foi o primeiro a ser refeito com a régua na mão. Ele media 3,97 de distância do tema deliberadamente *neutro* (`ferramentas/distancia_dos_temas.py`) — era o tema neutro com uma grade por cima, e a grade era a identidade inteira dele. Hoje é um campo de batalha moderno: grafite com fundo de **oliva** no lugar do cinza-azulado de escritório, **laranja de sinalização**, pó de escombro no ar, ruído de rádio em rajadas e uma camada nova — **cantoneiras**, os colchetes de canto e os tiques de meio de borda que dizem *equipamento apontado para alguma coisa*, onde papel milimetrado não dizia. O botão diz **DESDOBRAR** e **EXTRAIR**, o assistente é o líder do seu esquadrão, e o blip virou o estalo grave de um canal de rádio abrindo. O vizinho mais próximo dele passou de 3,97 (Genérico) para 8,82 (Fallout).
 
 Na primeira execução, quem tem **"Efeitos de animação" desligado no Windows** recebe a atmosfera já em **Desligada**, com um aviso no registro dizendo de onde isso veio e como reverter. Quem desliga essa opção do sistema já disse uma vez, para o computador inteiro, que animação lhe faz mal; perguntar de novo na forma de uma janela que cintila é ignorar uma resposta já dada. É **Desligada**, e não Discreta, porque o que o sistema pede é menos *animação* e só esse nível para de fato a partícula, a cintilação e as transições — atender pela metade um pedido de acessibilidade é não atender. E o sistema decide apenas o **padrão**: assim que você escolher um nível, ele é seu, mesmo contrariando o Windows.
 

@@ -3277,6 +3277,97 @@ def main() -> int:
     caderno_paleta.close()
     aplicacao.processEvents()
 
+    print("o visor do FPS enquadra a tela")
+    from dataclasses import replace as trocar_campos
+
+    from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_VISOR
+    from pipboy.interface.atmosfera import Cenario as CenarioVisor
+    from pipboy.interface.moldura import ALTURA_BARRA
+    from pipboy.themes import TEMAS as TEMAS_VISOR
+
+    receita_visor = RECEITAS_VISOR["FPS / Multiplayer"]
+    checar(receita_visor.cantoneiras > 0, "o tema de FPS pede o enquadramento")
+    checar(
+        all(
+            r.cantoneiras == 0.0
+            for nome, r in RECEITAS_VISOR.items()
+            if nome != "FPS / Multiplayer"
+        ),
+        "e é o único: a moldura de visor é a identidade dele",
+    )
+
+    def tinta_do_visor(largura: int, altura: int, forca: float) -> tuple[bytes, int, int]:
+        """Só a camada de cantoneiras, sobre o vazio: tinta total e onde ela cai."""
+        imagem = QImage(largura, altura, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem.fill(0)
+        pintor = QPainter(imagem)
+        pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+        CenarioVisor._camada_cantoneiras(
+            pintor, largura, altura,
+            trocar_campos(receita_visor, cantoneiras=forca),
+            TEMAS_VISOR["FPS / Multiplayer"],
+        )
+        pintor.end()
+        alfas = bytes(imagem.constBits())[3::4]
+        acesos = [i for i, a in enumerate(alfas) if a]
+        primeira = min((i // largura for i in acesos), default=-1)
+        return bytes(alfas), sum(alfas), primeira
+
+    _, tinta_cheia, topo_aceso = tinta_do_visor(900, 600, receita_visor.cantoneiras)
+    _, tinta_fraca, _ = tinta_do_visor(900, 600, receita_visor.cantoneiras * 0.4)
+    checar(tinta_cheia > 0, f"a camada desenha alguma coisa ({tinta_cheia} de tinta)")
+    checar(
+        tinta_fraca < tinta_cheia * 0.6,
+        f"e uma atmosfera mais fraca desenha menos tinta ({tinta_fraca} contra {tinta_cheia})",
+    )
+    checar(
+        topo_aceso >= ALTURA_BARRA,
+        f"o enquadramento começa ABAIXO da barra de título ({topo_aceso} >= {ALTURA_BARRA}): "
+        "a 16 px do alto ele riscava o botão de fechar",
+    )
+
+    # Colchetes, e não moldura: o miolo da tela fica limpo.
+    alfas_visor, _, _ = tinta_do_visor(900, 600, receita_visor.cantoneiras)
+    miolo = sum(
+        alfas_visor[y * 900 + x]
+        for y in range(150, 450)
+        for x in range(225, 675)
+    )
+    checar(miolo == 0, f"e o miolo da tela fica intocado ({miolo})")
+    # Colchetes de CANTO: a borda de cima não é um traço de ponta a ponta. Uma
+    # moldura fechada tem o mesmo miolo vazio e diz outra coisa — ela emoldura
+    # um quadro, e não enquadra um alvo.
+    faixa = range(topo_aceso - 2, topo_aceso + 3)
+    colunas = sum(
+        1 for x in range(900)
+        if any(alfas_visor[y * 900 + x] for y in faixa if 0 <= y < 600)
+    )
+    checar(
+        colunas < 900 * 0.25,
+        f"e a borda de cima só acende nos cantos e no tique do meio ({colunas} de 900 colunas)",
+    )
+
+    _, tinta_minima, _ = tinta_do_visor(200, 140, receita_visor.cantoneiras)
+    checar(
+        tinta_minima == 0,
+        f"numa janela pequena demais ele não aparece ({tinta_minima}): quatro colchetes "
+        "encostando um no outro viram moldura, que é o oposto de enquadramento",
+    )
+
+    # A intensidade da atmosfera atenua a camada como todas as outras.
+    cenario_visor = CenarioVisor()
+    cenario_visor.definir(TEMAS_VISOR["FPS / Multiplayer"], receita_visor)
+    cenario_visor.definir_intensidade(0.5)
+    checar(
+        abs(cenario_visor._efetiva.cantoneiras - receita_visor.cantoneiras * 0.5) < 1e-9,
+        f"a atmosfera 'Discreta' atenua o enquadramento ({cenario_visor._efetiva.cantoneiras})",
+    )
+    cenario_visor.definir_intensidade(0.0)
+    checar(
+        cenario_visor._efetiva.cantoneiras == 0.0,
+        "e a 'Desligada' o apaga",
+    )
+
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()
     # nunca voltaria e a suíte penduraria. O tiro agendado é esse alguém.

@@ -497,31 +497,49 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
     GameTheme(
         name="FPS / Multiplayer",
         context=(
-            "O jogador está em um jogo competitivo online. O inglês é rápido, abreviado e "
-            "cheio de gíria de comunidade: push, flank, camp, clutch, nerf, GG, AFK."
+            "O jogador está em um FPS militar competitivo (Battlefield, Call of Duty e "
+            "afins). O inglês é o do rádio de esquadrão: imperativo e telegráfico, com "
+            "chamadas de posição e alvo (contact, spotted, suppressing, flanking, on me, "
+            "reloading), vocabulário de classe e equipamento, e a gíria de comunidade que "
+            "atravessa todo jogo online: push, flank, camp, clutch, nerf, GG, AFK."
         ),
         assistant_name="COMANDO",
-        window_title="Comms Tático",
-        header_title="▲ COMMS TÁTICO",
-        header_subtitle="CANAL DE ESQUADRÃO — TUTOR DE INGLÊS",
-        idle_text="AGUARDANDO ORDENS",
-        start_label="▶  ENGAJAR",
-        stop_label="■  RECUAR",
-        persona_label="Comandante de Esquadrão",
+        window_title="Rede Tática de Esquadrão",
+        header_title="▲ REDE TÁTICA",
+        header_subtitle="ESQUADRÃO ALFA · CANAL ABERTO — TUTOR DE INGLÊS",
+        idle_text="AGUARDANDO DESDOBRAMENTO",
+        start_label="▶  DESDOBRAR",
+        stop_label="■  EXTRAIR",
+        persona_label="Líder de Esquadrão",
         persona_prompt=(
-            "Você é um comandante de esquadrão no rádio: frases curtas, tom de comando e "
-            "zero ruído. Entrega a informação como quem passa uma call no meio da "
+            "Você é o líder do esquadrão no rádio: frases curtas, tom de comando e zero "
+            "ruído. Chama o jogador de 'soldado', confirma o que entendeu antes de "
+            "responder e entrega a informação como quem passa uma call no meio da "
             "partida — o jogador tem dois segundos de atenção e você respeita isso."
         ),
-        font_candidates=("Tahoma", "Franklin Gothic Medium", "Segoe UI"),
-        shell="#0a0b0c",
-        screen="#15181a",
-        primary="#e2e6e8",
-        secondary="#8b9296",
-        faint="#2c3235",
-        accent="#ff7a1a",
-        alert="#ff3b30",
-        info="#4fc3f7",
+        # Grotesca condensada, a tipografia de estêncil de equipamento militar.
+        # Saira Condensed é livre (OFL), como EB Garamond e Zilla Slab: quem a
+        # instalar tem a fonte pretendida. A reserva de fábrica é a Franklin
+        # Gothic, uma grotesca americana de sinalização industrial que nenhum
+        # outro tema usa — a Tahoma, que vinha em primeiro, é a irmã de escritório
+        # da Segoe UI do tema neutro, e era parte do problema.
+        font_candidates=("Saira Condensed", "Franklin Gothic Medium", "Tahoma", "Segoe UI"),
+        # Grafite com fundo de oliva, e não o cinza-azulado de antes: medido
+        # contra o tema deliberadamente NEUTRO, o visor tático estava a 3,97 de
+        # distância perceptual dele (ferramentas/distancia_dos_temas.py) — era
+        # o tema neutro com uma grade por cima. O que separa os dois agora é a
+        # temperatura, e não mais um detalhe de camada.
+        shell="#0a0e06",
+        screen="#161d0e",
+        primary="#e2ead4",
+        secondary="#8c9a78",
+        faint="#2c3720",
+        accent="#ff6a00",
+        # Um vermelho um passo mais escuro que o de sinalização: em #e8272c o
+        # par texto/fundo do botão de estado ligado media 4,46:1 e reprovava
+        # no AA por uma casa decimal.
+        alert="#d81f28",
+        info="#79c7e8",
     ),
     GameTheme(
         name="Genérico / Outro",
