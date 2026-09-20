@@ -28,7 +28,14 @@ from PySide6.QtCore import (
     Qt,
     QTimer,
 )
-from PySide6.QtGui import QColor, QHoverEvent, QMouseEvent, QPainter, QPainterPath
+from PySide6.QtGui import (
+    QColor,
+    QFocusEvent,
+    QHoverEvent,
+    QMouseEvent,
+    QPainter,
+    QPainterPath,
+)
 from PySide6.QtWidgets import QAbstractButton, QApplication, QComboBox, QWidget
 
 from .. import design
@@ -43,6 +50,13 @@ from .componentes import (
 from .relogios import PASSO_MAXIMO, intervalo_interativo
 
 _MOVIMENTOS = (QEvent.Type.MouseMove, QEvent.Type.HoverMove)
+# Só o foco que veio do TECLADO leva a luz junto. O do mouse não: quem clicou
+# já tem o cursor no lugar, e a luz seguiu o cursor até lá.
+_FOCO_DE_TECLADO = (
+    Qt.FocusReason.TabFocusReason,
+    Qt.FocusReason.BacktabFocusReason,
+    Qt.FocusReason.ShortcutFocusReason,
+)
 
 
 def clicavel(widget: QWidget) -> bool:
@@ -61,6 +75,16 @@ FOLGA_ABRACO = 5.0
 # uma ficha é exatamente o que se quer.
 AREA_MAXIMA_ABRACO = 88_000.0
 ALTURA_MAXIMA_ABRACO = 170.0
+
+
+def centro_de(widget: QWidget, janela: QWidget) -> QPointF | None:
+    """O meio de ``widget`` em coordenadas de ``janela``; ``None`` se ele sumiu."""
+    try:
+        if not widget.isVisible() or widget.window() is not janela:
+            return None
+        return QPointF(widget.mapTo(janela, widget.rect().center()))
+    except RuntimeError:
+        return None
 
 
 def abraco_de(widget: QWidget | None, janela: QWidget) -> tuple[QRectF, float] | None:
@@ -143,11 +167,13 @@ class RastreadorDeCursor(QObject):
         janela: QWidget,
         ao_mover: Callable[[QPointF | None, QWidget | None], None],
         ao_clicar: Callable[[QPointF], None] | None = None,
+        ao_focar: Callable[[QWidget], None] | None = None,
     ) -> None:
         super().__init__(janela)
         self._janela = janela
         self._ao_mover = ao_mover
         self._ao_clicar = ao_clicar
+        self._ao_focar = ao_focar
         # O Qt repassa um clique não aceito a cada ancestral do widget clicado, e
         # o filtro da aplicação o vê em cada um: um clique virava quatro ondas.
         # Instante e posição na tela identificam o MESMO clique entre as cópias.
@@ -156,9 +182,15 @@ class RastreadorDeCursor(QObject):
         # o cursor e como HoverMove a ele e a cada ancestral que o acompanha.
         # Cada aviso refaz a luz e o ímã de todos os botões; repetido, é só custo.
         self._ultimo_movimento: tuple[float, float, int] | None = None
+        # Quem tinha o foco por último NESTA janela. Ver o FocusIn abaixo.
+        self._ultimo_foco: QWidget | None = None
         aplicacao = QApplication.instance()
         if aplicacao is not None:
             aplicacao.installEventFilter(self)
+
+    def esquecer_foco(self) -> None:
+        """Esquece quem tinha o foco: a janela se escondeu, e o próximo foco chega."""
+        self._ultimo_foco = None
 
     def eventFilter(self, alvo: QObject, evento: QEvent) -> bool:
         tipo = evento.type()
@@ -186,6 +218,25 @@ class RastreadorDeCursor(QObject):
                 if chave != self._ultimo_clique:
                     self._ultimo_clique = chave
                     self._ao_clicar(alvo.mapTo(self._janela, evento.position()))
+        elif tipo == QEvent.Type.FocusIn:
+            if (
+                isinstance(alvo, QWidget)
+                and isinstance(evento, QFocusEvent)
+                and alvo.window() is self._janela
+            ):
+                # O foco CHEGANDO à janela não é um passo do teclado: um
+                # diálogo que abre entrega o foco ao primeiro campo dele com o
+                # mesmo motivo de um Tab, e o anel saltava para lá sozinho toda
+                # vez que o caderno era reaberto. O que conta é o foco ANDANDO
+                # de um widget para outro dentro da janela.
+                anterior, self._ultimo_foco = self._ultimo_foco, alvo
+                if (
+                    self._ao_focar is not None
+                    and anterior is not None
+                    and anterior is not alvo
+                    and evento.reason() in _FOCO_DE_TECLADO
+                ):
+                    self._ao_focar(alvo)
         elif tipo == QEvent.Type.Leave and alvo is self._janela:
             self._ultimo_movimento = None
             self._ao_mover(None, None)
@@ -243,7 +294,9 @@ class CursorVivo(QObject):
         self._bordas = bordas
         self.vidro = _VidroDoCursor(self, janela)
         self.campo = CampoMagnetico(janela)
-        self._rastreador = RastreadorDeCursor(janela, self._mover, self._clicar)
+        self._rastreador = RastreadorDeCursor(
+            janela, self._mover, self._clicar, self._focar
+        )
         self._relogio = QTimer(self)
         self._relogio.setTimerType(Qt.TimerType.PreciseTimer)
         self._relogio.timeout.connect(self._quadro)
@@ -266,6 +319,7 @@ class CursorVivo(QObject):
 
     def esquecer(self) -> None:
         """A janela se escondeu: o cursor que estava nela não está mais."""
+        self._rastreador.esquecer_foco()
         self._cenario.apagar_cursor()
         self._alvo = None
         self.campo.mover(None)
@@ -303,6 +357,9 @@ class CursorVivo(QObject):
             return
         self._cenario.pulsar(ponto)
         self.sincronizar()
+
+    def _focar(self, alvo: QWidget) -> None:
+        self._mover(centro_de(alvo, self._janela), alvo)
 
     def _quadro(self) -> None:
         agora = self._cronometro.elapsed() / 1000.0

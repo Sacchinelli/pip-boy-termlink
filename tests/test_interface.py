@@ -2879,6 +2879,88 @@ def main() -> int:
     janela.campo_atmosfera.setCurrentText(atmosfera_palavras)
     aplicacao.processEvents()
 
+    print("o foco do teclado leva a luz")
+    atmosfera_foco = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    aplicacao.processEvents()
+
+    def focar(alvo: QWidget, motivo: Qt.FocusReason = Qt.FocusReason.TabFocusReason) -> None:
+        QApplication.sendEvent(alvo, QFocusEvent(QEvent.Type.FocusIn, motivo))
+
+    # -- O primeiro foco CHEGA à janela; ele não é um passo do teclado.
+    janela._rastreador.esquecer_foco()
+    janela._cursor_mudou(None)
+    aguardar(lambda: janela._cenario.luz[1] == 0.0)
+    focar(janela.botao_caderno)
+    checar(
+        janela._cenario.cursor is None,
+        "o foco chegando à janela não acende nada: um diálogo que abre faria isso sozinho",
+    )
+
+    # -- Daí em diante, o foco que ANDA leva a luz e o anel junto.
+    focar(janela.botao_historico)
+    # O esperado é calculado AQUI, e não pedido a centro_de: uma conta errada
+    # lá mudaria os dois lados da comparação de uma vez.
+    meio_do_botao = QPointF(
+        janela.botao_historico.mapTo(janela, janela.botao_historico.rect().center())
+    )
+    checar(
+        janela._cenario.cursor == meio_do_botao,
+        f"o Tab para outro campo leva a luz até o meio dele ({janela._cenario.cursor})",
+    )
+    checar(
+        aguardar(lambda: anel_abraca(janela.botao_historico)),
+        "e o anel abraça o campo que recebeu o foco",
+    )
+
+    # -- O foco vindo do mouse não mexe: quem clicou já tem o cursor no lugar.
+    janela._cursor_mudou(QPointF(20.0, 20.0))
+    focar(janela.botao_caderno, Qt.FocusReason.MouseFocusReason)
+    checar(
+        janela._cenario.cursor == QPointF(20.0, 20.0),
+        "o foco vindo do mouse não move a luz",
+    )
+
+    # -- Com a atmosfera desligada, o teclado também não acende.
+    janela.campo_atmosfera.setCurrentText("Desligada")
+    aplicacao.processEvents()
+    focar(janela.botao_historico)
+    checar(janela._cenario.cursor is None, "com a atmosfera desligada, o foco não acende nada")
+    janela.campo_atmosfera.setCurrentText("Completa")
+    aplicacao.processEvents()
+
+    # -- Nas satélites, o mesmo — e reabrir uma delas não acende nada, porque o
+    #    foco que o diálogo entrega ao primeiro campo chega com motivo de Tab.
+    janela.abrir_caderno()
+    aplicacao.processEvents()
+    caderno_foco = janela._caderno
+    assert caderno_foco is not None
+    checar(
+        caderno_foco._cenario.cursor is None and not caderno_foco._cursor_vivo.animando,
+        "o caderno recém-aberto não acende nada",
+    )
+    focar(caderno_foco.busca)
+    focar(caderno_foco.botao_fechar)
+    checar(
+        caderno_foco._cenario.cursor
+        == QPointF(caderno_foco.botao_fechar.mapTo(caderno_foco, caderno_foco.botao_fechar.rect().center())),
+        "mas o Tab dentro dele leva a luz do caderno junto",
+    )
+    caderno_foco.close()
+    aplicacao.processEvents()
+    janela.abrir_caderno()
+    aplicacao.processEvents()
+    checar(
+        caderno_foco._cenario.cursor is None and not caderno_foco._cursor_vivo.animando,
+        "e reabrir o caderno volta a não acender nada",
+    )
+    caderno_foco.close()
+    aplicacao.processEvents()
+
+    janela._cursor_mudou(None)
+    janela.campo_atmosfera.setCurrentText(atmosfera_foco)
+    aplicacao.processEvents()
+
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()
     # nunca voltaria e a suíte penduraria. O tiro agendado é esse alguém.

@@ -82,7 +82,7 @@ from .componentes import (
     definir_fonte_da_luz,
     definir_movimento_reduzido,
 )
-from .cursor import CampoMagnetico, RastreadorDeCursor, abraco_de
+from .cursor import CampoMagnetico, RastreadorDeCursor, abraco_de, centro_de
 from .dialogo import avisar
 from .estilo import RAIO_PADRAO, RAIO_POR_FORMA, folha_da_janela
 from .moldura import (
@@ -248,7 +248,9 @@ class Janela(QWidget):
         # Depois dos relógios: o primeiro movimento já pede um quadro.
         self._campo_magnetico = CampoMagnetico(self)
         self._alvo_do_anel: QWidget | None = None
-        self._rastreador = RastreadorDeCursor(self, self._cursor_mudou, self._clique)
+        self._rastreador = RastreadorDeCursor(
+            self, self._cursor_mudou, self._clique, self._foco_mudou
+        )
         self._aplicar_preferencias()
         self._aplicar_tema()
         self._registrar_atalhos()
@@ -883,6 +885,17 @@ class Janela(QWidget):
         # Sempre, e não só com o relógio parado: com ele correndo no passo de
         # repouso, é aqui que ele acelera para acompanhar o cursor.
         self._relogios.sincronizar_animacao()
+
+    def _foco_mudou(self, alvo: QWidget) -> None:
+        """O teclado levou o foco para outro lugar: a luz vai junto.
+
+        Navegar por Tab era invisível fora do anel de foco de cada widget,
+        enquanto o mouse tinha luz, anel e rastro. Agora o foco de TECLADO
+        move a luz para o meio do campo que o recebeu — com o rastro mostrando
+        o caminho — e o anel o abraça, como faria o cursor. O foco vindo do
+        mouse não passa por aqui: quem clicou já tem o cursor no lugar.
+        """
+        self._cursor_mudou(centro_de(alvo, self), alvo)
 
     def _clique(self, ponto: QPointF) -> None:
         """Todo clique na janela solta uma onda do ponto tocado."""
