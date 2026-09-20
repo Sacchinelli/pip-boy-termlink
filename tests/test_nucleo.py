@@ -1021,6 +1021,27 @@ def teste_design() -> None:
     for falha in falhas:
         print(f"         {falha}")
 
+    # --- Cada ambiente é mesmo um ambiente ---
+    # A promessa do seletor é que trocar o jogo troca a janela inteira. Estas
+    # quatro colunas são o que sustenta isso, e duas delas já tinham colidido
+    # em silêncio no passado: temas diferentes caindo na MESMA fonte de
+    # reserva. Colisão aqui não quebra nada — ela só apaga a identidade, que é
+    # o defeito mais fácil de não ver.
+    from pipboy.sons import RECEITAS
+
+    colunas = {
+        "primeira fonte desejada": [t.font_candidates[0] for t in TEMAS.values()],
+        "cor de tela": [t.screen for t in TEMAS.values()],
+        "acento": [t.accent for t in TEMAS.values()],
+        "timbre declarado": [(r.forma, r.grave, r.agudo) for r in RECEITAS.values()],
+    }
+    for nome_coluna, valores in colunas.items():
+        repetidos = sorted({v for v in valores if valores.count(v) > 1})
+        checar(
+            not repetidos,
+            f"nenhum ambiente repete o(a) {nome_coluna} de outro ({repetidos})",
+        )
+
     # Uma paleta clara não é usada hoje, mas a derivação não pode quebrar nela.
     checar(design.legivel_sobre("#ffffff").startswith("#0"), "texto escuro sobre fundo claro")
     checar(design.legivel_sobre("#000000").startswith("#f"), "texto claro sobre fundo escuro")

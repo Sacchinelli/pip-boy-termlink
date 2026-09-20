@@ -33,9 +33,6 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Final
 
 from PySide6.QtCore import QEasingCurve, QPointF, QRect, QRectF, Qt
-
-if TYPE_CHECKING:
-    from ..themes import GameTheme
 from PySide6.QtGui import (
     QColor,
     QImage,
@@ -46,6 +43,11 @@ from PySide6.QtGui import (
     QRadialGradient,
     QRegion,
 )
+
+from .moldura import ALTURA_BARRA
+
+if TYPE_CHECKING:
+    from ..themes import GameTheme
 
 
 # --------------------------------------------------------------------- Receita
@@ -67,6 +69,7 @@ class Atmosfera:
     brilho_y: float = 0.5           # posição vertical do halo (0 topo, 1 base)
     grade: float = 0.0              # grade técnica
     passo_grade: int = 40
+    cantoneiras: float = 0.0        # colchetes de canto e marcas de meio (visor)
     fibras: float = 0.0             # fibras horizontais de papel/couro
 
     # Camadas vivas
@@ -131,14 +134,17 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
         grao=0.06, vinheta=0.60, brilho=0.24, brilho_y=0.50,
         particulas="motes", densidade=38, forma="arredondada", semente=41,
      brilho_texto=0.18,),
-    # Visor tático: grade técnica, vinheta seca, sem firula. A grade é a
-    # identidade INTEIRA deste tema — não há partícula, varredura nem
-    # tremulação para carregá-lo — então ela precisa de intensidade
-    # suficiente para ser vista. Em 0.16 ela tocava 5% dos pixels com uma
-    # variação de sete níveis: existia no código e não na tela.
+    # Campo de batalha moderno: pó de escombro no ar, ruído de rádio e o
+    # enquadramento de um visor. A grade continua, mas mais fina e mais
+    # espaçada — ela era a identidade inteira e tinha de gritar; agora são as
+    # cantoneiras que dizem "equipamento apontado para alguma coisa", e a
+    # grade volta ao papel de retícula de fundo. O pó é cinza de cinza, e não
+    # laranja: partícula na cor do acento vira vaga-lume, e aqui é escombro.
     "FPS / Multiplayer": Atmosfera(
-        grao=0.03, grade=0.5, passo_grade=44, vinheta=0.52, brilho=0.12,
-        brilho_y=0.5, forma="chanfrada", semente=43,
+        grao=0.05, grade=0.3, passo_grade=58, vinheta=0.6, brilho=0.1,
+        brilho_y=0.62, cantoneiras=0.55, particulas="poeira", densidade=20,
+        interferencia=0.12, forma="chanfrada", semente=43,
+        cor_viva="#c3ccb8",
     ),
     # Neutro: só profundidade, para não competir com jogo nenhum.
     "Genérico / Outro": Atmosfera(
@@ -875,6 +881,7 @@ class Cenario:
             a,
             grao=a.grao * i, varredura=a.varredura * i, vinheta=a.vinheta * i,
             brilho=a.brilho * i, grade=a.grade * i, fibras=a.fibras * i,
+            cantoneiras=a.cantoneiras * i,
             tremulacao=a.tremulacao * i, interferencia=a.interferencia * i,
             densidade=int(a.densidade * i),
         )
@@ -1254,6 +1261,8 @@ class Cenario:
             # deliberadamente neutro, que mede 2.64. A camada existia e não
             # aparecia.
             self._camada_grade(pintor, largura, altura, a, self._tema)
+        if a.cantoneiras > 0 and self._tema is not None:
+            self._camada_cantoneiras(pintor, largura, altura, a, self._tema)
         if a.vinheta > 0:
             self._camada_vinheta(pintor, largura, altura, a)
         pintor.end()
@@ -1319,6 +1328,58 @@ class Cenario:
             for y in range(0, altura, passo * 4):
                 pintor.drawLine(x - 4, y, x + 4, y)
                 pintor.drawLine(x, y - 4, x, y + 4)
+
+    @staticmethod
+    def _camada_cantoneiras(
+        pintor: QPainter, largura: int, altura: int, a: Atmosfera, t: GameTheme
+    ) -> None:
+        """Colchetes nos cantos e marcas no meio das bordas: o visor enquadra.
+
+        A grade técnica sozinha não faz um visor — ela faz papel milimetrado, e
+        era a identidade inteira do tema de FPS. O que diz "isto é um
+        equipamento apontado para alguma coisa" é o ENQUADRAMENTO: quatro
+        colchetes recuados da borda e um tique no meio de cada lado, como a
+        moldura de um alvo travado.
+
+        Custa uma vez: vai no pixmap do vidro, que só se refaz quando a janela
+        muda de tamanho ou de tema.
+        """
+        recuo, braco, tique = 16.0, 34.0, 7.0
+        # O topo desce a barra de título inteira: o vidro cobre a janela toda,
+        # e um colchete a 16 px do alto atravessava o botão de fechar. O visor
+        # enquadra a TELA, não a moldura da janela — e é de moldura.py que sai
+        # a altura dessa barra, para as duas não saírem do lugar juntas.
+        topo = recuo + ALTURA_BARRA
+        caixa = QRectF(recuo, topo, largura - 2 * recuo, altura - recuo - topo)
+        if caixa.width() < braco * 3 or caixa.height() < braco * 3:
+            # Janela pequena demais: quatro colchetes encostando um no outro
+            # viram uma moldura, que é o oposto de um enquadramento.
+            return
+        cor = QColor(t.primary)
+        cor.setAlphaF(min(1.0, a.cantoneiras * 0.55))
+        caneta = QPen(cor)
+        caneta.setWidthF(1.4)
+        caneta.setCapStyle(Qt.PenCapStyle.FlatCap)
+        pintor.setPen(caneta)
+        pintor.setBrush(Qt.BrushStyle.NoBrush)
+        for x, y, dx, dy in (
+            (caixa.left(), caixa.top(), 1.0, 1.0),
+            (caixa.right(), caixa.top(), -1.0, 1.0),
+            (caixa.left(), caixa.bottom(), 1.0, -1.0),
+            (caixa.right(), caixa.bottom(), -1.0, -1.0),
+        ):
+            pintor.drawLine(QPointF(x, y), QPointF(x + dx * braco, y))
+            pintor.drawLine(QPointF(x, y), QPointF(x, y + dy * braco))
+        meio = QColor(t.accent)
+        meio.setAlphaF(min(1.0, a.cantoneiras * 0.45))
+        caneta_meio = QPen(meio)
+        caneta_meio.setWidthF(1.4)
+        pintor.setPen(caneta_meio)
+        cx, cy = caixa.center().x(), caixa.center().y()
+        pintor.drawLine(QPointF(cx, caixa.top()), QPointF(cx, caixa.top() + tique))
+        pintor.drawLine(QPointF(cx, caixa.bottom()), QPointF(cx, caixa.bottom() - tique))
+        pintor.drawLine(QPointF(caixa.left(), cy), QPointF(caixa.left() + tique, cy))
+        pintor.drawLine(QPointF(caixa.right(), cy), QPointF(caixa.right() - tique, cy))
 
     @staticmethod
     def _camada_fibras(
