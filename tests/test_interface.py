@@ -2961,6 +2961,210 @@ def main() -> int:
     janela.campo_atmosfera.setCurrentText(atmosfera_foco)
     aplicacao.processEvents()
 
+    print("a paleta alcança o que a janela faz")
+    from PySide6.QtGui import QKeyEvent
+
+    from pipboy.banco import dobrar
+    from pipboy.interface.paleta import LIMITE, Comando, Paleta, filtrar, pontuar
+
+    comandos = janela.comandos()
+    grupos = {c.grupo for c in comandos}
+    titulos = {c.titulo for c in comandos}
+    persona_antes = janela.campo_persona.currentText()
+    tamanho_antes = janela.campo_tamanho_texto.currentText()
+
+    # -- A lista é GERADA pelos seletores da lateral. Uma voz nova em VOZES
+    #    aparece aqui sem ninguém vir mexer na paleta; uma lista copiada à mão
+    #    envelheceria no primeiro acréscimo, em silêncio.
+    vozes = {janela.campo_voz.itemText(i) for i in range(janela.campo_voz.count())}
+    checar(
+        bool(vozes) and vozes <= titulos,
+        f"cada voz do seletor virou um comando ({len(vozes)} vozes)",
+    )
+    checar(
+        {c.grupo for c in comandos if c.titulo in vozes} == {"Voz"},
+        "e o grupo delas é o rótulo do próprio campo",
+    )
+    rotulos = {c.accessibleName() for c in janela.campos.values() if c.isEnabled()}
+    checar(
+        len(rotulos) >= 8 and rotulos <= grupos,
+        f"todos os campos habilitados da lateral estão na paleta ({sorted(rotulos - grupos)})",
+    )
+    chaves = {
+        c.text(): c
+        for c in (janela.chip_alto_falante, janela.chip_jogo, janela.chip_busca)
+    }
+    checar(
+        {nome for nome, c in chaves.items() if c.isEnabled()} == titulos & set(chaves),
+        f"as chaves habilitadas também, e só elas ({sorted(titulos & set(chaves))})",
+    )
+    chave_af = next(c for c in comandos if c.titulo == "Alto-falante (anti-eco)")
+    checar(
+        chave_af.dica == ("ligada" if janela.chip_alto_falante.isChecked() else "desligada"),
+        f"a dica de uma chave diz como ela está ({chave_af.dica})",
+    )
+    atual_voz = next(c for c in comandos if c.titulo == janela.campo_voz.currentText())
+    checar(atual_voz.dica == "atual", "e o valor em uso se anuncia como o atual")
+
+    # -- Nada aqui abre conexão. Iniciar e enviar consomem crédito por minuto;
+    #    encerrar não custa e por isso entra, mas só quando há o que encerrar.
+    proibidas = (janela.iniciar_sessao, janela.alternar_sessao, janela.enviar_texto)
+    checar(
+        all(c.acao not in proibidas for c in comandos),
+        "a paleta não oferece nada que chame a API",
+    )
+    checar("Encerrar a sessão" not in titulos, "e sem sessão no ar, nem o encerrar aparece")
+
+    # -- O que a janela proíbe, a paleta proíbe: um campo desabilitado não
+    #    gera comando. Sem isto, trocar o jogo no meio de uma sessão — que a
+    #    lateral impede com um campo cinza — teria uma porta dos fundos.
+    janela.campo_jogo.setEnabled(False)
+    sem_jogo = janela.comandos()
+    janela.campo_jogo.setEnabled(True)
+    checar(
+        all(c.grupo != "Jogo" for c in sem_jogo),
+        "um seletor desabilitado não entra na paleta",
+    )
+    checar(any(c.grupo == "Jogo" for c in janela.comandos()), "e volta quando ele volta")
+
+    # -- A busca: por subsequência, sem acento e sem caixa.
+    checar(pontuar("acao", "Ação") is not None, "a busca ignora acento e caixa")
+    checar(pontuar("tamtex", "Tamanho do texto") is not None, "e casa letras salteadas")
+    checar(pontuar("zx", "Caderno") is None, "o que não está lá não casa")
+    achados_cad = filtrar(comandos, "cad")
+    checar(
+        achados_cad[0].comando.titulo == "Abrir o caderno",
+        f"'cad' põe o caderno em primeiro ({achados_cad[0].comando.titulo})",
+    )
+    marcado = "".join(achados_cad[0].comando.titulo[i] for i in achados_cad[0].marcas)
+    checar(dobrar(marcado) == "cad", f"e as marcas apontam as letras que casaram ({marcado})")
+    achados_voz = filtrar(comandos, "voz")
+    checar(
+        len(achados_voz) > 1 and all(a.comando.grupo == "Voz" for a in achados_voz),
+        "procurar pelo grupo traz o grupo inteiro",
+    )
+    checar(
+        all(a.marcas == () for a in achados_voz),
+        "sem acender letra nenhuma: o que casou foi o grupo, e não o título",
+    )
+    checar(len(filtrar(comandos, "a")) == LIMITE, f"a lista para em {LIMITE} linhas")
+    checar(
+        [a.comando for a in filtrar(comandos, "   ")] == comandos[:LIMITE],
+        "sem busca, as ações da janela — e não um retângulo vazio",
+    )
+
+    # -- A caixa: escolha pelo teclado, pelo mouse, e a ação devolvida em vez
+    #    de executada.
+    def teclar(alvo: QWidget, tecla: Qt.Key) -> None:
+        # No campo de busca, e não na paleta: as setas SOBEM do QLineEdit para
+        # o diálogo, e é essa subida que deixa a lista ser percorrida sem
+        # tirar o foco de onde se digita.
+        QApplication.sendEvent(
+            alvo, QKeyEvent(QEvent.Type.KeyPress, tecla, Qt.KeyboardModifier.NoModifier)
+        )
+
+    paleta = Paleta(janela, comandos)
+    paleta.show()
+    aplicacao.processEvents()
+    checar(paleta.focusWidget() is paleta.campo, "a paleta abre com o foco no campo de busca")
+    checar(
+        paleta.escolha is not None and paleta.linhas[0].escolhida,
+        "com a primeira linha escolhida",
+    )
+    primeira = paleta.escolha
+    teclar(paleta.campo, Qt.Key.Key_Down)
+    checar(paleta.escolha is not primeira and paleta.linhas[1].escolhida, "a seta desce")
+    teclar(paleta.campo, Qt.Key.Key_Up)
+    checar(paleta.escolha is primeira, "e volta")
+    teclar(paleta.campo, Qt.Key.Key_Up)
+    checar(
+        paleta.escolha is comandos[LIMITE - 1],
+        "subir na primeira dá a volta e cai na última",
+    )
+    entrar(paleta.linhas[2], 20.0, 10.0)
+    aplicacao.processEvents()
+    checar(paleta.escolha is comandos[2], "o mouse escolhe a linha por onde passa")
+
+    paleta.campo.setText("historico")
+    aplicacao.processEvents()
+    escolhida = paleta.escolha
+    checar(
+        escolhida is not None and escolhida.titulo == "Ver o histórico",
+        f"digitar refaz a lista ({None if escolhida is None else escolhida.titulo})",
+    )
+    paleta._ativar()
+    checar(
+        paleta.escolhido == janela.abrir_historico and not paleta.isVisible(),
+        "o Enter fecha a paleta e GUARDA a ação, em vez de executá-la de dentro",
+    )
+
+    paleta_vazia = Paleta(janela, comandos)
+    paleta_vazia.show()
+    paleta_vazia.campo.setText("qzqzqz")
+    aplicacao.processEvents()
+    checar(
+        paleta_vazia.escolha is None and paleta_vazia.vazio.isVisible(),
+        "sem resultado, a paleta diz que não achou",
+    )
+    paleta_vazia._ativar()
+    checar(paleta_vazia.escolhido is None, "e o Enter não escolhe nada")
+    checar(not paleta_vazia.grab().isNull(), "a paleta se desenha")
+    paleta_vazia.close()
+
+    # -- Cada comando mexe no SEU campo. Sem o alvo amarrado em cada fechadura,
+    #    todas olhariam a última variável do laço e mexeriam no mesmo lugar.
+    voz_antiga = janela.campo_voz.currentText()
+    outra_voz = next(v for v in sorted(vozes) if v != voz_antiga)
+    next(c for c in comandos if c.titulo == outra_voz and c.grupo == "Voz").acao()
+    aplicacao.processEvents()
+    checar(
+        janela.campo_voz.currentText() == outra_voz
+        and janela.campo_persona.currentText() == persona_antes
+        and janela.campo_tamanho_texto.currentText() == tamanho_antes,
+        f"escolher uma voz mexe só no campo dela ({janela.campo_voz.currentText()})",
+    )
+    janela.campo_voz.setCurrentText(voz_antiga)
+    af_antes, web_antes = janela.chip_alto_falante.isChecked(), janela.chip_busca.isChecked()
+    chave_af.acao()
+    checar(
+        janela.chip_alto_falante.isChecked() is not af_antes
+        and janela.chip_busca.isChecked() is web_antes,
+        "e alternar uma chave alterna só aquela chave",
+    )
+    chave_af.acao()
+
+    # -- A elisão: um nome de microfone não cabe na linha, e a letra que sumiu
+    #    não pode ser acesa em cima das reticências.
+    linha_teste = paleta.linhas[0]
+    linha_teste.definir(Comando("Microfone comprido demais", "Áudio", lambda: None), (2, 20))
+    checar(
+        linha_teste._marcas_visiveis("Microfone com…") == (2,),
+        "a letra acesa que a elisão comeu não é pintada",
+    )
+    paleta.close()
+
+    # -- Ctrl+K abre de verdade, e a ação escolhida roda com a janela de volta.
+    def _escolher_na_paleta() -> None:
+        ativo = aplicacao.activeModalWidget()
+        if isinstance(ativo, Paleta):
+            ativo.campo.setText("caderno")
+            ativo._ativar()
+        elif ativo is not None:
+            ativo.close()
+
+    QTimer.singleShot(150, _escolher_na_paleta)
+    # Rede de segurança: um exec() sem ninguém para fechá-lo penduraria a suíte.
+    QTimer.singleShot(2500, _escolher_na_paleta)
+    janela.abrir_paleta()
+    aplicacao.processEvents()
+    checar(
+        janela._caderno is not None and janela._caderno.isVisible(),
+        "Ctrl+K, 'caderno' e Enter abrem o caderno depois que a paleta fecha",
+    )
+    if janela._caderno is not None:
+        janela._caderno.close()
+    aplicacao.processEvents()
+
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()
     # nunca voltaria e a suíte penduraria. O tiro agendado é esse alguém.
@@ -2985,8 +3189,9 @@ def main() -> int:
         for a in janela.findChildren(QShortcut, options=Qt.FindChildOption.FindDirectChildrenOnly)
     }
     checar(
-        instalados == {"F12", "Esc", "Ctrl+B", "Ctrl+H", "Ctrl+R", "Ctrl+M", "Ctrl+L"},
-        f"os sete atalhos locais estão instalados ({sorted(instalados)})",
+        instalados
+        == {"F12", "Esc", "Ctrl+B", "Ctrl+H", "Ctrl+R", "Ctrl+M", "Ctrl+L", "Ctrl+K"},
+        f"os oito atalhos locais estão instalados ({sorted(instalados)})",
     )
     janela.conversa.setFocus()
     aplicacao.processEvents()
