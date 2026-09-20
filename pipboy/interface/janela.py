@@ -74,6 +74,7 @@ from .atalhos import Atalhos, globais_disponiveis
 from .atmosfera import Cenario, atmosfera_de
 from .caderno import JanelaCaderno
 from .componentes import (
+    Botao,
     CampoSelecao,
     Desvanecer,
     LuzDoCursor,
@@ -101,6 +102,7 @@ from .montagem import (
     NIVEIS_GANHO_JOGO,
 )
 from .movimento import SinalFlutuante
+from .paleta import Comando, Paleta
 from .preferencias import Escolha, Marca, VinculoDePreferencias
 from .relogios import Batidas, Relogios
 from .tela_inicial import Resumo
@@ -1209,10 +1211,6 @@ class Janela(QWidget):
         sistema inteiro quebraria o menu de pausa do jogo, que é exatamente
         onde este programa é usado.
         """
-        def focar_entrada() -> None:
-            self.entrada_texto.setFocus()
-            self.entrada_texto.selectAll()
-
         self._atalhos = Atalhos(
             self,
             locais={
@@ -1222,7 +1220,8 @@ class Janela(QWidget):
                 "Ctrl+H": self.abrir_historico,
                 "Ctrl+R": self.revisar_agora,
                 "Ctrl+M": self.entrar_modo_compacto,
-                "Ctrl+L": focar_entrada,
+                "Ctrl+L": self.focar_texto,
+                "Ctrl+K": self.abrir_paleta,
             },
             # Pares, e não um dicionário: chaveado pela combinação, dois
             # atalhos com a mesma tecla no .env colapsariam num só antes de
@@ -1396,6 +1395,91 @@ class Janela(QWidget):
             return
         self.entrada_texto.clear()
         self._worker.send_text(texto)
+
+    def focar_texto(self) -> None:
+        """Leva o cursor para o campo de texto, com o que havia lá selecionado."""
+        self.entrada_texto.setFocus()
+        self.entrada_texto.selectAll()
+
+    def comandos(self) -> list[Comando]:
+        """Tudo o que a paleta alcança, montado a partir da própria janela.
+
+        A lista NÃO é escrita à mão: as opções saem dos seletores da lateral e
+        das chaves, lidos agora. Uma voz nova em ``VOZES``, um tema novo em
+        ``TEMAS``, um campo novo na coluna — todos entram na paleta sem que
+        ninguém precise lembrar de vir aqui, e uma lista copiada envelheceria
+        no primeiro acréscimo, em silêncio.
+
+        O que está desabilitado fica de fora: o seletor de jogo, durante uma
+        sessão, é cinza porque o contexto vai na abertura da conexão. Sem esta
+        regra a paleta seria a porta dos fundos para trocá-lo.
+
+        Iniciar uma sessão e enviar uma mensagem chamam a Live API e consomem
+        crédito; nenhum dos dois entra aqui. ENCERRAR entra: terminar não
+        custa, e é o que se procura com pressa.
+        """
+        lista = [
+            Comando("Abrir o caderno", "Ação", self.abrir_caderno, "Ctrl+B",
+                    "vocabulário palavras termos salvos"),
+            Comando("Ver o histórico", "Ação", self.abrir_historico, "Ctrl+H",
+                    "conversas sessões falas transcrição"),
+            Comando("Revisar cartões", "Ação", self.revisar_agora, "Ctrl+R",
+                    "estudar revisão vencidas repetição espaçada"),
+            Comando("Modo compacto", "Ação", self.entrar_modo_compacto, "Ctrl+M",
+                    "cápsula sobre o jogo janela pequena"),
+            Comando("Escrever no campo de texto", "Ação", self.focar_texto, "Ctrl+L",
+                    "digitar teclado mensagem"),
+        ]
+        if self.sessao_ativa:
+            lista.append(Comando("Encerrar a sessão", "Ação", self.encerrar_sessao, "Esc",
+                                 "parar terminar desligar"))
+            lista.append(Comando(
+                "Reativar o microfone" if self.mudo else "Silenciar o microfone",
+                "Ação", self.alternar_mudo, chaves="mudo mute voz microfone",
+            ))
+        for chip in (self.chip_alto_falante, self.chip_jogo, self.chip_busca):
+            if not chip.isEnabled():
+                continue
+            # O parâmetro com valor padrão amarra o alvo DESTA volta. Sem
+            # ele, as três fechaduras olhariam a mesma variável do laço, e a
+            # última venceria: os três comandos alternariam a busca na web.
+            def alternar(alvo: Botao = chip) -> None:
+                alvo.setChecked(not alvo.isChecked())
+
+            lista.append(Comando(
+                chip.text(), "Chave", alternar,
+                "ligada" if chip.isChecked() else "desligada",
+                "alternar ligar desligar",
+            ))
+        for campo in self.campos.values():
+            if not campo.isEnabled():
+                continue
+            rotulo = campo.accessibleName()
+            atual = campo.currentText()
+            for posicao in range(campo.count()):
+                valor = campo.itemText(posicao)
+
+                def escolher(alvo: CampoSelecao = campo, escolha: str = valor) -> None:
+                    alvo.setCurrentText(escolha)
+
+                lista.append(Comando(
+                    valor, rotulo, escolher, "atual" if valor == atual else "",
+                ))
+        return lista
+
+    def abrir_paleta(self) -> None:
+        """A paleta de comandos (Ctrl+K).
+
+        A ação escolhida roda DEPOIS que a paleta fecha, e não de dentro dela:
+        "Revisar cartões" abre um modal, e um modal nascido dentro de outro
+        que está se fechando fica órfão de janela-mãe na hora de se posicionar.
+        """
+        paleta = Paleta(self, self.comandos())
+        paleta.exec()
+        escolhido = paleta.escolhido
+        paleta.deleteLater()
+        if escolhido is not None:
+            escolhido()
 
     def abrir_caderno(self) -> None:
         """Abre (ou traz para a frente) o visualizador do caderno.

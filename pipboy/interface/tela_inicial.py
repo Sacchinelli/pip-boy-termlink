@@ -540,8 +540,16 @@ class TelaInicial(QWidget):
         base.setContentsMargins(0, design.ESPACO_MD, 0, 0)
         base.setSpacing(2)
         self.atalhos = rotulo("inicialRodape")
+        # A paleta é invisível por natureza: ninguém descobre um Ctrl+K
+        # sozinho. Ela se anuncia aqui, ao lado dos outros atalhos, que é onde
+        # quem está parado na tela inicial procura o que fazer.
+        self.comandos = rotulo("inicialRodape")
+        self.comandos.setText(
+            "Ctrl+K abre a paleta de comandos: digite o que quer e aperte Enter."
+        )
         self.diagnostico = rotulo("inicialRodape")
         base.addWidget(self.atalhos)
+        base.addWidget(self.comandos)
         base.addWidget(self.diagnostico)
 
         # Os blocos, na ordem em que entram em cascata.
@@ -566,7 +574,8 @@ class TelaInicial(QWidget):
         self.titulo.setFont(janela.fonte("display", ui=False))
         for item, papel in (
             (self.corpo, "corpo"), (self.sequencia, "legenda"), (self.secao_exemplos, "secao"),
-            (self.atalhos, "micro"), (self.diagnostico, "micro"),
+            (self.atalhos, "micro"), (self.comandos, "micro"),
+            (self.diagnostico, "micro"),
         ):
             item.setFont(janela.fonte(papel, ui=papel != "vocab"))
 
