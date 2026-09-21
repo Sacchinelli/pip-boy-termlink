@@ -40,17 +40,19 @@ Cada jogo tem o seu ambiente. A troca é imediata, sem reiniciar o programa.
 | Jogo | Ambiente |
 | --- | --- |
 | Fallout | Terminal CRT de fósforo verde (Pip-Boy 3000 MK IV) |
-| Elden Ring | Pergaminho dourado sobre pedra escura |
-| Skyrim | Crônica nórdica em azul-gelo e ouro |
+| Elden Ring | Ouro sobre quase preto, com motes subindo |
+| Skyrim | Noite de inverno no norte: gelo, neve e a aurora atravessando o céu |
 | The Witcher 3 | Bestiário sóbrio em prata e vermelho-sangue |
-| Red Dead | Diário sépia de couro e papel envelhecido |
-| GTA | Rádio pirata em neon rosa e ciano |
+| Red Dead | Película de cinema mudo: sépia, poeira no facho e riscos de rolo gasto |
+| GTA | Rádio pirata sobre a cidade: noite quase preta e o pôr do sol de neon no horizonte |
 | Cyberpunk 2077 | Interface netrunner em amarelo e ciano |
-| RPG / Aventura (geral) | Grimório arcano em violeta e ouro |
+| RPG / Aventura (geral) | Grimório de beringela e ouro, com o selo desenhado na página |
 | FPS / Multiplayer | Rede tática de esquadrão: grafite de oliva, laranja de sinalização e o enquadramento de um visor |
 | Genérico / Outro | Tema neutro escuro para qualquer jogo |
 
 Cada ambiente tem também uma **atmosfera** — varredura, grão, vinheta, partículas, interferência e a forma dos cantos — sintetizada com o QPainter. Não há textura, arte, logotipo ou fonte de terceiros no repositório: o que caracteriza um jogo na tela não é a cor, é o material, e material se desenha. A intensidade tem três níveis na coluna lateral (**Completa**, **Discreta**, **Desligada**), porque varredura e cintilação são obstáculo real para baixa visão.
+
+**Cada ambiente tem uma camada que só ele tem.** É o que impede um jogo de ser outro com outra cor, e foi a régua que mostrou onde isso faltava: *Skyrim* media 2,87 do tema neutro, e a rádio pirata do *GTA* media 4,57 do grimório do *RPG* — dois fundos escuros parecidos e nada que dissesse de que jogo eram. Hoje a crônica nórdica tem a **aurora** cruzando o alto do céu, o grimório tem o **selo** arcano desenhado na página, a rádio tem a **linha do horizonte** de neon com o brilho subindo dela, o velho oeste tem os **riscos** verticais de uma película gasta e o visor tático tem as **cantoneiras**. Nenhuma delas custa por quadro: todas vão no pixmap do vidro, que só se refaz ao mudar de tamanho ou de tema. As paletas foram junto — gelo no lugar do ardósia, beringela no lugar do índigo, ouro sobre quase preto — e o par mais parecido da tabela passou de **2,87 para 5,27**.
 
 O ambiente de **FPS** foi o primeiro a ser refeito com a régua na mão. Ele media 3,97 de distância do tema deliberadamente *neutro* (`ferramentas/distancia_dos_temas.py`) — era o tema neutro com uma grade por cima, e a grade era a identidade inteira dele. Hoje é um campo de batalha moderno: grafite com fundo de **oliva** no lugar do cinza-azulado de escritório, **laranja de sinalização**, pó de escombro no ar, ruído de rádio em rajadas e uma camada nova — **cantoneiras**, os colchetes de canto e os tiques de meio de borda que dizem *equipamento apontado para alguma coisa*, onde papel milimetrado não dizia. O botão diz **DESDOBRAR** e **EXTRAIR**, o assistente é o líder do seu esquadrão, e o blip virou o estalo grave de um canal de rádio abrindo. O vizinho mais próximo dele passou de 3,97 (Genérico) para 8,82 (Fallout).
 

@@ -3287,14 +3287,6 @@ def main() -> int:
 
     receita_visor = RECEITAS_VISOR["FPS / Multiplayer"]
     checar(receita_visor.cantoneiras > 0, "o tema de FPS pede o enquadramento")
-    checar(
-        all(
-            r.cantoneiras == 0.0
-            for nome, r in RECEITAS_VISOR.items()
-            if nome != "FPS / Multiplayer"
-        ),
-        "e é o único: a moldura de visor é a identidade dele",
-    )
 
     def tinta_do_visor(largura: int, altura: int, forca: float) -> tuple[bytes, int, int]:
         """Só a camada de cantoneiras, sobre o vazio: tinta total e onde ela cai."""
@@ -3367,6 +3359,115 @@ def main() -> int:
         cenario_visor._efetiva.cantoneiras == 0.0,
         "e a 'Desligada' o apaga",
     )
+
+    print("cada ambiente tem uma camada só dele")
+    # As camadas de assinatura são o que impede um ambiente de ser outro com
+    # outra cor. A régua (ferramentas/distancia_dos_temas.py) media 2,87 entre
+    # Skyrim e o tema NEUTRO, e 4,57 entre a rádio pirata e o grimório: dois
+    # fundos escuros parecidos e nada que dissesse de que jogo eram.
+    assinaturas = {
+        "aurora": "Skyrim",
+        "selo": "RPG / Aventura (geral)",
+        "horizonte": "GTA",
+        "arranhoes": "Red Dead",
+        "cantoneiras": "FPS / Multiplayer",
+    }
+    for campo, dono in assinaturas.items():
+        donos = sorted(
+            nome for nome, r in RECEITAS_VISOR.items() if getattr(r, campo) > 0
+        )
+        checar(donos == [dono], f"'{campo}' é assinatura de um ambiente só ({donos})")
+
+    def alfas_da_camada(
+        metodo: str, jogo: str, largura: int = 900, altura: int = 600, forca: float = -1.0
+    ) -> bytes:
+        """Só a camada pedida, sobre o vazio, no tema de quem a declara."""
+        receita = RECEITAS_VISOR[jogo]
+        campo = metodo.replace("_camada_", "")
+        if forca >= 0.0:
+            receita = trocar_campos(receita, **{campo: forca})
+        imagem = QImage(largura, altura, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem.fill(0)
+        pintor = QPainter(imagem)
+        pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+        getattr(CenarioVisor, metodo)(pintor, largura, altura, receita, TEMAS_VISOR[jogo])
+        pintor.end()
+        return bytes(imagem.constBits())[3::4]
+
+    # -- A aurora fica no CÉU: metade de cima, e não espalhada pela janela.
+    ceu = alfas_da_camada("_camada_aurora", "Skyrim")
+    tinta_alta = sum(ceu[: 300 * 900])
+    tinta_baixa = sum(ceu[300 * 900 :])
+    checar(
+        tinta_alta > tinta_baixa * 3,
+        f"a aurora fica no alto do céu ({tinta_alta} contra {tinta_baixa} embaixo)",
+    )
+    checar(
+        sum(alfas_da_camada("_camada_aurora", "Skyrim", forca=0.0)) == 0,
+        "e com a atmosfera desligada não existe",
+    )
+
+    # -- O selo é um ANEL: o miolo dele fica vazio, ou vira uma mancha por
+    #    cima do texto em vez de uma marca-d'água na página.
+    pagina = alfas_da_camada("_camada_selo", "RPG / Aventura (geral)")
+    centro_selo = sum(
+        pagina[y * 900 + x]
+        for y in range(int(600 * 0.52) - 40, int(600 * 0.52) + 40)
+        for x in range(int(900 * 0.66) - 40, int(900 * 0.66) + 40)
+    )
+    checar(sum(pagina) > 0 and centro_selo == 0, f"o selo é um anel, e não um disco ({centro_selo})")
+
+    # -- O horizonte é uma linha BAIXA, com o brilho subindo dela.
+    cidade = alfas_da_camada("_camada_horizonte", "GTA")
+    linhas = [sum(cidade[y * 900 : (y + 1) * 900]) for y in range(600)]
+    mais_acesa = linhas.index(max(linhas))
+    checar(
+        0.70 < mais_acesa / 600 < 0.78,
+        f"a linha do horizonte fica no terço de baixo ({mais_acesa / 600:.2f} da altura)",
+    )
+    checar(
+        sum(linhas[: int(600 * 0.4)]) == 0,
+        "e o céu acima dela fica limpo: o brilho sobe só um pedaço",
+    )
+
+    # -- Os arranhões são VERTICAIS: poucas colunas, muitas linhas.
+    pelicula = alfas_da_camada("_camada_arranhoes", "Red Dead")
+    colunas_risco = sum(
+        1 for x in range(900) if any(pelicula[y * 900 + x] for y in range(0, 600, 3))
+    )
+    linhas_risco = sum(
+        1 for y in range(600) if any(pelicula[y * 900 + x] for x in range(0, 900, 3))
+    )
+    checar(
+        0 < colunas_risco < 60 and linhas_risco > 300,
+        f"os riscos da película são verticais ({colunas_risco} colunas, {linhas_risco} linhas)",
+    )
+
+    # -- Todas as quatro obedecem à intensidade da atmosfera, como as antigas.
+    for campo, jogo in (
+        ("aurora", "Skyrim"), ("selo", "RPG / Aventura (geral)"),
+        ("horizonte", "GTA"), ("arranhoes", "Red Dead"),
+    ):
+        cheia = sum(alfas_da_camada(f"_camada_{campo}", jogo))
+        fraca = sum(alfas_da_camada(f"_camada_{campo}", jogo, forca=0.2 * getattr(
+            RECEITAS_VISOR[jogo], campo
+        )))
+        checar(
+            0 < fraca < cheia * 0.5,
+            f"a atmosfera atenua '{campo}' ({fraca} contra {cheia})",
+        )
+        # E pelo caminho de verdade: quem atenua é a receita EFETIVA, a que a
+        # intensidade escolhida no seletor produz. As medidas acima passam a
+        # força na mão e não provariam nada sobre esse caminho.
+        cenario_camada = CenarioVisor()
+        cenario_camada.definir(TEMAS_VISOR[jogo], RECEITAS_VISOR[jogo])
+        cenario_camada.definir_intensidade(0.5)
+        declarado = getattr(RECEITAS_VISOR[jogo], campo)
+        checar(
+            abs(getattr(cenario_camada._efetiva, campo) - declarado * 0.5) < 1e-9,
+            f"e a atmosfera 'Discreta' pela metade em '{campo}' "
+            f"({getattr(cenario_camada._efetiva, campo)})",
+        )
 
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()

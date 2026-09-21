@@ -70,6 +70,10 @@ class Atmosfera:
     grade: float = 0.0              # grade técnica
     passo_grade: int = 40
     cantoneiras: float = 0.0        # colchetes de canto e marcas de meio (visor)
+    aurora: float = 0.0             # fita de luz fria no alto do céu
+    selo: float = 0.0               # círculo arcano, como marca-d'água
+    horizonte: float = 0.0          # linha de neon com brilho, baixa na tela
+    arranhoes: float = 0.0          # riscos verticais de filme velho
     fibras: float = 0.0             # fibras horizontais de papel/couro
 
     # Camadas vivas
@@ -102,9 +106,12 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
         grao=0.07, vinheta=0.66, brilho=0.26, brilho_y=0.82, fibras=0.05,
         particulas="motes", densidade=46, forma="arredondada", semente=3,
     ),
-    # Nevasca fina e frio: vinheta azul, neve em diagonal, pedra granulada.
+    # Noite de inverno no norte: neve fina, pedra granulada e a aurora
+    # atravessando o alto do céu — que é justamente o que se olha para cima
+    # para ver, e o que faltava para esta crônica não ser o tema neutro com
+    # neve. O halo do fundo desceu: com a aurora no alto, os dois brigavam.
     "Skyrim": Atmosfera(
-        grao=0.06, vinheta=0.58, brilho=0.16, brilho_y=0.18,
+        grao=0.06, vinheta=0.58, brilho=0.10, brilho_y=0.72, aurora=0.6,
         particulas="neve", densidade=70, forma="reta", semente=19,
     ),
     # Couro e vela: grão grosso, halo quente lateral, brasas lentas.
@@ -112,16 +119,21 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
         grao=0.08, vinheta=0.64, brilho=0.18, brilho_y=0.35, fibras=0.06,
         particulas="brasas", densidade=26, forma="reta", semente=23,
     ),
-    # Papel envelhecido: fibras, poeira suspensa e muita vinheta de álbum.
+    # Película de cinema mudo: grão grosso, poeira no facho e os riscos
+    # verticais de um rolo gasto. Couro, pergaminho e papel velho dividem o
+    # chão quente com Elden Ring e Witcher; o que só o velho oeste tem não é
+    # a cor, é o SUPORTE.
     "Red Dead": Atmosfera(
         grao=0.10, vinheta=0.70, brilho=0.14, brilho_y=0.55, fibras=0.10,
-        particulas="poeira", densidade=34, forma="reta", semente=29,
+        arranhoes=0.5, particulas="poeira", densidade=34, forma="reta", semente=29,
     ),
-    # Fita de vídeo: varredura larga, neon estourado e interferência.
+    # Fita de vídeo apontada para a cidade: varredura larga, interferência e
+    # o pôr do sol de neon no horizonte — a imagem inteira deste ambiente, e
+    # o que ele não tinha. O halo saiu do alto: o brilho agora sobe da linha.
     "GTA": Atmosfera(
         grao=0.05, varredura=0.16, passo_varredura=4, vinheta=0.55,
-        brilho=0.30, brilho_y=0.25, interferencia=0.35, particulas="estatica",
-        densidade=14, forma="chanfrada", semente=31,
+        brilho=0.14, brilho_y=0.25, horizonte=0.7, interferencia=0.35,
+        particulas="estatica", densidade=14, forma="chanfrada", semente=31,
      brilho_texto=0.32,),
     # Interferência digital, varredura fina e chuva de dados descendo.
     "Cyberpunk 2077": Atmosfera(
@@ -129,9 +141,12 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
         brilho=0.24, brilho_y=0.30, interferencia=0.55, particulas="dados",
         densidade=30, forma="chanfrada", semente=37,
      brilho_texto=0.4,),
-    # Grimório: halo violeta ao centro e motes arcanos flutuando.
+    # Grimório: halo violeta, motes arcanos e o selo desenhado na página. O
+    # desenho não precisa ser legível para dizer de que livro ele é — e sem
+    # ele este ambiente e a rádio pirata eram dois fundos escuros arroxeados,
+    # a 4,57 um do outro.
     "RPG / Aventura (geral)": Atmosfera(
-        grao=0.06, vinheta=0.60, brilho=0.24, brilho_y=0.50,
+        grao=0.06, vinheta=0.60, brilho=0.24, brilho_y=0.50, selo=0.85,
         particulas="motes", densidade=38, forma="arredondada", semente=41,
      brilho_texto=0.18,),
     # Campo de batalha moderno: pó de escombro no ar, ruído de rádio e o
@@ -881,7 +896,8 @@ class Cenario:
             a,
             grao=a.grao * i, varredura=a.varredura * i, vinheta=a.vinheta * i,
             brilho=a.brilho * i, grade=a.grade * i, fibras=a.fibras * i,
-            cantoneiras=a.cantoneiras * i,
+            cantoneiras=a.cantoneiras * i, aurora=a.aurora * i, selo=a.selo * i,
+            horizonte=a.horizonte * i, arranhoes=a.arranhoes * i,
             tremulacao=a.tremulacao * i, interferencia=a.interferencia * i,
             densidade=int(a.densidade * i),
         )
@@ -1261,6 +1277,20 @@ class Cenario:
             # deliberadamente neutro, que mede 2.64. A camada existia e não
             # aparecia.
             self._camada_grade(pintor, largura, altura, a, self._tema)
+        # As quatro camadas de assinatura, cada uma de um ambiente só. Todas
+        # no VIDRO, e não no fundo: no fundo elas ficariam atrás da lateral
+        # (90% opaca) e do painel da conversa (62%), sobrando só nas margens —
+        # foi o que já aconteceu com a grade, que existia no código e não na
+        # tela. Luz que se vê por cima do conteúdo é luz que está na sala.
+        if self._tema is not None:
+            if a.aurora > 0:
+                self._camada_aurora(pintor, largura, altura, a, self._tema)
+            if a.selo > 0:
+                self._camada_selo(pintor, largura, altura, a, self._tema)
+            if a.horizonte > 0:
+                self._camada_horizonte(pintor, largura, altura, a, self._tema)
+            if a.arranhoes > 0:
+                self._camada_arranhoes(pintor, largura, altura, a, self._tema)
         if a.cantoneiras > 0 and self._tema is not None:
             self._camada_cantoneiras(pintor, largura, altura, a, self._tema)
         if a.vinheta > 0:
@@ -1328,6 +1358,147 @@ class Cenario:
             for y in range(0, altura, passo * 4):
                 pintor.drawLine(x - 4, y, x + 4, y)
                 pintor.drawLine(x, y - 4, x, y + 4)
+
+    @staticmethod
+    def _camada_aurora(
+        pintor: QPainter, largura: int, altura: int, a: Atmosfera, t: GameTheme
+    ) -> None:
+        """Uma fita de luz fria atravessando o alto: o céu do norte.
+
+        Skyrim media 2,87 do tema deliberadamente neutro — o mais perto que
+        dois ambientes chegavam. A crônica nórdica tinha neve caindo e mais
+        nada; o que falta a uma noite de inverno no norte é justamente o que
+        se olha para cima para ver.
+
+        São duas fitas sobrepostas, em cores diferentes e alturas diferentes,
+        porque uma só lê como um borrão centrado. A largura é maior que a da
+        janela de propósito: uma aurora que começa e acaba dentro da tela
+        vira uma mancha com bordas.
+        """
+        pintor.save()
+        pintor.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
+        pintor.setPen(Qt.PenStyle.NoPen)
+        for ordem, (cor_base, alto, espessura, forca) in enumerate((
+            (t.info, 0.15, 0.065, 1.0),
+            (t.primary, 0.26, 0.05, 0.7),
+        )):
+            centro = QPointF(largura * (0.36 + 0.30 * ordem), altura * alto)
+            fita = QRadialGradient(centro, largura * 0.7)
+            perto = QColor(cor_base)
+            perto.setAlphaF(min(1.0, a.aurora * 0.28 * forca))
+            meio = QColor(perto)
+            meio.setAlphaF(perto.alphaF() * 0.45)
+            longe = QColor(perto)
+            longe.setAlphaF(0.0)
+            fita.setColorAt(0.0, perto)
+            fita.setColorAt(0.5, meio)
+            fita.setColorAt(1.0, longe)
+            pintor.save()
+            # Achatada: o gradiente é redondo, e uma aurora é uma faixa. O
+            # mesmo truque do halo da luz do cursor, com outra proporção.
+            pintor.translate(centro)
+            pintor.scale(1.0, (altura * espessura) / (largura * 0.7))
+            pintor.translate(-centro)
+            pintor.setBrush(fita)
+            pintor.drawEllipse(centro, largura * 0.7, largura * 0.7)
+            pintor.restore()
+        pintor.restore()
+
+    @staticmethod
+    def _camada_selo(
+        pintor: QPainter, largura: int, altura: int, a: Atmosfera, t: GameTheme
+    ) -> None:
+        """Um círculo arcano apagado, como marca-d'água de grimório.
+
+        O ambiente de RPG e o de GTA mediam 4,57 um do outro: dois fundos
+        escuros arroxeados, e de longe é só isso que o olho pega. Um grimório
+        tem um desenho na página — e o desenho não precisa ser legível para
+        dizer de que livro ele é.
+
+        Fica na metade direita, fora da coluna lateral, e nunca fecha em
+        volta do texto: é fundo de página, não moldura.
+        """
+        raio = min(largura, altura) * 0.34
+        centro = QPointF(largura * 0.66, altura * 0.52)
+        cor = QColor(t.accent)
+        cor.setAlphaF(min(1.0, a.selo * 0.16))
+        caneta = QPen(cor)
+        caneta.setWidthF(1.2)
+        pintor.save()
+        pintor.setBrush(Qt.BrushStyle.NoBrush)
+        pintor.setPen(caneta)
+        pintor.drawEllipse(centro, raio, raio)
+        pintor.drawEllipse(centro, raio * 0.78, raio * 0.78)
+        # Doze marcas na borda, como as horas de um mostrador: é a repetição
+        # regular que faz um círculo virar um selo.
+        for passo in range(12):
+            angulo = math.tau * passo / 12
+            direcao = QPointF(math.cos(angulo), math.sin(angulo))
+            de = centro + direcao * (raio * 0.78)
+            ate = centro + direcao * raio
+            pintor.drawLine(de, ate)
+        pintor.restore()
+
+    @staticmethod
+    def _camada_horizonte(
+        pintor: QPainter, largura: int, altura: int, a: Atmosfera, t: GameTheme
+    ) -> None:
+        """A linha de neon do horizonte, com o brilho subindo dela.
+
+        A rádio pirata era varredura de VHS e mais nada — e varredura, os
+        outros também têm. O que ninguém tem é o pôr do sol de neon sobre a
+        cidade, que é a imagem inteira deste ambiente.
+        """
+        y = altura * 0.74
+        pintor.save()
+        pintor.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
+        pintor.setPen(Qt.PenStyle.NoPen)
+        # O brilho: do rosa do acento, subindo e sumindo.
+        brilho = QLinearGradient(QPointF(0, y - altura * 0.22), QPointF(0, y))
+        alto = QColor(t.accent)
+        alto.setAlphaF(0.0)
+        baixo = QColor(t.accent)
+        baixo.setAlphaF(min(1.0, a.horizonte * 0.22))
+        brilho.setColorAt(0.0, alto)
+        brilho.setColorAt(1.0, baixo)
+        pintor.setBrush(brilho)
+        pintor.drawRect(QRectF(0, y - altura * 0.22, largura, altura * 0.22))
+        # E a linha: o ciano do outro lado do espectro, fina e acesa.
+        linha = QColor(t.info)
+        linha.setAlphaF(min(1.0, a.horizonte * 0.26))
+        caneta = QPen(linha)
+        caneta.setWidthF(1.0)
+        pintor.setPen(caneta)
+        pintor.drawLine(QPointF(0, y), QPointF(largura, y))
+        pintor.restore()
+
+    @staticmethod
+    def _camada_arranhoes(
+        pintor: QPainter, largura: int, altura: int, a: Atmosfera, t: GameTheme
+    ) -> None:
+        """Riscos verticais de filme gasto, que é o que separa sépia de sépia.
+
+        Red Dead, Elden Ring e The Witcher 3 são os três ambientes quentes, e
+        mediam de 5,96 a 7,09 entre si: couro, pergaminho e papel velho
+        compartilham o chão. O que só o velho oeste tem não é a cor — é o
+        SUPORTE: a película arranhada de uma fita de cinema mudo.
+
+        Poucos riscos, de comprimentos diferentes, porque uma película cheia
+        deles vira textura e o olho para de ver que são riscos.
+        """
+        rng = random.Random(a.semente * 7 + 3)
+        pintor.save()
+        for _ in range(max(2, int(6 * a.arranhoes / 0.5))):
+            x = rng.uniform(largura * 0.04, largura * 0.96)
+            topo = rng.uniform(0.0, altura * 0.5)
+            fundo = min(altura, topo + altura * rng.uniform(0.25, 0.9))
+            cor = QColor(t.primary)
+            cor.setAlphaF(min(1.0, a.arranhoes * rng.uniform(0.08, 0.20)))
+            caneta = QPen(cor)
+            caneta.setWidthF(rng.uniform(0.8, 1.4))
+            pintor.setPen(caneta)
+            pintor.drawLine(QPointF(x, topo), QPointF(x + rng.uniform(-1.5, 1.5), fundo))
+        pintor.restore()
 
     @staticmethod
     def _camada_cantoneiras(
