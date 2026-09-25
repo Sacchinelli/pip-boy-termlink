@@ -65,6 +65,7 @@ from .atmosfera import ATENUACAO_NO_FUNDO_NU, Cenario, so_o_cursor
 from .componentes import Holofote, acender_borda, caminho_forma
 from .cursor import CursorVivo
 from .movimento import animar_entrada
+from .ornamentos import estilo_de_selecao, pintar_selecao
 
 # Quantas linhas a paleta mostra de uma vez. Sete cabem sem rolagem e sem
 # fazer a caixa virar um painel: o que não coube, o próximo caractere digitado
@@ -327,16 +328,26 @@ class Linha(QAbstractButton):
         caminho = caminho_forma(area, self._janela.atmosfera.forma, self.raio_borda)
 
         fundo = t.surface
+        # A cor do título e das letras achadas; a marca de escolhido do jogo,
+        # quando há uma, decide as duas contra o que ela pintou.
+        cor_titulo: QColor | None = None
         if self._escolhida or self._holofote.valor > 0.005:
             fundo = t.surface_alta
             self._holofote.pintar(
                 pintor, caminho, fundo=fundo, cor=t.accent, borda=t.border
             )
-            # Um fio de acento na lateral: diz qual linha o Enter vai executar
-            # mesmo quando a luz do holofote ainda está subindo.
-            pintor.setPen(Qt.PenStyle.NoPen)
-            pintor.setBrush(QColor(t.accent))
-            pintor.drawRect(QRectF(area.left(), area.top() + 6.0, 2.5, area.height() - 12.0))
+        if self._escolhida:
+            cor_titulo = pintar_selecao(
+                pintor, area, caminho, estilo_de_selecao(), self._janela.paleta()
+            )
+            if cor_titulo is None:
+                # Sem estilo do jogo: um fio de acento na lateral diz qual
+                # linha o Enter vai executar mesmo com a luz ainda subindo.
+                pintor.setPen(Qt.PenStyle.NoPen)
+                pintor.setBrush(QColor(t.accent))
+                pintor.drawRect(
+                    QRectF(area.left(), area.top() + 6.0, 2.5, area.height() - 12.0)
+                )
         acender_borda(pintor, self, caminho)
 
         metricas = QFontMetricsF(self._fonte_titulo())
@@ -354,14 +365,23 @@ class Linha(QAbstractButton):
         )
 
         pintor.setFont(self._fonte_titulo())
-        pintor.setPen(QColor(design.garantir_contraste(t.primary, fundo)))
+        pintor.setPen(
+            cor_titulo if cor_titulo is not None
+            else QColor(design.garantir_contraste(t.primary, fundo))
+        )
         pintor.drawText(QPointF(base_x, linha_base), titulo)
         # As letras que casaram, repintadas no acento E sublinhadas. Só a cor
         # não bastava: em metade dos temas o acento é vizinho da cor de texto
         # — no Cyberpunk, ciano sobre ciano —, e o destaque sumia justamente
         # onde ele diz POR QUE aquela linha está na lista. O fio embaixo
         # aparece em qualquer paleta.
-        aceso = QColor(design.garantir_contraste(t.accent, fundo, 3.0))
+        # Sobre a marca de escolhido, as letras achadas ficam na cor do título:
+        # num letreiro rosa, o acento rosa sumiria — e é o fio embaixo, e não
+        # a cor, que diz quais letras casaram.
+        aceso = (
+            cor_titulo if cor_titulo is not None
+            else QColor(design.garantir_contraste(t.accent, fundo, 3.0))
+        )
         fio = QColor(aceso)
         fio.setAlphaF(0.75)
         pintor.setPen(aceso)
@@ -378,7 +398,10 @@ class Linha(QAbstractButton):
 
         if legenda:
             pintor.setFont(self._fonte_legenda())
-            pintor.setPen(QColor(design.garantir_contraste(t.text_muted, fundo)))
+            pintor.setPen(
+                cor_titulo if cor_titulo is not None
+                else QColor(design.garantir_contraste(t.text_muted, fundo))
+            )
             pintor.drawText(
                 QPointF(area.right() - self.RESPIRO_X - largura_legenda, linha_base), legenda
             )
