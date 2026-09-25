@@ -1714,6 +1714,7 @@ class LinhaFala(QWidget):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self.direita = direita
         coluna = QVBoxLayout(self)
         # Só quem ABRE um turno afasta-se do que veio antes. Falas
         # seguidas do mesmo interlocutor não têm cabeçalho e ficam

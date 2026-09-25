@@ -3690,6 +3690,32 @@ def main() -> int:
     caderno_pares.close()
     aplicacao.processEvents()
 
+    print("a palavra salva fica junto de quem a ensinou")
+    from pipboy.events import Tag as TagNota
+
+    janela.conversa.limpar()
+    janela._registrar("Wasteland é terra devastada.", TagNota.ASSISTENTE, "PIP-BOY")
+    janela._registrar("⊕ wasteland — terra devastada", TagNota.VOCAB)
+    janela._registrar("E ammo?", TagNota.USUARIO, "Você")
+    janela._registrar("⊕ ammo — munição", TagNota.VOCAB)
+    aplicacao.processEvents()
+    itens_nota = janela.conversa._itens
+    nota_tutor, nota_jogador = itens_nota[1], itens_nota[3]
+    meio_nota = janela.conversa.viewport().width() / 2
+    rotulo_tutor = nota_tutor.findChild(QLabel)
+    rotulo_jogador = nota_jogador.findChild(QLabel)
+    assert rotulo_tutor is not None and rotulo_jogador is not None
+    checar(
+        rotulo_tutor.geometry().right() < meio_nota,
+        "depois da fala do tutor, a anotação fica do lado dele, e não no meio do painel",
+    )
+    checar(
+        rotulo_jogador.geometry().left() > meio_nota,
+        "e depois de uma fala do jogador, do lado do jogador",
+    )
+    janela.conversa.limpar()
+    aplicacao.processEvents()
+
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()
     # nunca voltaria e a suíte penduraria. O tiro agendado é esse alguém.
