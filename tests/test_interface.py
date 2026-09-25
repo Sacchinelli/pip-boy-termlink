@@ -4171,6 +4171,73 @@ def main() -> int:
         "e disparar Ctrl+L leva mesmo o cursor ao campo de texto",
     )
 
+    # A recusa de um atalho GLOBAL é uma linha de aviso, não um traço de pilha.
+    # Fora do Windows a biblioteca recusa toda combinação (precisa de root em
+    # Linux) e levantava três traços idênticos de quinze linhas, um por atalho,
+    # para dizer o que uma linha diz. O traço continua existindo — em debug.
+    import logging
+
+    from pipboy.events import UiEventKind as TipoDeEvento
+    from pipboy.interface import atalhos as modulo_atalhos
+
+    class _TecladoQueRecusa:
+        @staticmethod
+        def add_hotkey(*_argumentos: object, **_nomeados: object) -> None:
+            raise AssertionError  # exatamente o que a biblioteca levanta sem permissão
+
+        @staticmethod
+        def remove_hotkey(_handle: object) -> None:
+            pass
+
+    class _Coletor(logging.Handler):
+        def __init__(self) -> None:
+            super().__init__()
+            self.registros: list[logging.LogRecord] = []
+
+        def emit(self, registro: logging.LogRecord) -> None:
+            self.registros.append(registro)
+
+    coletor = _Coletor()
+    nivel_anterior = modulo_atalhos.LOGGER.level
+    teclado_real = modulo_atalhos.keyboard
+    avisos_na_conversa: list[str] = []
+    modulo_atalhos.LOGGER.addHandler(coletor)
+    modulo_atalhos.LOGGER.setLevel(logging.DEBUG)
+    modulo_atalhos.keyboard = _TecladoQueRecusa
+    try:
+        hospedeiro = QWidget()
+        recusados = modulo_atalhos.Atalhos(
+            hospedeiro,
+            locais={},
+            globais=[("ctrl+alt+p", TipoDeEvento.START_REQUEST)],
+            globais_ligados=True,
+            publicar=lambda _evento: None,
+            avisar=avisos_na_conversa.append,
+        )
+        recusados.instalar()
+        recusados.remover()
+        hospedeiro.deleteLater()
+    finally:
+        modulo_atalhos.keyboard = teclado_real
+        modulo_atalhos.LOGGER.setLevel(nivel_anterior)
+        modulo_atalhos.LOGGER.removeHandler(coletor)
+    avisos_no_log = [r for r in coletor.registros if r.levelno == logging.WARNING]
+    checar(
+        len(avisos_no_log) == 1
+        and avisos_no_log[0].exc_info is None
+        and "ctrl+alt+p" in avisos_no_log[0].getMessage()
+        and "AssertionError" in avisos_no_log[0].getMessage(),
+        "atalho global recusado vira UMA linha de aviso, com a razão e sem traço de pilha",
+    )
+    checar(
+        any(r.levelno == logging.DEBUG and r.exc_info for r in coletor.registros),
+        "e o traço inteiro continua disponível em debug",
+    )
+    checar(
+        avisos_na_conversa == ["Atalho global ctrl+alt+p indisponível."],
+        "e o jogador lê o aviso na conversa",
+    )
+
     print("modo compacto")
     janela.entrar_modo_compacto()
     aplicacao.processEvents()

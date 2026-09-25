@@ -122,8 +122,16 @@ class Atalhos:
                         combinacao, lambda t=tipo: self._publicar(UiEvent(t))
                     )
                 )
-            except Exception:
-                LOGGER.warning("Não foi possível registrar %s.", combinacao, exc_info=True)
+            except Exception as erro:
+                # Uma linha no aviso, o traço inteiro só em debug. Fora do
+                # Windows a biblioteca recusa TODA combinação (precisa de root
+                # em Linux), e cada recusa vinha com quinze linhas de pilha
+                # repetidas — três atalhos, três traços idênticos, para dizer o
+                # que a razão em uma linha já diz. O traço continua disponível
+                # para quem ligar o nível de depuração.
+                razao = str(erro).strip() or type(erro).__name__
+                LOGGER.warning("Não foi possível registrar %s: %s", combinacao, razao)
+                LOGGER.debug("Recusa de %s em detalhe.", combinacao, exc_info=True)
                 self._avisar(f"Atalho global {combinacao} indisponível.")
 
     def remover(self) -> None:
