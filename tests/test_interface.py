@@ -2689,8 +2689,21 @@ def main() -> int:
     checar(tela_fichas.fichas_empilhadas, "numa tela estreita, as fichas se empilham")
     tela_fichas.resize(largura_tela, tela_fichas.height())
     tela_fichas._ajustar_fileira()
+    # A mesma régua de ``_ajustar_fileira``: a largura útil é limitada pelo
+    # miolo, e entre as fichas há espaço. A versão anterior somava só as
+    # fichas contra a largura da tela, e discordava do código justamente no
+    # caso limite — sem fontes reais (offscreen em Linux) as três somam menos
+    # que a tela e ainda assim não cabem, e a suíte reprovava o que o programa
+    # fazia certo.
+    from pipboy.design import ESPACO_SM as ESPACO_FICHAS
+
+    disponivel_fichas = min(largura_tela, tela_fichas.LARGURA_MAX)
+    cabem_fichas = (
+        sum(f.sizeHint().width() for f in fichas) + (len(fichas) - 1) * ESPACO_FICHAS
+        <= disponivel_fichas
+    )
     checar(
-        not tela_fichas.fichas_empilhadas or sum(f.sizeHint().width() for f in fichas) > largura_tela,
+        tela_fichas.fichas_empilhadas == (not cabem_fichas),
         "e voltam para a linha quando cabem",
     )
 
