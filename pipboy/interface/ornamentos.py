@@ -22,8 +22,16 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPainterPath, QPen
+from PySide6.QtCore import QEvent, QPointF, QRectF, Qt
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+)
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 # Altura da faixa em que uma divisória se desenha: o fio fica no meio, e os
@@ -216,4 +224,224 @@ class Divisoria(QWidget):
     def paintEvent(self, _evento: Any) -> None:
         pintor = QPainter(self)
         pintar_divisoria(pintor, QRectF(self.rect()), self.estilo, self._provedor.tema)
+        pintor.end()
+
+
+# ------------------------------------------------------------------- Molduras
+# O painel da conversa é a maior superfície da janela, e era o mesmo retângulo
+# translúcido de cantos arredondados nos dez ambientes. A moldura é o que os
+# menus de cada jogo põem em volta do que importa — e, como nas divisórias, o
+# que se desenha é o estilo, com a paleta do tema. Tudo fica RENTE à borda: o
+# miolo do painel é da conversa, e nenhum ornamento passa por cima dela.
+
+
+def _graca(pintor: QPainter, caixa: QRectF, t: Any) -> None:
+    """Elden Ring: filigranas de ouro no alto e no pé, que somem nas pontas.
+
+    Nada fecha as laterais. É o que os menus da Terra Intermédia fazem: o que
+    importa fica entre dois fios dourados, e o resto se dissolve no escuro.
+    """
+    meio = caixa.center().x()
+    # Recuados o bastante para o losango caber inteiro: rente à borda, a
+    # metade de cima dele ficava fora da camada e saía um triângulo.
+    for y in (caixa.top() + 5.0, caixa.bottom() - 5.0):
+        _fio_que_some(pintor, meio - 8, caixa.left() + 12, y, t.accent, 0.7, 1.0)
+        _fio_que_some(pintor, meio + 8, caixa.right() - 12, y, t.accent, 0.7, 1.0)
+        pintor.setPen(QPen(_cor(t.accent, 0.95), 1.0))
+        _losango(pintor, QPointF(meio, y), 3.6, cheio=True)
+
+
+def _placa(pintor: QPainter, caixa: QRectF, t: Any) -> None:
+    """Skyrim: placa de pedra entalhada — fio duplo no alto e no pé, losangos
+    vazados nos quatro cantos, como os cravos de um tampo nórdico."""
+    pintor.setPen(QPen(_cor(t.primary, 0.32), 1.0))
+    for y, sentido in ((caixa.top() + 2, 1), (caixa.bottom() - 2, -1)):
+        for deslocamento in (0.0, 3.0 * sentido):
+            pintor.drawLine(
+                QPointF(caixa.left() + 12, y + deslocamento),
+                QPointF(caixa.right() - 12, y + deslocamento),
+            )
+    pintor.setPen(QPen(_cor(t.primary, 0.7), 1.1))
+    for x in (caixa.left() + 6, caixa.right() - 6):
+        for y in (caixa.top() + 5.0, caixa.bottom() - 5.0):
+            _losango(pintor, QPointF(x, y), 3.8, cheio=False)
+
+
+def _ferragens(pintor: QPainter, caixa: QRectF, t: Any) -> None:
+    """The Witcher 3: cantoneiras de ferro com um rebite, como num grimório de
+    couro — o painel parece encadernado, e não impresso."""
+    braco = 16.0
+    pintor.setPen(QPen(QColor(t.border_forte), 2.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.FlatCap))
+    cantos = (
+        (caixa.left() + 1, caixa.top() + 1, 1.0, 1.0),
+        (caixa.right() - 1, caixa.top() + 1, -1.0, 1.0),
+        (caixa.left() + 1, caixa.bottom() - 1, 1.0, -1.0),
+        (caixa.right() - 1, caixa.bottom() - 1, -1.0, -1.0),
+    )
+    for x, y, dx, dy in cantos:
+        pintor.drawLine(QPointF(x, y), QPointF(x + dx * braco, y))
+        pintor.drawLine(QPointF(x, y), QPointF(x, y + dy * braco))
+    pintor.setPen(Qt.PenStyle.NoPen)
+    pintor.setBrush(_cor(t.accent, 0.85))
+    for x, y, dx, dy in cantos:
+        pintor.drawEllipse(QPointF(x + dx * 4.5, y + dy * 4.5), 1.8, 1.8)
+
+
+def _cartaz_moldura(pintor: QPainter, caixa: QRectF, t: Any) -> None:
+    """Red Dead: a moldura dupla de um cartaz de procurado, com os quatro
+    quadrados de tinta dos cantos de dentro."""
+    pintor.setBrush(Qt.BrushStyle.NoBrush)
+    pintor.setPen(QPen(_cor(t.primary, 0.42), 1.6))
+    pintor.drawRect(caixa.adjusted(2, 2, -2, -2))
+    pintor.setPen(QPen(_cor(t.primary, 0.25), 1.0))
+    interna = caixa.adjusted(6, 6, -6, -6)
+    pintor.drawRect(interna)
+    for x in (interna.left(), interna.right()):
+        for y in (interna.top(), interna.bottom()):
+            pintor.fillRect(QRectF(x - 2, y - 2, 4, 4), _cor(t.primary, 0.55))
+
+
+def _neon_moldura(pintor: QPainter, caixa: QRectF, t: Any) -> None:
+    """GTA: o letreiro de neon no pé do painel, do rosa ao ciano, com halo — e
+    um fio fino de ciano no alto, como o reflexo dele no vidro."""
+    y = caixa.bottom() - 2.5
+    gradiente = QLinearGradient(QPointF(caixa.left(), y), QPointF(caixa.right(), y))
+    for alfa, largura in ((0.10, 7.0), (0.22, 4.0), (0.95, 1.8)):
+        gradiente.setColorAt(0.0, _cor(t.accent, 0.0))
+        gradiente.setColorAt(0.15, _cor(t.accent, alfa))
+        gradiente.setColorAt(0.85, _cor(t.info, alfa))
+        gradiente.setColorAt(1.0, _cor(t.info, 0.0))
+        pintor.setPen(
+            QPen(QBrush(gradiente), largura, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+        )
+        pintor.drawLine(QPointF(caixa.left() + 10, y), QPointF(caixa.right() - 10, y))
+    _fio_que_some(pintor, caixa.center().x(), caixa.left() + 20, caixa.top() + 1.5, t.info, 0.3, 1.0)
+    _fio_que_some(pintor, caixa.center().x(), caixa.right() - 20, caixa.top() + 1.5, t.info, 0.3, 1.0)
+
+
+def _circuito(pintor: QPainter, caixa: QRectF, t: Any) -> None:
+    """Cyberpunk 2077: dois cantos chanfrados em traço de acento, o bloco de
+    identificação no alto e o barramento recortado no pé."""
+    corte, braco = 12.0, 46.0
+    pintor.setPen(QPen(_cor(t.accent, 0.85), 1.4))
+    esquerda, topo = caixa.left() + 1, caixa.top() + 1
+    pintor.drawLine(QPointF(esquerda, topo + corte + braco), QPointF(esquerda, topo + corte))
+    pintor.drawLine(QPointF(esquerda, topo + corte), QPointF(esquerda + corte, topo))
+    pintor.drawLine(QPointF(esquerda + corte, topo), QPointF(esquerda + corte + braco, topo))
+    direita, base = caixa.right() - 1, caixa.bottom() - 1
+    pintor.drawLine(QPointF(direita, base - corte - braco), QPointF(direita, base - corte))
+    pintor.drawLine(QPointF(direita, base - corte), QPointF(direita - corte, base))
+    pintor.drawLine(QPointF(direita - corte, base), QPointF(direita - corte - braco, base))
+    pintor.fillRect(
+        QRectF(esquerda + corte + braco + 8, topo - 1, 18, 3), _cor(t.accent, 0.95)
+    )
+    _segmentada(pintor, QRectF(caixa.left() + 16, base - 6, caixa.width() * 0.45, 6), t)
+
+
+def _pagina(pintor: QPainter, caixa: QRectF, t: Any) -> None:
+    """RPG: página de manuscrito — fio duplo de ouro e um arabesco em cada
+    canto, o quarto de círculo das iluminuras."""
+    pintor.setBrush(Qt.BrushStyle.NoBrush)
+    pintor.setPen(QPen(_cor(t.accent, 0.38), 1.0))
+    externa = caixa.adjusted(3, 3, -3, -3)
+    interna = caixa.adjusted(7, 7, -7, -7)
+    pintor.drawRect(externa)
+    pintor.drawRect(interna)
+    raio = 10.0
+    pintor.setPen(QPen(_cor(t.accent, 0.8), 1.2))
+    for x, y, inicio in (
+        (interna.left(), interna.top(), 270),
+        (interna.right(), interna.top(), 180),
+        (interna.left(), interna.bottom(), 0),
+        (interna.right(), interna.bottom(), 90),
+    ):
+        pintor.drawArc(QRectF(x - raio, y - raio, 2 * raio, 2 * raio), inicio * 16, 90 * 16)
+
+
+MOLDURAS: dict[str, Callable[[QPainter, QRectF, Any], None]] = {
+    "graca": _graca,
+    "placa": _placa,
+    "ferragens": _ferragens,
+    "cartaz": _cartaz_moldura,
+    "neon": _neon_moldura,
+    "circuito": _circuito,
+    "pagina": _pagina,
+}
+
+# Até onde, a partir da borda, uma moldura pode desenhar. O resto é da conversa.
+FAIXA_MOLDURA = 16.0
+
+
+def pintar_moldura(pintor: QPainter, caixa: QRectF, estilo: str, tema: Any) -> None:
+    """Desenha a moldura de ``estilo`` rente à borda de ``caixa``; vazio é nada."""
+    desenhar = MOLDURAS.get(estilo)
+    if desenhar is None or caixa.width() < 80 or caixa.height() < 80:
+        return
+    pintor.save()
+    pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+    desenhar(pintor, caixa, tema)
+    pintor.restore()
+
+
+class MolduraDoPainel(QWidget):
+    """A moldura do jogo em volta de um painel, por cima dele e sem tocá-lo.
+
+    Vive no mesmo pai que o painel e segue a geometria dele (um filtro de
+    eventos no painel avisa quando ele muda). É transparente ao mouse: nenhum
+    clique, rolagem ou seleção de texto da conversa passa a morar nela.
+
+    Desenha de um retrato guardado: o painel fica embaixo da luz do cursor, e
+    a cada quadro em que a luz passa por perto esta camada é pintada de novo
+    na região suja. Refazer gradientes ali seria trabalho por quadro para
+    desenhar a mesma coisa; o retrato só se refaz quando muda o tamanho, o
+    jogo ou o traço.
+    """
+
+    def __init__(self, provedor: Any, painel: QWidget) -> None:
+        super().__init__(painel.parentWidget())
+        self._provedor = provedor
+        self._painel = painel
+        self._retrato: QPixmap | None = None
+        self._chave: tuple[Any, ...] | None = None
+        self.setObjectName("molduraPainel")
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        painel.installEventFilter(self)
+        self.acompanhar()
+
+    @property
+    def estilo(self) -> str:
+        return str(getattr(self._provedor.atmosfera, "moldura", ""))
+
+    def acompanhar(self) -> None:
+        """Cobre o painel de novo, por cima dele."""
+        self.setGeometry(self._painel.geometry())
+        self.setVisible(self._painel.isVisible() and bool(self.estilo))
+        self.raise_()
+        self.update()
+
+    def eventFilter(self, alvo: Any, evento: Any) -> bool:
+        if alvo is self._painel and evento.type() in (
+            QEvent.Type.Resize, QEvent.Type.Move, QEvent.Type.Show, QEvent.Type.Hide,
+        ):
+            self.acompanhar()
+        return False
+
+    def paintEvent(self, _evento: Any) -> None:
+        estilo, tema = self.estilo, self._provedor.tema
+        if not estilo:
+            return
+        chave = (self.width(), self.height(), estilo, tema.name, self.devicePixelRatioF())
+        if self._retrato is None or chave != self._chave:
+            razao = self.devicePixelRatioF()
+            retrato = QPixmap(round(self.width() * razao), round(self.height() * razao))
+            retrato.setDevicePixelRatio(razao)
+            retrato.fill(QColor(0, 0, 0, 0))
+            pintor_retrato = QPainter(retrato)
+            pintar_moldura(pintor_retrato, QRectF(self.rect()), estilo, tema)
+            pintor_retrato.end()
+            self._retrato, self._chave = retrato, chave
+        pintor = QPainter(self)
+        pintor.drawPixmap(0, 0, self._retrato)
         pintor.end()

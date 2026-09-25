@@ -92,6 +92,10 @@ class Atmosfera:
     # tático; colada, é terminal no Fallout.
     divisoria: str = "linha"
     espacamento_titulo: float = 0.0
+    # A moldura do painel da conversa (ver ornamentos.MOLDURAS); vazia, nenhuma.
+    # O terminal e o visor já têm a sua — o tubo e as cantoneiras —, e o tema
+    # neutro existe para não ter.
+    moldura: str = ""
 
     semente: int = 7
     # Cor de acento das camadas vivas; vazio usa o acento do tema.
@@ -109,7 +113,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
      brilho_texto=0.6,),
     # Luz dourada baixa e partículas subindo, contra pergaminho.
     "Elden Ring": Atmosfera(
-        divisoria="fio_de_ouro", espacamento_titulo=2.5,
+        divisoria="fio_de_ouro", moldura="graca", espacamento_titulo=2.5,
         grao=0.07, vinheta=0.66, brilho=0.26, brilho_y=0.82, fibras=0.05,
         particulas="motes", densidade=46, forma="arredondada", semente=3,
     ),
@@ -118,13 +122,13 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # para ver, e o que faltava para esta crônica não ser o tema neutro com
     # neve. O halo do fundo desceu: com a aurora no alto, os dois brigavam.
     "Skyrim": Atmosfera(
-        divisoria="nordica", espacamento_titulo=2.0,
+        divisoria="nordica", moldura="placa", espacamento_titulo=2.0,
         grao=0.06, vinheta=0.58, brilho=0.10, brilho_y=0.72, aurora=0.6,
         particulas="neve", densidade=70, forma="reta", semente=19,
     ),
     # Couro e vela: grão grosso, halo quente lateral, brasas lentas.
     "The Witcher 3": Atmosfera(
-        divisoria="medalhao", espacamento_titulo=1.0,
+        divisoria="medalhao", moldura="ferragens", espacamento_titulo=1.0,
         grao=0.08, vinheta=0.64, brilho=0.18, brilho_y=0.35, fibras=0.06,
         particulas="brasas", densidade=26, forma="reta", semente=23,
     ),
@@ -133,7 +137,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # chão quente com Elden Ring e Witcher; o que só o velho oeste tem não é
     # a cor, é o SUPORTE.
     "Red Dead": Atmosfera(
-        divisoria="cartaz", espacamento_titulo=1.5,
+        divisoria="cartaz", moldura="cartaz", espacamento_titulo=1.5,
         grao=0.10, vinheta=0.70, brilho=0.14, brilho_y=0.55, fibras=0.10,
         arranhoes=0.5, particulas="poeira", densidade=34, forma="reta", semente=29,
     ),
@@ -141,14 +145,14 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # o pôr do sol de neon no horizonte — a imagem inteira deste ambiente, e
     # o que ele não tinha. O halo saiu do alto: o brilho agora sobe da linha.
     "GTA": Atmosfera(
-        divisoria="neon", espacamento_titulo=0.5,
+        divisoria="neon", moldura="neon", espacamento_titulo=0.5,
         grao=0.05, varredura=0.16, passo_varredura=4, vinheta=0.55,
         brilho=0.14, brilho_y=0.25, horizonte=0.7, interferencia=0.35,
         particulas="estatica", densidade=14, forma="chanfrada", semente=31,
      brilho_texto=0.32,),
     # Interferência digital, varredura fina e chuva de dados descendo.
     "Cyberpunk 2077": Atmosfera(
-        divisoria="segmentada", espacamento_titulo=1.5,
+        divisoria="segmentada", moldura="circuito", espacamento_titulo=1.5,
         grao=0.04, varredura=0.22, passo_varredura=3, vinheta=0.58, curvatura=0.20,
         brilho=0.24, brilho_y=0.30, interferencia=0.55, particulas="dados",
         densidade=30, forma="chanfrada", semente=37,
@@ -158,7 +162,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # ele este ambiente e a rádio pirata eram dois fundos escuros arroxeados,
     # a 4,57 um do outro.
     "RPG / Aventura (geral)": Atmosfera(
-        divisoria="iluminura", espacamento_titulo=1.5,
+        divisoria="iluminura", moldura="pagina", espacamento_titulo=1.5,
         grao=0.06, vinheta=0.60, brilho=0.24, brilho_y=0.50, selo=0.85,
         particulas="motes", densidade=38, forma="arredondada", semente=41,
      brilho_texto=0.18,),

@@ -57,7 +57,7 @@ from .componentes import (
 )
 from .conversa import Conversa
 from .moldura import BarraDeTitulo
-from .ornamentos import Divisoria
+from .ornamentos import Divisoria, MolduraDoPainel
 
 if TYPE_CHECKING:  # pragma: no cover
     from .janela import Janela
@@ -259,6 +259,7 @@ class Palco:
     botao_mudo: Botao
     botao_acao: Botao
     conversa: Conversa
+    moldura_painel: MolduraDoPainel
     entrada_texto: QLineEdit
     botao_enviar: Botao
 
@@ -746,6 +747,9 @@ def _palco(janela: Janela, alvo: QWidget) -> Palco:
 
     conversa = Conversa(janela)
     coluna.addWidget(conversa, 1)
+    # A moldura do jogo em volta da conversa: por cima do painel, rente à
+    # borda dele, transparente ao mouse. Ver ornamentos.MolduraDoPainel.
+    moldura_painel = MolduraDoPainel(janela, conversa)
 
     linha = QHBoxLayout()
     linha.setSpacing(8)
@@ -768,5 +772,6 @@ def _palco(janela: Janela, alvo: QWidget) -> Palco:
     return Palco(
         pilula=pilula, medidor=medidor, rotulo_meta=rotulo_meta,
         botao_mudo=botao_mudo, botao_acao=botao_acao, conversa=conversa,
+        moldura_painel=moldura_painel,
         entrada_texto=entrada_texto, botao_enviar=botao_enviar,
     )
