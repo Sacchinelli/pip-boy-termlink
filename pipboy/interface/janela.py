@@ -1146,6 +1146,10 @@ class Janela(QWidget):
         self.botao_acao.setEnabled(not (ativa and not pode_parar))
         self.conversa.definir_sessao_ativa(ativa)
         self.botao_mudo.setEnabled(ativa)
+        # Visíveis só com a sessão no ar: ver montagem._palco. O botão de ação
+        # fica na ponta direita da barra, então aparecer não o desloca.
+        self.botao_mudo.setVisible(ativa)
+        self.medidor.setVisible(ativa)
         self._relogios.medir_entrada(ativa)
         self._atualizar_medidor()
         self._mostrar_resumo_da_sessao(ativa)
