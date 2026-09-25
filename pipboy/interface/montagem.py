@@ -646,6 +646,11 @@ def _palco(janela: Janela, alvo: QWidget) -> Palco:
         "à esquerda dele nada é transmitido. Parado = microfone errado ou bloqueado."
     )
     barra.addWidget(medidor)
+    # O medidor e o Mudo nascem escondidos, e só aparecem com a sessão no ar:
+    # antes dela o medidor não mede nada (ver Relogios.medir_entrada) e o Mudo
+    # não tem o que calar. Em repouso eram uma régua vazia e um botão cinza
+    # disputando o olho com a única ação que existe ali — INICIAR.
+    medidor.hide()
     # Numa barra apertada é ESTE texto que cede — os botões ao lado não têm
     # como se abreviar.
     rotulo_meta = RotuloElidido(objectName="meta")
@@ -661,6 +666,7 @@ def _palco(janela: Janela, alvo: QWidget) -> Palco:
     botao_mudo.clicked.connect(janela.alternar_mudo)
     botao_mudo.setToolTip("Corta o envio do microfone. Nada é transmitido enquanto mudo.")
     botao_mudo.setEnabled(False)
+    botao_mudo.hide()
     barra.addWidget(botao_mudo)
 
     # Magnético: o botão principal é puxado na direção do cursor quando ele

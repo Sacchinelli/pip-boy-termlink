@@ -3716,6 +3716,47 @@ def main() -> int:
     janela.conversa.limpar()
     aplicacao.processEvents()
 
+    print("em repouso, o topo mostra só o que se pode fazer")
+    janela._definir_controles(ativa=False)
+    aplicacao.processEvents()
+    checar(
+        janela.botao_mudo.isHidden() and janela.medidor.isHidden()
+        and not janela.botao_acao.isHidden(),
+        "sem sessão, o Mudo e o medidor ficam fora: a única ação é iniciar",
+    )
+    direita_parada = janela.botao_acao.geometry().right()
+    janela._definir_controles(ativa=True)
+    aplicacao.processEvents()
+    checar(
+        not janela.botao_mudo.isHidden() and not janela.medidor.isHidden(),
+        "com a sessão no ar, os dois aparecem",
+    )
+    checar(
+        janela.botao_acao.geometry().right() == direita_parada,
+        "e o botão principal não sai do lugar quando eles chegam",
+    )
+    janela._definir_controles(ativa=False)
+    aplicacao.processEvents()
+    checar(janela.botao_mudo.isHidden(), "ao encerrar, o Mudo sai de novo")
+
+    # Um botão escondido não é puxado pelo cursor que passa onde ele estava.
+    # Habilitado de propósito: em repouso o Mudo também está desabilitado, e
+    # um botão desabilitado já não sente o ímã — sem isto a checagem passaria
+    # pela regra errada.
+    mudo_escondido = janela.botao_mudo
+    mudo_escondido.setEnabled(True)
+    mudo_escondido.atrair(None)
+    onde_estava = QPointF(mudo_escondido.mapTo(janela, mudo_escondido.rect().center()))
+    janela._campo_magnetico.mover(onde_estava)
+    aplicacao.processEvents()
+    esperar(300)
+    checar(
+        mudo_escondido.deslocamento_ima.x() == 0.0 and mudo_escondido.deslocamento_ima.y() == 0.0,
+        f"o ímã não puxa botão escondido ({mudo_escondido.deslocamento_ima})",
+    )
+    janela._campo_magnetico.mover(None)
+    mudo_escondido.setEnabled(False)
+
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()
     # nunca voltaria e a suíte penduraria. O tiro agendado é esse alguém.
