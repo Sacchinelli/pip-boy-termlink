@@ -697,6 +697,19 @@ def main() -> int:
         "e ela está sempre à vista: a paleta existe mesmo sem atalho global",
     )
     checar(
+        tela.titulo.text() == janela.tema.saudacao,
+        f"a tela inicial abre com a frase do jogo ({tela.titulo.text()})",
+    )
+    jogo_saudacao = janela.campo_jogo.currentText()
+    janela.campo_jogo.setCurrentText("Red Dead")
+    aplicacao.processEvents()
+    checar(
+        tela.titulo.text() == "A trilha está aberta",
+        f"e trocar de jogo troca a frase ({tela.titulo.text()})",
+    )
+    janela.campo_jogo.setCurrentText(jogo_saudacao)
+    aplicacao.processEvents()
+    checar(
         tecla_legivel("ctrl+alt+p") == "Ctrl+Alt+P" and tecla_legivel("f12") == "F12",
         "as teclas do .env são escritas como se leem numa tecla",
     )
