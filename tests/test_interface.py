@@ -3672,6 +3672,24 @@ def main() -> int:
     visor_relance.close()
     relance.remover_sessao(com_pergunta)
 
+    print("o caderno se lê como pares")
+    janela.abrir_caderno()
+    aplicacao.processEvents()
+    caderno_pares = janela._caderno
+    assert caderno_pares is not None
+    caderno_pares.atualizar()
+    aplicacao.processEvents()
+    cartao_par = caderno_pares._cartoes[0]
+    rotulos_par = cartao_par.findChildren(QLabel)
+    termo_par = next(r for r in rotulos_par if r.text() == cartao_par._entrada.termo)
+    traducao_par = next(r for r in rotulos_par if r.text() == cartao_par._entrada.traducao)
+    checar(
+        abs(termo_par.y() - traducao_par.y()) <= 3 and traducao_par.x() > termo_par.x(),
+        "termo e tradução dividem a linha, como um par — e não uma pilha de três andares",
+    )
+    caderno_pares.close()
+    aplicacao.processEvents()
+
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()
     # nunca voltaria e a suíte penduraria. O tiro agendado é esse alguém.
