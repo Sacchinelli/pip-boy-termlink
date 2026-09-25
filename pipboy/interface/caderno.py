@@ -527,14 +527,24 @@ class JanelaCaderno(QDialog):
         moldura.addWidget(corpo, 1)
 
         coluna = QVBoxLayout(corpo)
-        coluna.setContentsMargins(24, 22, 24, 20)
+        coluna.setContentsMargins(24, 16, 24, 20)
         coluna.setSpacing(14)
 
-        self.titulo = QLabel("CADERNO DE VOCABULÁRIO", objectName="cadernoTitulo")
-        coluna.addWidget(self.titulo)
+        # Título e números numa linha só. O título era "CADERNO DE VOCABULÁRIO"
+        # em corpo de exibição, logo abaixo de uma barra de título que já diz
+        # "Caderno de vocabulário" — e com os números numa linha própria por
+        # baixo, o cabeçalho gastava mais de um terço da janela antes da
+        # primeira palavra. Uma palavra basta na fonte do jogo, como em
+        # PROGRESSO; os números vão ao lado dela, alinhados pela base.
+        cabecalho = QHBoxLayout()
+        cabecalho.setSpacing(16)
+        self.titulo = QLabel("CADERNO", objectName="cadernoTitulo")
+        cabecalho.addWidget(self.titulo, 0, Qt.AlignmentFlag.AlignBottom)
         self.resumo = QLabel("", objectName="cadernoResumo")
         self.resumo.setWordWrap(True)
-        coluna.addWidget(self.resumo)
+        self.resumo.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
+        cabecalho.addWidget(self.resumo, 1, Qt.AlignmentFlag.AlignBottom)
+        coluna.addLayout(cabecalho)
 
         self.busca = QLineEdit(objectName="cadernoBusca")
         self.busca.setPlaceholderText("Buscar por termo, tradução ou exemplo…")
