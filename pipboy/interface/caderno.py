@@ -151,7 +151,7 @@ class CartaoTermo(QFrame):
     INTENCAO_MS = 70
     DESLIZE = 10.0
     TAMANHO_ACAO = 28
-    MARGENS = (16, 13, 13, 13)  # esquerda, topo, direita, base
+    MARGENS = (16, 11, 12, 10)  # esquerda, topo, direita, base
 
     def __init__(
         self,
@@ -189,10 +189,16 @@ class CartaoTermo(QFrame):
 
         coluna = QVBoxLayout(self)
         coluna.setContentsMargins(*self.MARGENS)
-        coluna.setSpacing(5)
+        coluna.setSpacing(4)
 
+        # Termo e tradução na MESMA linha: são um par, e é como par que se lê
+        # um caderno de vocabulário — "wasteland  terra devastada". Empilhados,
+        # cada palavra gastava uma linha a mais, e a janela mostrava duas
+        # palavras e meia de uma lista que se consulta de relance. O contraste
+        # entre os dois é tipográfico (a fonte do jogo, em negrito, contra a
+        # neutra), e não um travessão a mais entre eles.
         topo = QHBoxLayout()
-        topo.setSpacing(10)
+        topo.setSpacing(14)
         # O termo usa a fonte do TEMA: é a palavra do jogo, a única coisa nesta
         # janela que veio de lá. Tradução e metadados ficam na fonte neutra.
         termo = QLabel(entrada.termo)
@@ -202,8 +208,17 @@ class CartaoTermo(QFrame):
             f" background: transparent; {self._realce(tema, tema.primary)}"
         )
         termo.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        topo.addWidget(termo)
-        topo.addStretch(1)
+        topo.addWidget(termo, 0, Qt.AlignmentFlag.AlignTop)
+
+        traducao = QLabel(entrada.traducao)
+        traducao.setWordWrap(True)
+        traducao.setFont(janela.fonte("corpo"))
+        traducao.setStyleSheet(
+            f"color: {design.garantir_contraste(tema.primary, self._fundo)};"
+            f" background: transparent; padding-top: 1px; {self._realce(tema, tema.primary)}"
+        )
+        traducao.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        topo.addWidget(traducao, 1, Qt.AlignmentFlag.AlignTop)
 
         texto_selo, papel_selo = _selo(entrada)
         selo = QLabel(texto_selo)
@@ -212,18 +227,8 @@ class CartaoTermo(QFrame):
             f"color: {design.garantir_contraste(getattr(tema, papel_selo), self._fundo)};"
             " background: transparent;"
         )
-        topo.addWidget(selo)
+        topo.addWidget(selo, 0, Qt.AlignmentFlag.AlignTop)
         coluna.addLayout(topo)
-
-        traducao = QLabel(entrada.traducao)
-        traducao.setWordWrap(True)
-        traducao.setFont(janela.fonte("corpo"))
-        traducao.setStyleSheet(
-            f"color: {design.garantir_contraste(tema.primary, self._fundo)};"
-            f" background: transparent; {self._realce(tema, tema.primary)}"
-        )
-        traducao.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        coluna.addWidget(traducao)
 
         if entrada.exemplo:
             exemplo = QLabel(entrada.exemplo)
