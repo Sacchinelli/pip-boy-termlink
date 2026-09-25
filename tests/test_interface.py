@@ -3849,6 +3849,80 @@ def main() -> int:
         "sem escolha à mão, a largura volta a decidir",
     )
 
+    print("cada jogo tem o traço dos menus dele")
+    from PySide6.QtCore import QRectF as CaixaTraco
+
+    from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_TRACO
+    from pipboy.interface.ornamentos import ALTURA_DIVISORIA, DIVISORIAS, pintar_divisoria
+    from pipboy.themes import TEMAS as TEMAS_TRACO
+
+    estilos = {nome: r.divisoria for nome, r in RECEITAS_TRACO.items()}
+    checar(
+        all(estilo in DIVISORIAS for estilo in estilos.values()),
+        f"toda receita pede um traço que existe ({sorted(set(estilos.values()) - set(DIVISORIAS))})",
+    )
+    proprios = [e for e in estilos.values() if e != "linha"]
+    checar(
+        len(proprios) == len(set(proprios)) and len(proprios) >= 8,
+        f"fora o fio neutro, nenhum jogo divide o traço com outro ({len(set(proprios))} traços)",
+    )
+
+    def tinta_da_divisoria(estilo: str) -> bytes:
+        imagem = QImage(220, ALTURA_DIVISORIA, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem.fill(0)
+        pintor_traco = QPainter(imagem)
+        pintar_divisoria(
+            pintor_traco, CaixaTraco(0, 0, 220, ALTURA_DIVISORIA), estilo, TEMAS_TRACO["Elden Ring"]
+        )
+        pintor_traco.end()
+        return bytes(imagem.constBits())
+
+    desenhos = {estilo: tinta_da_divisoria(estilo) for estilo in DIVISORIAS}
+    checar(
+        all(any(desenho[3::4]) for desenho in desenhos.values()),
+        "todo traço desenha alguma coisa na faixa dele",
+    )
+    iguais = sorted(
+        (a, b) for a in desenhos for b in desenhos if a < b and desenhos[a] == desenhos[b]
+    )
+    checar(not iguais, f"e cada um desenha diferente dos outros ({iguais})")
+
+    # Os títulos de seção falam na fonte do JOGO, com o espaçamento dele.
+    janela.campo_jogo.setCurrentText("Elden Ring")
+    aplicacao.processEvents()
+    titulo_secao = janela._rotulos_secao[0]
+    checar(
+        titulo_secao.font().family() == janela.fonte("secao", ui=False).family()
+        and titulo_secao.font().letterSpacing()
+        == 1.0 + RECEITAS_TRACO["Elden Ring"].espacamento_titulo,
+        f"o título de seção vem na fonte e no espaçamento do jogo ({titulo_secao.font().family()})",
+    )
+    # A regra do nome do ambiente, e não o resultado: no backend offscreen da
+    # suíte não há fonte nenhuma, e a métrica de reserva é larga demais para
+    # qualquer título caber — o resultado depende da máquina, a regra não.
+    # Um nome que cabe fica com as letras afastadas do jogo.
+    atmosfera_traco = janela._atmosfera
+    janela._atmosfera = RECEITAS_TRACO["Elden Ring"]
+    checar(
+        janela._ajustar_marca("AB").letterSpacing()
+        == RECEITAS_TRACO["Elden Ring"].espacamento_titulo,
+        "o nome do ambiente leva o espaçamento do jogo quando cabe",
+    )
+
+    # Onde o espaçamento não cabe, ele cede, e o tamanho da letra é preservado.
+    janela._atmosfera = trocar_campos(
+        RECEITAS_TRACO["Skyrim"], espacamento_titulo=40.0
+    )
+    fonte_cede = janela._ajustar_marca("PERGAMINHO DO DOVAHKIIN")
+    checar(
+        fonte_cede.letterSpacing() == 0.0,
+        "um espaçamento que não cabe cede, em vez de cortar o nome",
+    )
+    janela._atmosfera = atmosfera_traco
+    janela.campo_jogo.setCurrentText("Fallout")
+    janela._aplicar_tema()
+    aplicacao.processEvents()
+
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()
     # nunca voltaria e a suíte penduraria. O tiro agendado é esse alguém.

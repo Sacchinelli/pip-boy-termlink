@@ -435,6 +435,14 @@ class Janela(QWidget):
         fonte.setItalic(tipo.estilo == "italic")
         return fonte
 
+    def fonte_de_secao(self) -> QFont:
+        """O título de seção: a fonte do jogo, com o espaçamento dos menus dele."""
+        fonte = self.fonte("secao", ui=False)
+        fonte.setLetterSpacing(
+            QFont.SpacingType.AbsoluteSpacing, 1.0 + self._atmosfera.espacamento_titulo
+        )
+        return fonte
+
     def _fonte_mono(self, papel: str) -> QFont:
         tipo = design.TIPO[papel]
         return QFont(self._mono, design.escalar(tipo.tamanho, self._escala_texto))
@@ -445,14 +453,24 @@ class Janela(QWidget):
         return design.escalar(design.LARGURA_LATERAL, self._escala_texto)
 
     def _ajustar_marca(self, texto: str) -> QFont:
-        """Encolhe o nome do ambiente até ele caber na largura da coluna."""
+        """Encolhe o nome do ambiente até ele caber na largura da coluna.
+
+        Primeiro com o espaçamento do jogo, encolhendo a letra; se nem na
+        menor letra ele couber, o espaçamento cede antes da palavra — um
+        "PERGAMINHO DO DOVAHKIIN" espaçado saía cortado em "DOVAHKII", e
+        ninguém lê um nome pela metade para apreciar o espaçamento dele.
+        """
+        limite = design.escalar(design.CABECALHO_LARGURA_MAX, self._escala_texto)
         fonte = self.fonte("display", ui=False)
         maximo = fonte.pointSize()
-        limite = design.escalar(design.CABECALHO_LARGURA_MAX, self._escala_texto)
-        for tamanho in range(maximo, maximo - 10, -1):
-            fonte.setPointSize(tamanho)
-            if QFontMetrics(fonte).horizontalAdvance(texto) <= limite:
-                break
+        for espacamento in (self._atmosfera.espacamento_titulo, 0.0):
+            # O espaçamento entra ANTES da medida: a conta de caber já precisa
+            # das letras afastadas, ou o título espaçado estoura a coluna.
+            fonte.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, espacamento)
+            for tamanho in range(maximo, maximo - 10, -1):
+                fonte.setPointSize(tamanho)
+                if QFontMetrics(fonte).horizontalAdvance(texto) <= limite:
+                    return fonte
         return fonte
 
     # ----------------------------------------------------------------- Janela
@@ -654,7 +672,7 @@ class Janela(QWidget):
         self.marca.setFont(self._ajustar_marca(self._tema.header_title))
         self.submarca.setFont(self.fonte("micro"))
         for rotulo in self._rotulos_secao:
-            rotulo.setFont(self.fonte("secao"))
+            rotulo.setFont(self.fonte_de_secao())
         for etiqueta in self._rotulos_campo:
             etiqueta.setFont(self.fonte("rotulo"))
         for campo in self.campos.values():

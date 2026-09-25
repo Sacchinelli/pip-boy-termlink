@@ -39,7 +39,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QScrollArea,
-    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -58,6 +57,7 @@ from .componentes import (
 )
 from .conversa import Conversa
 from .moldura import BarraDeTitulo
+from .ornamentos import Divisoria
 
 if TYPE_CHECKING:  # pragma: no cover
     from .janela import Janela
@@ -399,14 +399,15 @@ def _lateral(janela: Janela, alvo: QWidget) -> Lateral:
         linha = QHBoxLayout()
         linha.setContentsMargins(0, 0, 0, 0)
         linha.setSpacing(10)
+        # Os títulos de seção falam na fonte do JOGO, e o fio ao lado tem o
+        # traço dos menus dele (ver ornamentos). Títulos são identidade, como
+        # a marca; os controles embaixo continuam na família neutra — é a
+        # mesma fronteira que já separava a fala do assistente dos botões.
         rotulo = RotuloDecifravel(titulo.upper(), objectName="secao")
-        rotulo.setFont(janela.fonte("secao"))
+        rotulo.setFont(janela.fonte_de_secao())
         rotulos_secao.append(rotulo)
         linha.addWidget(rotulo)
-        regua = QFrame(objectName="regua")
-        regua.setFixedHeight(1)
-        regua.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        linha.addWidget(regua, 1)
+        linha.addWidget(Divisoria(janela), 1)
         # Sem destino, o título ainda não entra em layout nenhum: quem o pediu
         # o encaixa (é o caso do resumo da sessão, que monta o próprio bloco).
         if destino is not None:
