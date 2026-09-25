@@ -59,7 +59,9 @@ class BotaoJanela(QAbstractButton):
         self._maximizada = False
         self.setFixedSize(LARGURA_BOTAO, ALTURA_BARRA)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # Tab é dos controles reais.
+        self._lateral_recolhida = False
         nomes = {
+            "lateral": "Recolher a coluna lateral (Ctrl+\\)",
             "compacto": "Modo compacto — uma cápsula sobre o jogo",
             "minimizar": "Minimizar",
             "maximizar": "Maximizar",
@@ -71,6 +73,19 @@ class BotaoJanela(QAbstractButton):
         self._nome = nomes[acao]
         self.setAccessibleName(self._nome)
         self.setToolTip(self._nome)
+
+    def definir_lateral_recolhida(self, recolhida: bool) -> None:
+        """O botão da coluna diz o que o clique FARÁ, como o de maximizar."""
+        if recolhida == self._lateral_recolhida:
+            return
+        self._lateral_recolhida = recolhida
+        if self.acao == "lateral":
+            nome = (
+                "Mostrar a coluna lateral (Ctrl+\\)" if recolhida else self._nome
+            )
+            self.setToolTip(nome)
+            self.setAccessibleName(nome)
+        self.update()
 
     def definir_maximizada(self, maximizada: bool) -> None:
         if maximizada == self._maximizada:
@@ -115,6 +130,16 @@ class BotaoJanela(QAbstractButton):
             # Janela grande com uma cápsula no canto: o ícone de PiP.
             pintor.drawRect(QRectF(cx - meio, cy - meio, 2 * meio, 2 * meio))
             pintor.fillRect(QRectF(cx, cy + 1, meio, meio - 1), cor)
+        elif self.acao == "lateral":
+            # O ícone universal de "coluna lateral": uma janela com a faixa da
+            # esquerda separada. Cheia, a coluna está à vista; vazia, recolhida
+            # — o mesmo desenho, nos dois estados, que o resto do sistema usa.
+            caixa = QRectF(cx - meio, cy - meio, 2 * meio, 2 * meio)
+            pintor.drawRect(caixa)
+            divisa = cx - meio + 3.5
+            pintor.drawLine(QPointF(divisa, cy - meio), QPointF(divisa, cy + meio))
+            if not self._lateral_recolhida:
+                pintor.fillRect(QRectF(cx - meio, cy - meio, 3.5, 2 * meio), cor)
         elif self.acao == "minimizar":
             pintor.drawLine(QPointF(cx - meio, cy), QPointF(cx + meio, cy))
         elif self.acao == "maximizar":
@@ -183,18 +208,22 @@ class BarraDeTitulo(QWidget):
         linha.addStretch(1)
 
         acoes = {
+            "lateral": lambda: janela.alternar_lateral(),
             "compacto": lambda: janela.entrar_modo_compacto(),
             "minimizar": janela.showMinimized,
             "maximizar": self._alternar_maximizada,
             "fechar": janela.close,
         }
         self.botao_maximizar: BotaoJanela | None = None
+        self.botao_lateral: BotaoJanela | None = None
         for acao in botoes:
             botao = BotaoJanela(acao, self._provedor.paleta, self)
             botao.clicked.connect(acoes[acao])
             linha.addWidget(botao)
             if acao == "maximizar":
                 self.botao_maximizar = botao
+            elif acao == "lateral":
+                self.botao_lateral = botao
 
     # -- tema
     def aplicar_tema(self) -> None:

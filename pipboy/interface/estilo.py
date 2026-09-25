@@ -40,9 +40,10 @@ def folha_da_janela(tema: GameTheme, forma: str) -> str:
     raio = RAIO_POR_FORMA.get(forma, RAIO_PADRAO)
     return f"""
     QWidget {{ color: {t.primary}; }}
-    #lateral, #rolagemLateral, #colunaLateral, #rodapeLateral {{
+    #lateral, #rolagemLateral, #colunaLateral, #rodapeLateral, #trilhoLateral {{
         background: {rgba(t.surface, 0.90)};
     }}
+    #glifoTrilho {{ color: {t.accent_text}; background: transparent; }}
     #colunaLateral {{ border-right: 1px solid {t.border}; }}
     /* O caderno é ancorado; o fio o separa dos ajustes que rolam por trás. */
     #rodapeLateral {{ border-top: 1px solid {t.border}; }}
