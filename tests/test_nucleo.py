@@ -1830,6 +1830,26 @@ def teste_historico() -> None:
     resumos = store.listar_sessoes()
     checar(len(resumos) == 1 and resumos[0].falas == 3, "resumo conta as falas")
     checar(resumos[0].jogo == "Fallout", "metadados da sessão preservados")
+    # A conversa se chama pelo que o jogador perguntou nela. É a primeira fala
+    # DELE, e não a primeira da sessão: o tutor pode abrir falando.
+    checar(
+        resumos[0].abertura == "what is wasteland?",
+        f"o resumo traz a primeira pergunta do jogador ({resumos[0].abertura!r})",
+    )
+    resumo_um = store.sessao(sessao)
+    checar(
+        resumo_um is not None and resumo_um.abertura == "what is wasteland?",
+        "e a sessão pedida pelo id também",
+    )
+    so_tutor = store.iniciar_sessao(jogo="Skyrim")
+    store.registrar_fala(so_tutor, autor="GUIA", tag="assistente", texto="Bem-vindo, viajante.")
+    store.registrar_fala(so_tutor, autor="", tag="vocab", texto="traveler — viajante")
+    resumo_tutor = store.sessao(so_tutor)
+    checar(
+        resumo_tutor is not None and resumo_tutor.abertura == "",
+        "sem fala do jogador, a abertura fica vazia — e não vira a fala do tutor",
+    )
+    store.remover_sessao(so_tutor)
 
     vazia = store.iniciar_sessao(jogo="GTA")
     checar(store.descartar_sessao_vazia(vazia), "sessão sem fala é descartada")
@@ -2038,6 +2058,10 @@ def teste_busca_entre_conversas() -> None:
     checar(len(achados) == 1 and achados[0][0].id == a, "só a conversa que menciona aparece")
     checar(achados[0][1] == 3, f"conta as falas que casam, não as da sessão ({achados[0][1]})")
     checar(achados[0][0].falas == 3, "e o total da sessão continua ali, para comparar")
+    checar(
+        achados[0][0].abertura == "o que é wasteland?",
+        "e a abertura viaja com o resultado da busca, como na lista",
+    )
 
     checar(hist.buscar_sessoes("WASTELAND")[0][0].id == a, "a busca ignora maiúsculas")
     checar(len(hist.buscar_sessoes("fogueira")) == 1, "acha pelo texto do assistente")

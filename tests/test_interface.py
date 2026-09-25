@@ -3603,6 +3603,75 @@ def main() -> int:
     aplicacao.processEvents()
     checar(not visor_acoes.isVisible(), "e o Esc fecha o histórico")
 
+    print("o histórico se lê de relance")
+    from datetime import datetime as Instante
+    from datetime import timedelta as Intervalo
+    from datetime import timezone as Fuso
+
+    from pipboy.interface.historico import _data_amigavel
+
+    fuso_local = Instante.now().astimezone().tzinfo
+    referencia = Instante(2026, 9, 24, 22, 50, tzinfo=fuso_local)
+
+    def ha(dias: int, hora: int = 21, minuto: int = 5) -> str:
+        instante = (referencia - Intervalo(days=dias)).replace(hour=hora, minute=minuto)
+        return instante.astimezone(Fuso.utc).isoformat()
+
+    checar(_data_amigavel(ha(0), referencia) == "Hoje, 21:05", "o mesmo dia é 'Hoje'")
+    checar(_data_amigavel(ha(1), referencia) == "Ontem, 21:05", "o dia anterior é 'Ontem'")
+    checar(
+        _data_amigavel(ha(3), referencia) == "Seg, 21:05",
+        f"nesta semana, o dia da semana ({_data_amigavel(ha(3), referencia)})",
+    )
+    checar(
+        _data_amigavel(ha(40), referencia) == "15 ago, 21:05",
+        f"neste ano, dia e mês em português ({_data_amigavel(ha(40), referencia)})",
+    )
+    checar(
+        _data_amigavel(ha(400), referencia) == "20 ago 2025",
+        f"de outro ano, o ano no lugar da hora ({_data_amigavel(ha(400), referencia)})",
+    )
+    checar(_data_amigavel("não é data", referencia) == "não é data", "texto estranho passa intacto")
+
+    relance = HistoricoStore(dados / "historico.sqlite3")
+    com_pergunta = relance.iniciar_sessao(jogo="Fallout")
+    relance.registrar_fala(com_pergunta, autor="PIP-BOY", tag="assistente", texto="Pronto.")
+    relance.registrar_fala(com_pergunta, autor="VOCÊ", tag="usuario", texto="o que é feral?")
+    relance.registrar_fala(com_pergunta, autor="PIP-BOY", tag="assistente", texto="Selvagem.")
+    relance.registrar_fala(com_pergunta, autor="PIP-BOY", tag="assistente", texto="Como gato de rua.")
+    janela.abrir_historico()
+    aplicacao.processEvents()
+    visor_relance = janela._visor_historico
+    assert visor_relance is not None
+    visor_relance.recarregar()
+    aplicacao.processEvents()
+    item_relance = visor_relance._itens_lista[com_pergunta]
+    checar(
+        item_relance.text().startswith("“o que é feral?”"),
+        f"a conversa na lista se chama pela primeira pergunta ({item_relance.text().splitlines()[0]})",
+    )
+    checar(
+        "Fallout · Hoje" in item_relance.text() and "4 falas" in item_relance.text(),
+        "e o jogo, o quando e o tamanho vão na linha de baixo",
+    )
+    visor_relance._itens_lista[com_pergunta].click()
+    aplicacao.processEvents()
+    blocos_relance = [
+        visor_relance._pilha_falas.itemAt(i).widget()
+        for i in range(visor_relance._pilha_falas.count() - 1)
+    ]
+    legendas = [b.text().count("font-size") for b in blocos_relance if isinstance(b, QLabel)]
+    checar(
+        legendas == [1, 1, 1, 0],
+        f"quem fala vira legenda, e só quando muda de pessoa ({legendas})",
+    )
+    checar(
+        all("—" not in b.text().split("</div>")[0] for b in blocos_relance if isinstance(b, QLabel)),
+        "o nome não vem mais colado na fala com travessão",
+    )
+    visor_relance.close()
+    relance.remover_sessao(com_pergunta)
+
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()
     # nunca voltaria e a suíte penduraria. O tiro agendado é esse alguém.
