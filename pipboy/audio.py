@@ -53,18 +53,62 @@ from .constants import (
 
 LOGGER = logging.getLogger("pip_boy.audio")
 
-try:  # PyAudioWPatch adiciona loopback WASAPI; fora do Windows usamos PyAudio puro.
-    import pyaudiowpatch as pyaudio
-
-    HAS_LOOPBACK_SUPPORT = True
-except ImportError:  # pragma: no cover - depende da plataforma
-    import pyaudio
-
-    HAS_LOOPBACK_SUPPORT = False
-
 
 class AudioError(RuntimeError):
     """Falha de dispositivo apresentável ao usuário."""
+
+
+# O PyAudio é carregado na PRIMEIRA vez que alguém pede hardware, e não na
+# importação deste módulo. Metade do que mora aqui não toca em dispositivo
+# nenhum — o portão de voz, o piso de ruído, a política de eco, as marcas de
+# fala — e é justamente essa metade que a suíte do núcleo exercita. Com o
+# import no topo, ela só rodava onde o PortAudio estivesse instalado: em
+# Linux sem ele, cada seção que importava daqui era pulada, e ``session.py``
+# (que importa este módulo) nem carregava. O import tardio também tira o
+# PyAudio do caminho de quem só quer o tipo ``Device`` ou as constantes.
+_motor: Any | None = None
+_tem_loopback = False
+_carga = threading.Lock()
+
+
+def _pyaudio() -> Any:
+    """O módulo do PyAudio, importado sob demanda e guardado.
+
+    PyAudioWPatch é o fork com loopback WASAPI e vem primeiro; fora do Windows
+    fica o PyAudio puro. Sem nenhum dos dois, a falha vira ``AudioError`` com a
+    instrução de instalação, em vez de um ``ImportError`` solto no meio de uma
+    thread — é o que a sessão já sabe apresentar ao jogador.
+    """
+    global _motor, _tem_loopback
+    with _carga:
+        if _motor is not None:
+            return _motor
+        try:
+            import pyaudiowpatch as motor
+
+            _tem_loopback = True
+        except ImportError:
+            try:
+                import pyaudio as motor
+            except ImportError as erro:
+                raise AudioError(
+                    "Nenhuma biblioteca de áudio instalada. Windows: "
+                    "py -m pip install PyAudioWPatch | Linux/macOS: "
+                    "py -m pip install pyaudio"
+                ) from erro
+            _tem_loopback = False
+        _motor = motor
+        return motor
+
+
+def suporta_loopback() -> bool:
+    """A biblioteca carregada sabe capturar a saída do sistema (WASAPI)?
+
+    Carrega o PyAudio se ainda não foi carregado: a resposta depende de QUAL
+    dos dois foi encontrado, e isso só se sabe importando.
+    """
+    _pyaudio()
+    return _tem_loopback
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,7 +138,7 @@ def _device_from_info(info: dict[str, Any], *, input_side: bool, loopback: bool 
 
 def list_devices() -> tuple[list[Device], list[Device], Device | None]:
     """Lista dispositivos de entrada, de saída e o loopback padrão do sistema."""
-    audio = pyaudio.PyAudio()
+    audio = _pyaudio().PyAudio()
     entradas: list[Device] = []
     saidas: list[Device] = []
     loopback: Device | None = None
@@ -109,7 +153,7 @@ def list_devices() -> tuple[list[Device], list[Device], Device | None]:
             if int(info.get("maxOutputChannels", 0)) > 0:
                 saidas.append(_device_from_info(info, input_side=False))
 
-        if HAS_LOOPBACK_SUPPORT:
+        if _tem_loopback:
             with suppress(Exception):
                 info = audio.get_default_wasapi_loopback()
                 if info:
@@ -125,7 +169,7 @@ class Playback:
     def __init__(self, audio: Any, device_index: int | None) -> None:
         self._audio = audio
         self._stream = audio.open(
-            format=pyaudio.paInt16,
+            format=_pyaudio().paInt16,
             channels=CHANNELS,
             rate=OUTPUT_SAMPLE_RATE,
             output=True,
@@ -522,7 +566,7 @@ class Capture:
         for rate in (INPUT_SAMPLE_RATE, 48_000, 44_100):
             try:
                 stream = self._audio.open(
-                    format=pyaudio.paInt16,
+                    format=_pyaudio().paInt16,
                     channels=CHANNELS,
                     rate=rate,
                     input=True,
@@ -543,7 +587,7 @@ class Capture:
     def _open_loopback(self, device: Device) -> Any | None:
         try:
             return self._audio.open(
-                format=pyaudio.paInt16,
+                format=_pyaudio().paInt16,
                 channels=device.channels,
                 rate=device.sample_rate,
                 input=True,
@@ -827,12 +871,12 @@ class AudioSession:
         game_gain: float = 0.45,
         speaker_mode: bool = False,
     ) -> None:
-        self._audio = pyaudio.PyAudio()
+        self._audio = _pyaudio().PyAudio()
         self.playback: Playback | None = None
         self.capture: Capture | None = None
         try:
             loopback: Device | None = None
-            if game_audio and HAS_LOOPBACK_SUPPORT:
+            if game_audio and _tem_loopback:
                 with suppress(Exception):
                     info = self._audio.get_default_wasapi_loopback()
                     if info:
