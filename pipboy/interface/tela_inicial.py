@@ -34,6 +34,7 @@ from PySide6.QtGui import (
     QColor,
     QEnterEvent,
     QFocusEvent,
+    QFont,
     QFontMetrics,
     QHoverEvent,
     QPainter,
@@ -572,9 +573,16 @@ class TelaInicial(QWidget):
         fonte_glifo = janela.fonte("display", ui=False)
         fonte_glifo.setPointSize(round(fonte_glifo.pointSize() * 1.7))
         self.glifo.setFont(fonte_glifo)
-        self.titulo.setFont(janela.fonte("display", ui=False))
+        # O título e o nome da seção de exemplos no traço do jogo: a fonte
+        # dele, com o espaçamento entre letras dos menus dele.
+        fonte_titulo = janela.fonte("display", ui=False)
+        fonte_titulo.setLetterSpacing(
+            QFont.SpacingType.AbsoluteSpacing, janela.atmosfera.espacamento_titulo
+        )
+        self.titulo.setFont(fonte_titulo)
+        self.secao_exemplos.setFont(janela.fonte_de_secao())
         for item, papel in (
-            (self.corpo, "corpo"), (self.sequencia, "legenda"), (self.secao_exemplos, "secao"),
+            (self.corpo, "corpo"), (self.sequencia, "legenda"),
             (self.atalhos, "micro"), (self.diagnostico, "micro"),
         ):
             item.setFont(janela.fonte(papel, ui=papel != "vocab"))
@@ -647,7 +655,7 @@ class TelaInicial(QWidget):
             #inicialTitulo {{ color: {t.primary}; }}
             #inicialCorpo {{ color: {t.text_muted}; }}
             #inicialSequencia {{ color: {t.accent_text}; }}
-            #inicialSecao {{ color: {t.text_muted}; letter-spacing: 1px; }}
+            #inicialSecao {{ color: {t.text_muted}; }}
             #inicialRodape {{ color: {t.text_muted}; }}
         """)
         for cartao in (self.cartao_revisar, self.cartao_caderno, self.cartao_historico):
