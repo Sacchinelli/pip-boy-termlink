@@ -1160,8 +1160,8 @@ def main() -> int:
     )
     visor._busca.clear()
     checar(
-        visor._botao_fechar.font().pointSize() == janela.fonte("corpo_forte").pointSize(),
-        "os botões do rodapé usam a fonte dos outros botões",
+        visor._botao_apagar.font().pointSize() == janela.fonte("corpo_forte").pointSize(),
+        "o botão de apagar usa a fonte dos outros botões",
     )
 
     janela.campo_atmosfera.setCurrentText("Desligada")
@@ -1563,13 +1563,13 @@ def main() -> int:
     caderno_ima = janela._caderno
     assert caderno_ima is not None
     checar(
-        len(caderno_ima._campo_magnetico.botoes) == 5,
-        f"os cinco botões do rodapé do caderno são magnéticos ({len(caderno_ima._campo_magnetico.botoes)})",
+        len(caderno_ima._campo_magnetico.botoes) == 4,
+        f"os quatro botões do rodapé do caderno são magnéticos ({len(caderno_ima._campo_magnetico.botoes)})",
     )
-    fechar = caderno_ima.botao_fechar
-    mover_sobre(fechar, QPointF(fechar.width() - 2.0, fechar.height() / 2))
+    porta_ima = caderno_ima.botao_progresso
+    mover_sobre(porta_ima, QPointF(porta_ima.width() - 2.0, porta_ima.height() / 2))
     checar(
-        aguardar(lambda: fechar.deslocamento_ima.x() > 0.0),
+        aguardar(lambda: porta_ima.deslocamento_ima.x() > 0.0),
         "e o rastreador do caderno os puxa pelo cursor dele",
     )
     caderno_ima.close()
@@ -1888,11 +1888,11 @@ def main() -> int:
     assert caderno_borda is not None
     # A luz posta EM CIMA do botão do caderno, pela tela: a distância não o
     # recusa, e só a janela diferente pode.
-    fechar_borda = caderno_borda.botao_fechar
-    sobre_o_caderno = janela.mapFromGlobal(fechar_borda.mapToGlobal(fechar_borda.rect().center()))
+    porta_borda = caderno_borda.botao_progresso
+    sobre_o_caderno = janela.mapFromGlobal(porta_borda.mapToGlobal(porta_borda.rect().center()))
     assentar_cursor(QPointF(sobre_o_caderno))
     checar(
-        not acende(fechar_borda),
+        not acende(porta_borda),
         "a luz da janela principal não acende o que é de outra janela, nem passando por cima",
     )
     caderno_borda.close()
@@ -2566,8 +2566,8 @@ def main() -> int:
     aplicacao.processEvents()
     caderno_abraco = janela._caderno
     assert caderno_abraco is not None
-    fechar_abraco = caderno_abraco.botao_fechar
-    mover_sobre(fechar_abraco, QPointF(fechar_abraco.width() / 2, fechar_abraco.height() / 2))
+    porta_abraco = caderno_abraco.botao_progresso
+    mover_sobre(porta_abraco, QPointF(porta_abraco.width() / 2, porta_abraco.height() / 2))
     checar(
         aguardar(lambda: caderno_abraco._cenario.abracando),
         "no caderno, o anel abraça o botão sob o cursor",
@@ -2940,10 +2940,10 @@ def main() -> int:
         "o caderno recém-aberto não acende nada",
     )
     focar(caderno_foco.busca)
-    focar(caderno_foco.botao_fechar)
+    focar(caderno_foco.botao_progresso)
     checar(
         caderno_foco._cenario.cursor
-        == QPointF(caderno_foco.botao_fechar.mapTo(caderno_foco, caderno_foco.botao_fechar.rect().center())),
+        == QPointF(caderno_foco.botao_progresso.mapTo(caderno_foco, caderno_foco.botao_progresso.rect().center())),
         "mas o Tab dentro dele leva a luz do caderno junto",
     )
     caderno_foco.close()
@@ -3552,6 +3552,56 @@ def main() -> int:
         and not janela.bloco_volume.isHidden() and not janela.chip_jogo.isHidden(),
         "ao encerrar, a coluna volta a ser a dos ajustes",
     )
+
+    print("as ações ficam no lugar da importância delas")
+    from PySide6.QtGui import QKeyEvent as TeclaAcao
+
+    janela.abrir_caderno()
+    aplicacao.processEvents()
+    caderno_acoes = janela._caderno
+    assert caderno_acoes is not None
+    checar(
+        not hasattr(caderno_acoes, "botao_fechar"),
+        "o caderno não repete o × da barra de título com um botão 'Fechar'",
+    )
+    rodape_botoes = sorted(
+        (caderno_acoes.botao_exportar, caderno_acoes.botao_importar,
+         caderno_acoes.botao_progresso, caderno_acoes.botao_revisar),
+        key=lambda b: b.x(),
+    )
+    checar(
+        rodape_botoes[-1] is caderno_acoes.botao_revisar,
+        "a revisão, que é a ação principal, fica por último, à direita",
+    )
+    QApplication.sendEvent(
+        caderno_acoes,
+        TeclaAcao(QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier),
+    )
+    aplicacao.processEvents()
+    checar(not caderno_acoes.isVisible(), "e o Esc fecha o caderno, como fechava o botão")
+
+    janela.abrir_historico()
+    aplicacao.processEvents()
+    visor_acoes = janela._visor_historico
+    assert visor_acoes is not None
+    checar(
+        not hasattr(visor_acoes, "_botao_fechar"),
+        "o histórico também não repete o × da barra de título",
+    )
+    checar(
+        visor_acoes._botao_apagar.variante == "perigo_sutil",
+        "apagar a sessão é discreto em repouso: o destrutivo não é o mais chamativo",
+    )
+    checar(
+        abs(visor_acoes._botao_apagar.y() - visor_acoes._cabecalho.y()) < 24,
+        "e fica no cabeçalho da conversa que ele apaga, e não num rodapé",
+    )
+    QApplication.sendEvent(
+        visor_acoes,
+        TeclaAcao(QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier),
+    )
+    aplicacao.processEvents()
+    checar(not visor_acoes.isVisible(), "e o Esc fecha o histórico")
 
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()
