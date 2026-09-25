@@ -27,7 +27,7 @@ janela inteira e o docstring de ``montar`` diz o que usa dela.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -205,6 +205,7 @@ class Moldura:
     rodape_lateral: QWidget
     palco: QWidget
     veu: Desvanecer
+    trilho: QWidget
 
 
 @dataclass(slots=True)
@@ -263,6 +264,15 @@ class Palco:
 
 
 @dataclass(slots=True)
+class Trilho:
+    """A coluna recolhida: a marca do jogo e as duas portas, só em ícone."""
+
+    glifo: QLabel
+    botao_caderno: Botao
+    botao_historico: Botao
+
+
+@dataclass(slots=True)
 class Pecas:
     """Tudo que a montagem construiu, agrupado pela região da tela."""
 
@@ -270,6 +280,7 @@ class Pecas:
     lateral: Lateral
     rodape: Rodape
     palco: Palco
+    trilho: Trilho
 
 
 # ------------------------------------------------------------------ Montagem
@@ -289,6 +300,7 @@ def montar(janela: Janela) -> Pecas:
         lateral=_lateral(janela, moldura.lateral),
         rodape=_rodape(janela, moldura.rodape_lateral),
         palco=_palco(janela, moldura.palco),
+        trilho=_trilho(janela, moldura.trilho),
     )
 
 
@@ -297,7 +309,7 @@ def _moldura(janela: Janela) -> Moldura:
     pilha_externa.setContentsMargins(0, 0, 0, 0)
     pilha_externa.setSpacing(0)
     barra_titulo = BarraDeTitulo(
-        janela, botoes=("compacto", "minimizar", "maximizar", "fechar")
+        janela, botoes=("lateral", "compacto", "minimizar", "maximizar", "fechar")
     )
     pilha_externa.addWidget(barra_titulo)
 
@@ -334,6 +346,12 @@ def _moldura(janela: Janela) -> Moldura:
 
     rodape_lateral = QWidget(objectName="rodapeLateral")
     pilha.addWidget(rodape_lateral)
+    # A coluna recolhida mora na MESMA coluna, no lugar dos ajustes e do
+    # rodapé: recolher é trocar o que ela mostra e a largura que ela ocupa,
+    # sem tirar nada do layout nem refazer a janela.
+    trilho = QWidget(objectName="trilhoLateral")
+    trilho.hide()
+    pilha.addWidget(trilho, 1)
     raiz.addWidget(coluna_lateral)
 
     palco = QWidget(objectName="palco")
@@ -347,6 +365,7 @@ def _moldura(janela: Janela) -> Moldura:
         rodape_lateral=rodape_lateral,
         palco=palco,
         veu=veu,
+        trilho=trilho,
     )
 
 
@@ -628,6 +647,49 @@ def _rodape(janela: Janela, alvo: QWidget) -> Rodape:
         botao_caderno=botao_caderno,
         botao_historico=botao_historico,
     )
+
+
+# A coluna recolhida: larga o bastante para um ícone com folga de clique,
+# estreita o bastante para a conversa ganhar a coluna quase inteira.
+LARGURA_TRILHO = 60
+
+
+def _trilho(janela: Janela, alvo: QWidget) -> Trilho:
+    """A coluna recolhida: a marca do jogo em cima, as duas portas embaixo.
+
+    Os ajustes não entram: recolher a coluna é pedir espaço para a conversa,
+    e ajuste se procura com a coluna aberta — ou pela paleta, que alcança
+    todos eles sem abrir nada. As portas ficam porque são destinos, e um
+    destino não pode depender de a coluna estar aberta.
+    """
+    pilha = QVBoxLayout(alvo)
+    pilha.setContentsMargins(10, 20, 10, 18)
+    pilha.setSpacing(8)
+
+    glifo = QLabel(objectName="glifoTrilho")
+    glifo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    pilha.addWidget(glifo)
+    pilha.addStretch(1)
+
+    def porta(texto: str, dica: str, nome: str, acao: Callable[[], object]) -> Botao:
+        botao = Botao(
+            texto, variante="sutil", paleta=janela.paleta, forma=janela.atmosfera.forma,
+        )
+        botao.setFont(janela.fonte("titulo"))
+        botao.setFixedSize(LARGURA_TRILHO - 20, LARGURA_TRILHO - 20)
+        botao.setToolTip(dica)
+        botao.setAccessibleName(nome)
+        botao.clicked.connect(acao)
+        pilha.addWidget(botao, 0, Qt.AlignmentFlag.AlignHCenter)
+        return botao
+
+    botao_caderno = porta(
+        GLIFO_CADERNO, "Caderno (Ctrl+B)", "Abrir o caderno de vocabulário", janela.abrir_caderno
+    )
+    botao_historico = porta(
+        "◷", "Histórico (Ctrl+H)", "Abrir o histórico de sessões", janela.abrir_historico
+    )
+    return Trilho(glifo=glifo, botao_caderno=botao_caderno, botao_historico=botao_historico)
 
 
 def _palco(janela: Janela, alvo: QWidget) -> Palco:

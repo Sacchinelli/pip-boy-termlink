@@ -99,6 +99,7 @@ from .montagem import (
     GANHO_JOGO_PADRAO,
     GLIFO_MIC_ATIVO,
     GLIFO_MIC_MUDO,
+    LARGURA_TRILHO,
     NIVEIS_ATMOSFERA,
     NIVEIS_GANHO_JOGO,
 )
@@ -149,6 +150,12 @@ class Sobreposicao(QWidget):
         if self._pintar_bordas is not None:
             self._pintar_bordas(pintor)
         pintor.end()
+
+
+# Abaixo desta largura de janela, a coluna lateral recolhe sozinha — a menos
+# que alguém a tenha aberto ou fechado à mão. A janela de abertura (1240 px)
+# fica acima; a mínima (980 px) e a metade de um monitor Full HD, abaixo.
+LARGURA_RECOLHE = 1180
 
 
 class Janela(QWidget):
@@ -492,6 +499,10 @@ class Janela(QWidget):
 
         self.barra_titulo = moldura.barra_titulo
         self.coluna_lateral = moldura.coluna_lateral
+        self.trilho = moldura.trilho
+        self.trilho_glifo = pecas.trilho.glifo
+        self.trilho_caderno = pecas.trilho.botao_caderno
+        self.trilho_historico = pecas.trilho.botao_historico
         self.lateral = moldura.lateral
         self.rolagem_lateral = moldura.rolagem_lateral
         self.rodape_lateral = moldura.rodape_lateral
@@ -578,6 +589,13 @@ class Janela(QWidget):
         # medida duas vezes por repintura, e a segunda apagava a primeira.
         self.marca.setText(t.header_title)
         self.submarca.setText(t.header_subtitle)
+        # O trilho leva a marca do jogo — o símbolo que abre o título dele —,
+        # e não um ícone genérico de menu: recolhida, a coluna continua
+        # dizendo em que ambiente se está.
+        partes_titulo = t.header_title.split()
+        self.trilho_glifo.setText(
+            partes_titulo[0] if partes_titulo and not partes_titulo[0].isalnum() else "◆"
+        )
 
         ativa = self._worker is not None
         self.botao_acao.setText(t.stop_label if ativa else t.start_label)
@@ -588,6 +606,7 @@ class Janela(QWidget):
             self.botao_acao, self.botao_mudo, self.botao_caderno,
             self.botao_historico, self.botao_enviar,
             self.chip_alto_falante, self.chip_jogo, self.chip_busca,
+            self.trilho_caderno, self.trilho_historico,
         ):
             botao.forma = self._atmosfera.forma
             botao.update()
@@ -631,7 +650,7 @@ class Janela(QWidget):
         tamanho do texto ajustável, "uma vez e nunca mais" vira "metade da
         janela ignora a escolha".
         """
-        self.coluna_lateral.setFixedWidth(self.largura_lateral)
+        self._aplicar_lateral()
         self.marca.setFont(self._ajustar_marca(self._tema.header_title))
         self.submarca.setFont(self.fonte("micro"))
         for rotulo in self._rotulos_secao:
@@ -648,6 +667,9 @@ class Janela(QWidget):
             valor_resumo.setFont(self.fonte("aux"))
         self.resumo_sessao.dica.setFont(self.fonte("micro"))
         self.rotulo_caderno.setFont(self.fonte("micro"))
+        self.trilho_glifo.setFont(self.fonte("display", ui=False))
+        for porta in (self.trilho_caderno, self.trilho_historico):
+            porta.setFont(self.fonte("titulo"))
         self.pilula.setFont(self.fonte("micro"))
         self.rotulo_meta.setFont(self._fonte_mono("micro"))
         self.entrada_texto.setFont(self.fonte("corpo"))
@@ -780,6 +802,7 @@ class Janela(QWidget):
 
     def resizeEvent(self, evento: Any) -> None:
         super().resizeEvent(evento)
+        self._aplicar_lateral()
         self._posicionar_veu()
         if hasattr(self, "_sobreposicao"):
             self._sobreposicao.setGeometry(self.rect())
@@ -1119,11 +1142,15 @@ class Janela(QWidget):
     def _atualizar_caderno(self) -> None:
         total = self._store.total()
         self._total_no_caderno = total
-        texto = f"Caderno · {total} termos"
+        texto = f"Caderno · {total} {'termo' if total == 1 else 'termos'}"
         vencidas = self._store.pendentes()
         if vencidas:
             texto += f"\n{vencidas} para revisar"
         self.rotulo_caderno.setText(texto)
+        # Na coluna recolhida, o contador vive na dica da porta do caderno.
+        self.trilho_caderno.setToolTip(
+            f"Caderno — {vencidas} para revisar (Ctrl+B)" if vencidas else "Caderno (Ctrl+B)"
+        )
         self.conversa.atualizar_inicial()
 
     def _definir_controles(self, ativa: bool, pode_parar: bool = True) -> None:
@@ -1274,6 +1301,7 @@ class Janela(QWidget):
                 "Ctrl+M": self.entrar_modo_compacto,
                 "Ctrl+L": self.focar_texto,
                 "Ctrl+K": self.abrir_paleta,
+                "Ctrl+\\": self.alternar_lateral,
             },
             # Pares, e não um dicionário: chaveado pela combinação, dois
             # atalhos com a mesma tecla no .env colapsariam num só antes de
@@ -1448,6 +1476,49 @@ class Janela(QWidget):
         self.entrada_texto.clear()
         self._worker.send_text(texto)
 
+    # ------------------------------------------------------ Coluna lateral
+
+    @property
+    def lateral_recolhida(self) -> bool:
+        """A coluna está recolhida à faixa de ícones?
+
+        Quem decide é a escolha de quem usa, quando há uma; sem ela, a largura
+        da janela. É a mesma regra da atmosfera: o sistema propõe o padrão, e
+        a escolha feita à mão vale mesmo contrariando a proposta.
+        """
+        escolha = getattr(self, "_lateral_escolha", None)
+        if escolha is not None:
+            return bool(escolha)
+        return self.width() < LARGURA_RECOLHE
+
+    def alternar_lateral(self) -> None:
+        """Recolhe ou abre a coluna lateral (Ctrl+\\), e isso passa a valer."""
+        self._lateral_escolha = not self.lateral_recolhida
+        self._aplicar_lateral()
+
+    def _aplicar_lateral(self) -> None:
+        """Mostra a coluna inteira ou só a faixa de ícones, conforme a regra.
+
+        Numa janela estreita, 296 px de ajustes deixavam para a conversa o que
+        sobrava — e, com a sessão no ar, a coluna só tem o resumo e dois
+        controles. Recolhida, ela vira uma faixa com a marca do jogo e as duas
+        portas, e a conversa ganha a largura. Nada some de vez: os ajustes
+        voltam num clique ou num Ctrl+\\, e a paleta alcança todos eles com a
+        coluna fechada.
+        """
+        if not hasattr(self, "trilho"):
+            return  # a montagem ainda não terminou
+        recolhida = self.lateral_recolhida
+        largura = LARGURA_TRILHO if recolhida else self.largura_lateral
+        if self.coluna_lateral.width() != largura or self.coluna_lateral.minimumWidth() != largura:
+            self.coluna_lateral.setFixedWidth(largura)
+        self.rolagem_lateral.setVisible(not recolhida)
+        self.rodape_lateral.setVisible(not recolhida)
+        self.trilho.setVisible(recolhida)
+        botao = self.barra_titulo.botao_lateral
+        if botao is not None:
+            botao.definir_lateral_recolhida(recolhida)
+
     def focar_texto(self) -> None:
         """Leva o cursor para o campo de texto, com o que havia lá selecionado."""
         self.entrada_texto.setFocus()
@@ -1481,6 +1552,11 @@ class Janela(QWidget):
                     "cápsula sobre o jogo janela pequena"),
             Comando("Escrever no campo de texto", "Ação", self.focar_texto, "Ctrl+L",
                     "digitar teclado mensagem"),
+            Comando(
+                "Mostrar a coluna lateral" if self.lateral_recolhida
+                else "Recolher a coluna lateral",
+                "Ação", self.alternar_lateral, "Ctrl+\\", "barra menu esconder ajustes",
+            ),
         ]
         if self.sessao_ativa:
             lista.append(Comando("Encerrar a sessão", "Ação", self.encerrar_sessao, "Esc",

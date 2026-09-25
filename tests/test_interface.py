@@ -3773,6 +3773,82 @@ def main() -> int:
     janela._campo_magnetico.mover(None)
     mudo_escondido.setEnabled(False)
 
+    print("a coluna lateral recolhe")
+    from pipboy.interface.janela import LARGURA_RECOLHE
+    from pipboy.interface.montagem import LARGURA_TRILHO
+
+    tamanho_trilho = janela.size()
+    janela._lateral_escolha = None
+    janela.resize(1240, 860)
+    aplicacao.processEvents()
+    checar(
+        not janela.lateral_recolhida and not janela.rolagem_lateral.isHidden()
+        and janela.trilho.isHidden(),
+        "na janela de abertura, a coluna está inteira",
+    )
+    janela.resize(LARGURA_RECOLHE - 200, 620)
+    aplicacao.processEvents()
+    checar(
+        janela.lateral_recolhida and janela.coluna_lateral.width() == LARGURA_TRILHO
+        and janela.rolagem_lateral.isHidden() and janela.rodape_lateral.isHidden()
+        and not janela.trilho.isHidden(),
+        f"numa janela estreita, ela recolhe sozinha à faixa ({janela.coluna_lateral.width()} px)",
+    )
+    checar(
+        janela.trilho_glifo.text() == janela.tema.header_title.split()[0],
+        "e a faixa leva a marca do jogo, e não um ícone genérico",
+    )
+    botao_coluna = janela.barra_titulo.botao_lateral
+    assert botao_coluna is not None
+    checar(
+        botao_coluna.toolTip().startswith("Mostrar"),
+        "o botão da barra de título diz o que o clique vai fazer",
+    )
+
+    # A escolha à mão vale mais que a largura, nos dois sentidos.
+    janela.alternar_lateral()
+    aplicacao.processEvents()
+    checar(
+        not janela.lateral_recolhida and not janela.rolagem_lateral.isHidden(),
+        "aberta à mão numa janela estreita, ela abre",
+    )
+    janela.resize(LARGURA_RECOLHE - 190, 620)
+    aplicacao.processEvents()
+    checar(not janela.lateral_recolhida, "e continua aberta quando a janela mexe")
+    janela.alternar_lateral()
+    janela.resize(1240, 860)
+    aplicacao.processEvents()
+    checar(
+        janela.lateral_recolhida and janela.coluna_lateral.width() == LARGURA_TRILHO,
+        "fechada à mão, fica fechada mesmo numa janela larga",
+    )
+    comando_coluna = next(c for c in janela.comandos() if c.acao == janela.alternar_lateral)
+    checar(
+        comando_coluna.titulo == "Mostrar a coluna lateral",
+        f"a paleta oferece o caminho de volta ({comando_coluna.titulo})",
+    )
+
+    # As portas continuam funcionando com a coluna recolhida.
+    janela.trilho_caderno.click()
+    aplicacao.processEvents()
+    checar(
+        janela._caderno is not None and janela._caderno.isVisible(),
+        "a porta do caderno na faixa abre o caderno",
+    )
+    janela._caderno.close()
+    aplicacao.processEvents()
+
+    # Sem mudar de tamanho não há evento de redimensionamento: a regra é
+    # reaplicada à mão, como faria o próximo arrasto da borda.
+    janela._lateral_escolha = None
+    janela.resize(tamanho_trilho)
+    janela._aplicar_lateral()
+    aplicacao.processEvents()
+    checar(
+        not janela.lateral_recolhida and janela.coluna_lateral.width() == janela.largura_lateral,
+        "sem escolha à mão, a largura volta a decidir",
+    )
+
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()
     # nunca voltaria e a suíte penduraria. O tiro agendado é esse alguém.
@@ -3798,8 +3874,8 @@ def main() -> int:
     }
     checar(
         instalados
-        == {"F12", "Esc", "Ctrl+B", "Ctrl+H", "Ctrl+R", "Ctrl+M", "Ctrl+L", "Ctrl+K"},
-        f"os oito atalhos locais estão instalados ({sorted(instalados)})",
+        == {"F12", "Esc", "Ctrl+B", "Ctrl+H", "Ctrl+R", "Ctrl+M", "Ctrl+L", "Ctrl+K", "Ctrl+\\"},
+        f"os nove atalhos locais estão instalados ({sorted(instalados)})",
     )
     janela.conversa.setFocus()
     aplicacao.processEvents()
