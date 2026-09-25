@@ -21,6 +21,7 @@ onde se está:
 
 from __future__ import annotations
 
+import html
 from datetime import datetime
 from typing import Any
 
@@ -33,7 +34,7 @@ from PySide6.QtCore import (
     QTimer,
     QVariantAnimation,
 )
-from PySide6.QtGui import QColor, QKeySequence, QPainter, QPen, QShortcut
+from PySide6.QtGui import QColor, QFontMetrics, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -69,12 +70,46 @@ CASCATA_MAXIMA = 10
 FOLGA_MARCADA = 140
 
 
-def _data_amigavel(iso: str) -> str:
+# Escritos aqui, e não pedidos ao locale: o do Windows pode estar em inglês
+# numa máquina de quem estuda inglês, e uma lista em português com "Mon, Sep"
+# no meio é a costura que denuncia o improviso.
+_DIAS = ("seg", "ter", "qua", "qui", "sex", "sáb", "dom")
+_MESES = ("jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez")
+
+
+def _data_amigavel(iso: str, agora: datetime | None = None) -> str:
+    """Quando, dito como se diz: "Hoje, 22:50", "Ontem", "Sex", "12 ago".
+
+    A data completa (24/09/2026 22:50) era a PRIMEIRA linha de cada conversa
+    na lista, e numa semana de estudo ela é igual em quase todas — o olho
+    tinha de ler até o fim de cada uma para achar a diferença. Relativa, ela
+    fica curta onde a conversa é recente, que é justamente onde se procura.
+
+    ``agora`` existe para o teste; o programa usa o relógio.
+    """
     try:
         quando = datetime.fromisoformat(iso).astimezone()
     except ValueError:
         return iso
-    return quando.strftime("%d/%m/%Y %H:%M")
+    referencia = agora if agora is not None else datetime.now().astimezone()
+    hora = quando.strftime("%H:%M")
+    dias = (referencia.date() - quando.date()).days
+    if dias == 0:
+        return f"Hoje, {hora}"
+    if dias == 1:
+        return f"Ontem, {hora}"
+    if 1 < dias < 7:
+        return f"{_DIAS[quando.weekday()].capitalize()}, {hora}"
+    mes = _MESES[quando.month - 1]
+    if quando.year == referencia.year:
+        return f"{quando.day} {mes}, {hora}"
+    return f"{quando.day} {mes} {quando.year}"
+
+
+def _resumir(texto: str, fonte: Any, largura: int) -> str:
+    """Uma fala numa linha só, cortada na largura — para títulos de lista."""
+    corrido = " ".join(texto.split())
+    return QFontMetrics(fonte).elidedText(corrido, Qt.TextElideMode.ElideRight, largura)
 
 
 class LinhaMarcada(QLabel):
@@ -340,11 +375,23 @@ class JanelaHistorico(QDialog):
         for resumo, casam in achados:
             # Com busca ativa, o número que importa é quantas falas casam —
             # é ele que diz onde vale entrar. Sem busca, o tamanho da conversa.
-            contagem = f"{casam} de {resumo.falas} falas" if procurado else f"{resumo.falas} falas"
-            rotulo = (
-                f"{_data_amigavel(resumo.iniciada_em)}\n"
-                f"{resumo.jogo or 'Sem jogo'} · {contagem}"
+            falas = "fala" if resumo.falas == 1 else "falas"
+            contagem = (
+                f"{casam} de {resumo.falas} {falas}" if procurado else f"{resumo.falas} {falas}"
             )
+            # A conversa se chama pelo que o jogador perguntou nela: data, jogo
+            # e modo se repetem a semana inteira, a pergunta não. Sem pergunta
+            # (uma sessão só de fala do tutor), o jogo assume o título.
+            quando = _data_amigavel(resumo.iniciada_em)
+            if resumo.abertura:
+                titulo = _resumir(
+                    f"“{resumo.abertura}”", janela.fonte("legenda"), LARGURA_LISTA - 44
+                )
+                detalhe = f"{resumo.jogo or 'Sem jogo'} · {quando} · {contagem}"
+            else:
+                titulo = resumo.jogo or "Sem jogo"
+                detalhe = f"{quando} · {contagem}"
+            rotulo = f"{titulo}\n{detalhe}"
             # Chip, e não botão sutil: é uma lista de ESCOLHA, e o chip ligado
             # é a forma que o programa já usa para "esta é a que está valendo".
             botao = Botao(
@@ -354,6 +401,9 @@ class JanelaHistorico(QDialog):
             botao.setCheckable(True)
             botao.setFont(janela.fonte("legenda"))
             botao.setMinimumHeight(52)
+            botao.setAccessibleName(
+                f"{resumo.abertura or resumo.jogo or 'Conversa'} — {detalhe}"
+            )
             self._itens_lista[resumo.id] = botao
             # Clicar num RESULTADO leva o texto procurado junto: a conversa
             # abre já rolada até a fala que casou. Sem isso, achar a conversa
@@ -488,15 +538,35 @@ class JanelaHistorico(QDialog):
         # anotação nenhuma e a primeira menção é a resposta certa.
         indice_marcado = self._linha_a_marcar(visiveis)
         blocos: list[QWidget] = []
+        # Quem fala vira uma LEGENDA acima da fala, e só quando muda: era um
+        # prefixo repetido em toda linha ("DEDO — ...", "DEDO — ..."), e numa
+        # conversa de uma hora isso é uma coluna de nomes iguais a atravessar
+        # para chegar ao que foi dito. É o mesmo agrupamento da conversa na
+        # janela principal — e, como lá, uma anotação quebra o grupo.
+        tamanho_legenda = janela.fonte("micro").pointSize()
+        anterior = ""
         for posicao, fala in enumerate(visiveis):
-            texto = (
-                f"{fala.autor or fala.tag.upper()} — {fala.texto}"
-                if fala.autor or fala.tag
-                else fala.texto
-            )
+            nota = fala.tag in ("vocab", "sistema")
+            quem = "" if nota else (fala.autor or fala.tag.upper())
+            legenda = quem if quem and quem != anterior else ""
+            anterior = quem
             cor = cores.get(fala.tag, t.secondary)
+            fundo = (
+                design.misturar(t.screen, t.accent, 0.20)
+                if posicao == indice_marcado else t.screen
+            )
+            corpo = html.escape(fala.texto).replace("\n", "<br>")
+            texto = corpo
+            if legenda:
+                # Os dois em bloco próprio: texto solto depois de um <div> é
+                # posto pelo Qt no MESMO parágrafo, e a legenda saía colada na
+                # primeira palavra da fala.
+                texto = (
+                    f'<div style="color:{design.garantir_contraste(t.text_muted, fundo)};'
+                    f' font-size:{tamanho_legenda}pt;">{html.escape(legenda)}</div>'
+                    f"<div>{corpo}</div>"
+                )
             if posicao == indice_marcado:
-                fundo = design.misturar(t.screen, t.accent, 0.20)
                 marcada = LinhaMarcada(texto, fundo=fundo, acento=t.accent)
                 self.linha_marcada = marcada
                 bloco: QLabel = marcada
@@ -507,9 +577,11 @@ class JanelaHistorico(QDialog):
             else:
                 bloco = QLabel(texto)
                 bloco.setStyleSheet(
-                    f"color: {design.garantir_contraste(cor, t.screen)};"
+                    f"color: {design.garantir_contraste(cor, fundo)};"
                     " background: transparent;"
                 )
+            bloco.setTextFormat(Qt.TextFormat.RichText)
+            bloco.setAccessibleName(f"{quem}: {fala.texto}" if quem else fala.texto)
             bloco.setWordWrap(True)
             bloco.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             bloco.setFont(janela.fonte("corpo"))
