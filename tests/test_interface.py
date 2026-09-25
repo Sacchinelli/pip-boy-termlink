@@ -688,6 +688,15 @@ def main() -> int:
         "o modelo em uso aparece no rodapé da tela inicial",
     )
     checar(
+        not hasattr(tela, "comandos")
+        and tela.atalhos.text().index("Ctrl+K") < tela.atalhos.text().index("comandos"),
+        "os atalhos são uma linha só, e o Ctrl+K vem primeiro",
+    )
+    checar(
+        not tela.atalhos.isHidden(),
+        "e ela está sempre à vista: a paleta existe mesmo sem atalho global",
+    )
+    checar(
         tecla_legivel("ctrl+alt+p") == "Ctrl+Alt+P" and tecla_legivel("f12") == "F12",
         "as teclas do .env são escritas como se leem numa tecla",
     )
