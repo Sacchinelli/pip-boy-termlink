@@ -603,19 +603,22 @@ class JanelaCaderno(QDialog):
         self.contagem = QLabel("", objectName="cadernoContagem")
         rodape.addWidget(self.contagem)
         rodape.addStretch(1)
-        # A revisão offline mora aqui, ao lado do dado que ela consome: cobra
-        # as vencidas com a mesma repetição espaçada do Quiz, mas sem sessão,
-        # sem rede e sem gastar um token.
+        # A ordem é a da hierarquia: as ações de arquivo e o painel de números
+        # primeiro, discretas, e a revisão por ÚLTIMO, à direita, onde o olho
+        # procura a ação principal. Um "Fechar" em cor de acento disputava
+        # esse lugar com ela — e fechar já tinha o × da barra de título e o
+        # Esc, como em toda janela do sistema. Saiu.
         self.botao_progresso = Botao("◔   Progresso", variante="sutil", paleta=self._janela.paleta)
         self.botao_progresso.setToolTip("O caderno em números: ritmo, domínio e jogos")
         self.botao_progresso.clicked.connect(self._abrir_progresso)
-        rodape.addWidget(self.botao_progresso)
+        # A revisão offline mora aqui, ao lado do dado que ela consome: cobra
+        # as vencidas com a mesma repetição espaçada do Quiz, mas sem sessão,
+        # sem rede e sem gastar um token.
         self.botao_revisar = Botao("▶   Revisar", variante="primario", paleta=self._janela.paleta)
         self.botao_revisar.setToolTip(
             "Cartões das palavras vencidas — funciona offline, sem gastar tokens"
         )
         self.botao_revisar.clicked.connect(self._abrir_revisao)
-        rodape.addWidget(self.botao_revisar)
         # O resultado da exportação ia só para o registro da janela principal,
         # que fica ATRÁS deste caderno: o seletor de arquivo fechava e nada mais
         # acontecia. A confirmação agora aparece no botão que foi clicado.
@@ -633,16 +636,16 @@ class JanelaCaderno(QDialog):
         )
         self.botao_importar.clicked.connect(self._janela.importar_vocabulario)
         rodape.addWidget(self.botao_importar)
-        self.botao_fechar = Botao("Fechar", variante="acento", paleta=self._janela.paleta)
-        self.botao_fechar.clicked.connect(self.close)
-        rodape.addWidget(self.botao_fechar)
+        rodape.addWidget(self.botao_progresso)
+        rodape.addSpacing(8)
+        rodape.addWidget(self.botao_revisar)
         coluna.addLayout(rodape)
 
         # O rodapé responde ao cursor como os botões da janela principal: cada
         # um é puxado de leve pelo mouse que se aproxima e acende antes do toque.
         for botao in (
             self.botao_progresso, self.botao_revisar, self.botao_exportar,
-            self.botao_importar, self.botao_fechar,
+            self.botao_importar,
         ):
             botao.tornar_magnetico(4)
         # A mesma resposta ao cursor da janela principal, com o cenário daqui:
@@ -687,7 +690,7 @@ class JanelaCaderno(QDialog):
         self.campo_jogo.definir_cor_luz(t.primary, raio_borda=raio)
         for botao in (
             self.botao_progresso, self.botao_revisar, self.botao_exportar,
-            self.botao_importar, self.botao_fechar,
+            self.botao_importar,
         ):
             botao.setFont(janela.fonte("corpo_forte"))
             botao.forma = forma

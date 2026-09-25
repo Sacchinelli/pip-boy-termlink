@@ -203,9 +203,28 @@ class JanelaHistorico(QDialog):
         # -- transcrição
         coluna_falas = QVBoxLayout()
         coluna_falas.setSpacing(8)
+        # O cabeçalho da conversa aberta leva a ação que age SOBRE ela. Apagar
+        # morava num rodapé, em vermelho cheio, ao lado de um "Fechar" em cor
+        # de acento: a ação destrutiva era o elemento mais chamativo da janela
+        # e o botão de fechar repetia o × da barra de título. Agora ela fica
+        # junto do que apaga, discreta em repouso, e só assume o vermelho
+        # quando o cursor chega — o aviso aparece no instante em que passa a
+        # importar, e a confirmação continua antes de qualquer perda.
+        topo_falas = QHBoxLayout()
+        topo_falas.setSpacing(12)
         self._cabecalho = QLabel("")
         self._cabecalho.setWordWrap(True)
-        coluna_falas.addWidget(self._cabecalho)
+        topo_falas.addWidget(self._cabecalho, 1)
+        self._botao_apagar = Botao(
+            "✕   Apagar sessão", variante="perigo_sutil",
+            paleta=janela.paleta, forma=janela.atmosfera.forma,
+        )
+        self._botao_apagar.setToolTip(
+            "Apaga esta conversa e a transcrição inteira dela — pede confirmação antes"
+        )
+        self._botao_apagar.clicked.connect(self._apagar_sessao)
+        topo_falas.addWidget(self._botao_apagar, 0, Qt.AlignmentFlag.AlignTop)
+        coluna_falas.addLayout(topo_falas)
 
         # Busca dentro da transcrição aberta. Filtra as falas em vez de
         # rolar até a próxima ocorrência: numa conversa de uma hora, ver
@@ -229,21 +248,6 @@ class JanelaHistorico(QDialog):
         self._rolagem_falas.setWidget(self._interno_falas)
         coluna_falas.addWidget(self._rolagem_falas, 1)
 
-        rodape = QHBoxLayout()
-        rodape.addStretch(1)
-        self._botao_apagar = Botao(
-            "✕   Apagar sessão", variante="perigo",
-            paleta=janela.paleta, forma=janela.atmosfera.forma,
-        )
-        self._botao_apagar.clicked.connect(self._apagar_sessao)
-        rodape.addWidget(self._botao_apagar)
-        self._botao_fechar = Botao(
-            "Fechar", variante="acento",
-            paleta=janela.paleta, forma=janela.atmosfera.forma,
-        )
-        self._botao_fechar.clicked.connect(self.close)
-        rodape.addWidget(self._botao_fechar)
-        coluna_falas.addLayout(rodape)
         linha.addLayout(coluna_falas, 1)
 
         self._grips = GripsRedimensionamento(self)
@@ -274,12 +278,11 @@ class JanelaHistorico(QDialog):
         self._cabecalho.setFont(janela.fonte("legenda"))
         self._busca.setFont(janela.fonte("corpo"))
         self._busca_sessoes.setFont(janela.fonte("aux"))
-        # Sem isto os dois botões herdavam a fonte do diálogo, e saíam numa
-        # letra diferente da de todas as outras janelas — no Fallout, em
-        # caixa-alta pixelada.
-        for botao in (self._botao_apagar, self._botao_fechar):
-            botao.setFont(janela.fonte("corpo_forte"))
-            botao.forma = janela.atmosfera.forma
+        # Sem isto o botão herdava a fonte do diálogo, e saía numa letra
+        # diferente da de todas as outras janelas — no Fallout, em caixa-alta
+        # pixelada.
+        self._botao_apagar.setFont(janela.fonte("corpo_forte"))
+        self._botao_apagar.forma = janela.atmosfera.forma
         raio = {"chanfrada": 3, "reta": 2}.get(janela.atmosfera.forma, 8)
         self._raio_busca = float(raio + 2)
         self._cenario.definir(t, so_o_cursor(janela.atmosfera))
