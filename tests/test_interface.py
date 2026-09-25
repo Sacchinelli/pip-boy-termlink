@@ -3696,6 +3696,13 @@ def main() -> int:
         abs(termo_par.y() - traducao_par.y()) <= 3 and traducao_par.x() > termo_par.x(),
         "termo e tradução dividem a linha, como um par — e não uma pilha de três andares",
     )
+    titulo_cab, resumo_cab = caderno_pares.titulo, caderno_pares.resumo
+    checar(
+        titulo_cab.text() == "CADERNO"
+        and titulo_cab.geometry().bottom() >= resumo_cab.geometry().top()
+        and resumo_cab.x() > titulo_cab.x(),
+        "o título não repete a barra de título, e os números moram na linha dele",
+    )
     caderno_pares.close()
     aplicacao.processEvents()
 
