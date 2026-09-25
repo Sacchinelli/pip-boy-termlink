@@ -104,6 +104,7 @@ from .montagem import (
     NIVEIS_GANHO_JOGO,
 )
 from .movimento import SinalFlutuante
+from .ornamentos import definir_estilo_de_selecao
 from .paleta import PALAVRAS_DO_CADERNO, Comando, Paleta
 from .preferencias import Escolha, Marca, VinculoDePreferencias
 from .relogios import Batidas, Relogios
@@ -621,6 +622,9 @@ class Janela(QWidget):
         self.botao_acao.variante = "perigo" if ativa else "primario"
 
         self._cenario.definir(t, self._atmosfera)
+        # O jeito de o jogo marcar o que está escolhido vale no programa
+        # inteiro — chaves, filtros do caderno, lista do histórico, paleta.
+        definir_estilo_de_selecao(self._atmosfera.selecao)
         for botao in (
             self.botao_acao, self.botao_mudo, self.botao_caderno,
             self.botao_historico, self.botao_enviar,

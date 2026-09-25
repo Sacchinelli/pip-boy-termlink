@@ -4022,6 +4022,113 @@ def main() -> int:
         "a largura de uma linha cobre a tinta, e não só o quanto a caneta anda",
     )
 
+    print("cada jogo marca o escolhido do seu jeito")
+    from PySide6.QtCore import QRectF as CaixaSelecao
+    from PySide6.QtGui import QColor
+    from PySide6.QtGui import QPainterPath as CaminhoSelecao
+
+    from pipboy import design as design_selecao
+    from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_SELECAO
+    from pipboy.interface.ornamentos import SELECOES, estilo_de_selecao, pintar_selecao
+    from pipboy.themes import TEMAS as TEMAS_SELECAO
+    from pipboy.themes import paleta_de
+
+    selecoes = {nome: r.selecao for nome, r in RECEITAS_SELECAO.items()}
+    checar(
+        all(e == "" or e in SELECOES for e in selecoes.values()),
+        "toda receita pede uma marca de escolhido que existe, ou a de sempre",
+    )
+    proprias_sel = [e for e in selecoes.values() if e]
+    checar(
+        len(proprias_sel) == len(set(proprias_sel)) == 9,
+        f"nove jogos marcam o escolhido do seu jeito, e nenhum copia outro ({len(set(proprias_sel))})",
+    )
+    checar(
+        selecoes["Red Dead"] == "pincelada" and selecoes["Fallout"] == "invertida",
+        "o velho oeste passa a pincelada vermelha; o terminal, a barra invertida",
+    )
+
+    def retrato_da_selecao(estilo: str, jogo: str, largura: int = 240, altura: int = 34):
+        """A marca sobre um chip desligado: devolve a imagem e a cor do rótulo."""
+        paleta_sel = paleta_de(TEMAS_SELECAO[jogo])
+        imagem = QImage(largura, altura, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem.fill(QColor(paleta_sel["surface_alta"]))
+        pintor_sel = QPainter(imagem)
+        caixa_sel = CaixaSelecao(0.5, 0.5, largura - 1, altura - 1)
+        caminho_sel = CaminhoSelecao()
+        caminho_sel.addRect(caixa_sel)
+        cor_sel = pintar_selecao(pintor_sel, caixa_sel, caminho_sel, estilo, paleta_sel)
+        pintor_sel.end()
+        return imagem, cor_sel
+
+    base_vazia = QImage(240, 34, QImage.Format.Format_ARGB32_Premultiplied)
+    base_vazia.fill(QColor(paleta_de(TEMAS_SELECAO["GTA"])["surface_alta"]))
+    retratos_sel = {e: retrato_da_selecao(e, "GTA")[0] for e in SELECOES}
+    checar(
+        all(r != base_vazia for r in retratos_sel.values()),
+        "toda marca desenha alguma coisa",
+    )
+    iguais_sel = sorted(
+        (a, b) for a in retratos_sel for b in retratos_sel
+        if a < b and retratos_sel[a] == retratos_sel[b]
+    )
+    checar(not iguais_sel, f"e cada uma desenha diferente das outras ({iguais_sel})")
+    checar(
+        retrato_da_selecao("pincelada", "Red Dead")[0]
+        == retrato_da_selecao("pincelada", "Red Dead")[0],
+        "a pincelada é a mesma a cada repintura: o botão não treme",
+    )
+
+    # O rótulo continua legível sobre a marca — medido nos PIXELS pintados,
+    # onde o texto cai: no meio (chip, centrado) e a um quarto (linha da
+    # paleta, alinhada à esquerda).
+    ilegiveis = []
+    for jogo_sel, estilo_sel in selecoes.items():
+        if not estilo_sel:
+            continue
+        imagem_sel, cor_sel = retrato_da_selecao(estilo_sel, jogo_sel)
+        assert cor_sel is not None
+        for x_sel in (60, 120):
+            fundo_sel = imagem_sel.pixelColor(x_sel, 17).name()
+            razao = design_selecao.contraste(cor_sel.name(), fundo_sel)
+            if razao < 4.5:
+                ilegiveis.append(f"{jogo_sel}@{x_sel}: {razao:.2f}")
+    checar(not ilegiveis, f"o rótulo é legível (AA) sobre a marca de todo jogo ({ilegiveis})")
+
+    # A marca em uso segue o jogo, e o chip ligado a pinta.
+    janela.campo_jogo.setCurrentText("Red Dead")
+    aplicacao.processEvents()
+    checar(estilo_de_selecao() == "pincelada", "no Red Dead, a marca em vigor é a pincelada")
+    chip_sel = janela.chip_busca
+    marcado_antes = chip_sel.isChecked()
+    chip_sel.setChecked(True)
+    imagem_chip = chip_sel.grab().toImage()
+    meio_chip = imagem_chip.pixelColor(imagem_chip.width() // 3, imagem_chip.height() // 2)
+    checar(
+        meio_chip.red() > meio_chip.green() + 40 and meio_chip.red() > meio_chip.blue() + 40,
+        f"e a chave ligada aparece pintada de vermelho ({meio_chip.name()})",
+    )
+    # E o rótulo passa a ser escrito na cor que a marca devolveu — a legível
+    # sobre a tinta. Sem isso, a pincelada sairia certa e o texto, na cor
+    # apagada do chip desligado, sumiria dentro dela.
+    _, cor_rotulo = retrato_da_selecao("pincelada", "Red Dead")
+    assert cor_rotulo is not None
+    na_cor = sum(
+        1
+        for y in range(imagem_chip.height())
+        for x in range(imagem_chip.width())
+        if abs(imagem_chip.pixelColor(x, y).red() - cor_rotulo.red())
+        + abs(imagem_chip.pixelColor(x, y).green() - cor_rotulo.green())
+        + abs(imagem_chip.pixelColor(x, y).blue() - cor_rotulo.blue()) < 30
+    )
+    checar(na_cor > 5, f"e o rótulo é escrito na cor legível sobre a tinta ({na_cor} px)")
+    chip_sel.setChecked(marcado_antes)
+    janela.campo_jogo.setCurrentText("Genérico / Outro")
+    aplicacao.processEvents()
+    checar(estilo_de_selecao() == "", "no tema neutro, a marca é a de sempre")
+    janela.campo_jogo.setCurrentText("Fallout")
+    aplicacao.processEvents()
+
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()
     # nunca voltaria e a suíte penduraria. O tiro agendado é esse alguém.

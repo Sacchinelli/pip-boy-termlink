@@ -70,6 +70,7 @@ from PySide6.QtWidgets import (
 
 from .. import design
 from .movimento import Transicao
+from .ornamentos import estilo_de_selecao, pintar_selecao
 
 
 # ------------------------------------------------------------------- Geometria
@@ -491,7 +492,10 @@ class Botao(QAbstractButton):
             contorno = QColor(design.misturar(p["border"], p["alert"], 0.7 * self._hover))
             halo = base
         elif self.variante == "chip":
-            if ligado:
+            # Com um estilo de seleção do jogo em vigor, o chip ligado nasce
+            # com a cara do desligado, e a marca de escolhido é pintada por
+            # cima dele em paintEvent (ver ornamentos.SELECOES).
+            if ligado and not estilo_de_selecao():
                 fundo = QColor(design.misturar(p["surface"], p["accent"], 0.26))
                 frente = QColor(design.garantir_contraste(p["accent"], fundo.name()))
                 contorno = QColor(design.misturar(p["surface"], p["accent"], 0.55))
@@ -569,6 +573,15 @@ class Botao(QAbstractButton):
             pintor.setPen(caneta)
             pintor.setBrush(Qt.BrushStyle.NoBrush)
             pintor.drawPath(caminho)
+        if (
+            self.variante == "chip" and self.isCheckable() and self.isChecked()
+            and self.isEnabled()
+        ):
+            escrita = pintar_selecao(
+                pintor, area, caminho, estilo_de_selecao(), self._paleta()
+            )
+            if escrita is not None:
+                frente = escrita
         if self.isEnabled():
             acender_borda(pintor, self, caminho)
 
