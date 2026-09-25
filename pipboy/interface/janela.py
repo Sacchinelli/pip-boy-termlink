@@ -516,6 +516,9 @@ class Janela(QWidget):
         self.chip_alto_falante = lateral.chip_alto_falante
         self.chip_jogo = lateral.chip_jogo
         self.chip_busca = lateral.chip_busca
+        self.ajustes_de_sessao = lateral.ajustes_de_sessao
+        self.bloco_volume = lateral.bloco_volume
+        self.resumo_sessao = lateral.resumo_sessao
 
         self.rotulo_caderno = rodape.rotulo_caderno
         self.botao_caderno = rodape.botao_caderno
@@ -639,6 +642,11 @@ class Janela(QWidget):
             campo.setFont(self.fonte("aux"))
         for chip in (self.chip_alto_falante, self.chip_jogo, self.chip_busca):
             chip.setFont(self.fonte("legenda"))
+        for rotulo_resumo in self.resumo_sessao.rotulos:
+            rotulo_resumo.setFont(self.fonte("rotulo"))
+        for valor_resumo in self.resumo_sessao.valores:
+            valor_resumo.setFont(self.fonte("aux"))
+        self.resumo_sessao.dica.setFont(self.fonte("micro"))
         self.rotulo_caderno.setFont(self.fonte("micro"))
         self.pilula.setFont(self.fonte("micro"))
         self.rotulo_meta.setFont(self._fonte_mono("micro"))
@@ -1140,6 +1148,45 @@ class Janela(QWidget):
         self.botao_mudo.setEnabled(ativa)
         self._relogios.medir_entrada(ativa)
         self._atualizar_medidor()
+        self._mostrar_resumo_da_sessao(ativa)
+
+    def linhas_do_resumo(self) -> list[tuple[str, str]]:
+        """O que vai na abertura da conexão, como a coluna o resume na sessão.
+
+        Lido dos PRÓPRIOS seletores, e não de uma cópia da configuração: é o
+        que eles mostram que o jogador escolheu, e é o que precisa continuar
+        visível quando eles se recolhem.
+        """
+        nomes = ("jogo", "persona", "nivel", "modo", "voz", "entrada", "saida")
+        linhas = [
+            (self.campos[nome].accessibleName(), self.campos[nome].currentText())
+            for nome in nomes
+        ]
+        opcoes = [
+            chip.text() for chip in (self.chip_alto_falante, self.chip_busca)
+            if chip.isChecked()
+        ]
+        if opcoes:
+            linhas.append(("Opções", " · ".join(opcoes)))
+        return linhas
+
+    def _mostrar_resumo_da_sessao(self, ativa: bool) -> None:
+        """Com a sessão no ar, os ajustes travados dão lugar ao resumo deles.
+
+        Ver ``montagem.ResumoDaSessao``. Continuam existindo — e travados —
+        por baixo: o resumo é o que se MOSTRA, e o travamento continua sendo o
+        que impede a troca.
+        """
+        if ativa:
+            self.resumo_sessao.definir(self.linhas_do_resumo())
+        self.resumo_sessao.setVisible(ativa)
+        self.ajustes_de_sessao.setVisible(not ativa)
+        self.bloco_volume.setVisible(not ativa)
+        # "Ouvir o jogo" só fica na coluna da sessão se der para mexer nele:
+        # sem dispositivo de loopback, ele é uma caixa cinza que não liga, e
+        # a coluna da sessão é justamente a que mostra só o que ainda vale.
+        self.chip_jogo.setVisible(not ativa or self.chip_jogo.isEnabled())
+        self._posicionar_veu()
 
     # ----------------------------------------------------------- Preferências
 

@@ -3469,6 +3469,90 @@ def main() -> int:
             f"({getattr(cenario_camada._efetiva, campo)})",
         )
 
+    print("a sessão ganha a lateral")
+    # Parada, a coluna mostra os ajustes; no ar, o resumo do que está valendo.
+    # Os seletores travados eram uma parede cinza que empurrava para baixo da
+    # dobra os dois controles que ainda funcionavam.
+    janela._definir_controles(ativa=False)
+    aplicacao.processEvents()
+    checar(
+        not janela.ajustes_de_sessao.isHidden() and janela.resumo_sessao.isHidden(),
+        "parada, a coluna mostra os ajustes e esconde o resumo",
+    )
+
+    # A busca na web é ajuste de ENSINO (como o tutor responde), e não de áudio.
+    checar(
+        janela.chip_busca.parent() is janela.ajustes_de_sessao
+        and janela.chip_busca.y() < janela.campo_entrada.y()
+        and janela.chip_busca.y() > janela.campo_voz.y(),
+        "a busca na web mora com os ajustes de ensino, logo depois da voz",
+    )
+    checar(
+        janela.botao_caderno.y() == janela.botao_historico.y()
+        and janela.botao_caderno.x() < janela.botao_historico.x(),
+        "caderno e histórico ficam lado a lado no rodapé da coluna",
+    )
+
+    janela.chip_busca.setChecked(True)
+    janela.chip_alto_falante.setChecked(False)
+    janela._definir_controles(ativa=True)
+    aplicacao.processEvents()
+    checar(
+        janela.ajustes_de_sessao.isHidden() and not janela.resumo_sessao.isHidden()
+        and janela.bloco_volume.isHidden(),
+        "no ar, os ajustes travados saem e o resumo entra no lugar",
+    )
+    linhas_resumo = dict(janela.resumo_sessao.linhas)
+    checar(
+        linhas_resumo.get("Jogo") == janela.campo_jogo.currentText()
+        and linhas_resumo.get("Voz") == janela.campo_voz.currentText()
+        and linhas_resumo.get("Microfone") == janela.campo_entrada.currentText(),
+        f"o resumo diz o que os próprios seletores escolheram ({linhas_resumo.get('Jogo')})",
+    )
+    checar(
+        linhas_resumo.get("Opções") == "Busca na web",
+        f"e as opções ligadas, e só elas ({linhas_resumo.get('Opções')})",
+    )
+    checar(
+        all(not c.isEnabled() for n, c in janela.campos.items()
+            if n not in ("atmosfera", "tamanho_texto")),
+        "o travamento continua por baixo: esconder não é destravar",
+    )
+    checar(
+        janela.campo_atmosfera.isEnabled() and janela.campo_tamanho_texto.isEnabled()
+        and not janela.campo_atmosfera.isHidden(),
+        "e os dois controles de apresentação continuam à vista e vivos",
+    )
+    checar(
+        "encerre a sessão" in janela.resumo_sessao.dica.text(),
+        "o resumo termina dizendo como trocar",
+    )
+
+    # "Ouvir o jogo" só fica na coluna da sessão se der para mexer nele.
+    habilitado_antes = janela.chip_jogo.isEnabled()
+    janela.chip_jogo.setEnabled(False)
+    janela._definir_controles(ativa=True)
+    checar(janela.chip_jogo.isHidden(), "sem loopback, 'ouvir o jogo' some da coluna da sessão")
+    janela.chip_jogo.setEnabled(True)
+    janela._definir_controles(ativa=True)
+    checar(not janela.chip_jogo.isHidden(), "com loopback, ele fica: é o único ajuste de áudio vivo")
+    janela.chip_jogo.setEnabled(habilitado_antes)
+
+    janela.chip_busca.setChecked(False)
+    janela._definir_controles(ativa=True)
+    checar(
+        "Opções" not in dict(janela.resumo_sessao.linhas),
+        "sem opção ligada, a linha de opções não aparece vazia",
+    )
+
+    janela._definir_controles(ativa=False)
+    aplicacao.processEvents()
+    checar(
+        not janela.ajustes_de_sessao.isHidden() and janela.resumo_sessao.isHidden()
+        and not janela.bloco_volume.isHidden() and not janela.chip_jogo.isHidden(),
+        "ao encerrar, a coluna volta a ser a dos ajustes",
+    )
+
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()
     # nunca voltaria e a suíte penduraria. O tiro agendado é esse alguém.

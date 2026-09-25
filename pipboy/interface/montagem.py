@@ -27,12 +27,14 @@ janela inteira e o docstring de ``montar`` diz o que usa dela.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -99,6 +101,98 @@ DICA_OUVIR_O_JOGO = (
 DICA_SEM_LOOPBACK = "Indisponível: exige Windows com WASAPI e o pacote PyAudioWPatch."
 
 
+# ------------------------------------------------------------ Resumo da sessão
+# Quantas linhas o resumo pode ter: os sete seletores que vão na abertura da
+# conexão e uma linha de opções. As linhas nascem todas de uma vez e só são
+# preenchidas ou escondidas — o resumo é refeito a cada sessão, e criar e
+# destruir widget para isso é trabalho sem motivo.
+LINHAS_DO_RESUMO = 8
+
+
+class ResumoDaSessao(QWidget):
+    """O que está valendo na sessão no ar, lido de relance.
+
+    Durante a sessão, sete dos dez seletores ficam travados: jogo, nível e
+    microfone vão na abertura da conexão, e trocá-los no meio mentiria sobre o
+    que está valendo. Travados, eles continuavam ocupando a coluna inteira —
+    uma parede de caixas cinzentas que não se podia usar, empurrando para
+    baixo da dobra os dois controles que AINDA funcionavam e disputando o olho
+    com a conversa, que é o produto. Na janela mínima, cinco caixas travadas
+    eram tudo o que a coluna mostrava.
+
+    A informação que eles carregavam — qual jogo, qual voz, qual microfone
+    estão valendo agora — é a única coisa que importava neles durante a
+    sessão, e ela cabe numa lista de leitura: rótulo discreto à esquerda,
+    valor na cor do texto à direita, quebrando linha em vez de cortar. Mais
+    legível que o texto apagado de um campo desabilitado, e sem prometer um
+    clique que não vai funcionar.
+
+    Termina dizendo como trocar — encerrando —, porque "travado" sem o
+    próximo passo é só uma porta fechada.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("resumoSessao")
+        self._pilha = QVBoxLayout(self)
+        self._pilha.setContentsMargins(0, 0, 0, 0)
+        self._pilha.setSpacing(0)
+        self._grade = QGridLayout()
+        self._grade.setContentsMargins(0, 0, 0, 0)
+        self._grade.setHorizontalSpacing(12)
+        self._grade.setVerticalSpacing(7)
+        self._grade.setColumnStretch(1, 1)
+        self.rotulos: list[QLabel] = []
+        self.valores: list[QLabel] = []
+        for linha in range(LINHAS_DO_RESUMO):
+            rotulo = QLabel(objectName="rotuloCampo")
+            rotulo.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+            valor = QLabel(objectName="valorResumo")
+            valor.setWordWrap(True)
+            valor.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+            # Selecionável: o nome de um microfone é justamente o que alguém
+            # quer copiar para procurar nas configurações do Windows.
+            valor.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            self._grade.addWidget(rotulo, linha, 0)
+            self._grade.addWidget(valor, linha, 1)
+            self.rotulos.append(rotulo)
+            self.valores.append(valor)
+        self.dica = QLabel(
+            "Jogo, voz e microfone vão na abertura da conexão. "
+            "Para trocar, encerre a sessão.",
+            objectName="dicaResumo",
+        )
+        self.dica.setWordWrap(True)
+
+    def montar(self, cabecalho: QHBoxLayout) -> None:
+        """Encaixa o título de seção (feito pela montagem, como os outros)."""
+        self._pilha.addLayout(cabecalho)
+        self._pilha.addSpacing(9)
+        self._pilha.addLayout(self._grade)
+        self._pilha.addSpacing(10)
+        self._pilha.addWidget(self.dica)
+        self._pilha.addSpacing(14)
+
+    def definir(self, linhas: Sequence[tuple[str, str]]) -> None:
+        """Preenche o resumo; as linhas que sobram somem."""
+        for indice, (rotulo, valor) in enumerate(zip(self.rotulos, self.valores, strict=True)):
+            if indice < len(linhas):
+                rotulo.setText(linhas[indice][0])
+                valor.setText(linhas[indice][1])
+                valor.setAccessibleName(f"{linhas[indice][0]}: {linhas[indice][1]}")
+            rotulo.setVisible(indice < len(linhas))
+            valor.setVisible(indice < len(linhas))
+
+    @property
+    def linhas(self) -> list[tuple[str, str]]:
+        """O que o resumo mostra agora, na ordem."""
+        return [
+            (rotulo.text(), valor.text())
+            for rotulo, valor in zip(self.rotulos, self.valores, strict=True)
+            if not rotulo.isHidden()
+        ]
+
+
 # --------------------------------------------------------------- Inventário
 @dataclass(slots=True)
 class Moldura:
@@ -138,6 +232,11 @@ class Lateral:
     chip_alto_falante: Botao
     chip_jogo: Botao
     chip_busca: Botao
+    # O que some quando a sessão começa, e o que aparece no lugar. Ver
+    # ResumoDaSessao.
+    ajustes_de_sessao: QWidget
+    bloco_volume: QWidget
+    resumo_sessao: ResumoDaSessao
 
 
 @dataclass(slots=True)
@@ -272,7 +371,7 @@ def _lateral(janela: Janela, alvo: QWidget) -> Lateral:
     rotulos_secao: list[RotuloDecifravel] = []
     rotulos_campo: list[QLabel] = []
 
-    def secao(titulo: str) -> None:
+    def secao(titulo: str, destino: QVBoxLayout | None = None) -> QHBoxLayout:
         # Título e fio na MESMA linha, o fio começando onde o texto acaba.
         # Empilhados, viravam duas faixas horizontais por seção, e a coluna
         # ganhava quatro divisórias de largura total competindo com os próprios
@@ -289,15 +388,23 @@ def _lateral(janela: Janela, alvo: QWidget) -> Lateral:
         regua.setFixedHeight(1)
         regua.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         linha.addWidget(regua, 1)
-        coluna.addLayout(linha)
-        coluna.addSpacing(9)
+        # Sem destino, o título ainda não entra em layout nenhum: quem o pediu
+        # o encaixa (é o caso do resumo da sessão, que monta o próprio bloco).
+        if destino is not None:
+            destino.addLayout(linha)
+            destino.addSpacing(9)
+        return linha
 
-    def campo(nome: str, rotulo: str, valores: list[str], dica: str = "") -> CampoSelecao:
+    def campo(
+        nome: str, rotulo: str, valores: list[str], dica: str = "",
+        destino: QVBoxLayout | None = None,
+    ) -> CampoSelecao:
+        alvo = destino if destino is not None else coluna
         etiqueta = QLabel(rotulo, objectName="rotuloCampo")
         etiqueta.setFont(janela.fonte("rotulo"))
         rotulos_campo.append(etiqueta)
-        coluna.addWidget(etiqueta)
-        coluna.addSpacing(4)
+        alvo.addWidget(etiqueta)
+        alvo.addSpacing(4)
         seletor = CampoSelecao()
         seletor.addItems(valores)
         # Sem isto, um microfone chamado 'Microfone (2- Realtek(R) Audio)' dá
@@ -314,86 +421,122 @@ def _lateral(janela: Janela, alvo: QWidget) -> Lateral:
         if dica:
             seletor.setToolTip(dica)
             etiqueta.setToolTip(dica)
-        coluna.addWidget(seletor)
-        coluna.addSpacing(9)
+        alvo.addWidget(seletor)
+        alvo.addSpacing(9)
         campos[nome] = seletor
         return seletor
 
-    secao("Ambiente")
+    # O resumo da sessão ocupa o lugar dos ajustes quando ela começa. Nasce
+    # escondido e vem PRIMEIRO: com a sessão no ar, é a primeira coisa abaixo
+    # do nome do aparelho.
+    resumo_sessao = ResumoDaSessao()
+    resumo_sessao.montar(secao("Nesta sessão"))
+    resumo_sessao.hide()
+    coluna.addWidget(resumo_sessao)
+
+    # Tudo que vai na abertura da conexão, num bloco só: é ele que some quando
+    # a sessão começa. Os dois controles que continuam valendo durante a
+    # conversa — ouvir o jogo e a apresentação — ficam fora dele.
+    ajustes_de_sessao = QWidget(objectName="ajustesDeSessao")
+    ajustes = QVBoxLayout(ajustes_de_sessao)
+    ajustes.setContentsMargins(0, 0, 0, 0)
+    ajustes.setSpacing(0)
+    coluna.addWidget(ajustes_de_sessao)
+
+    secao("Ambiente", ajustes)
     campo_jogo = campo(
         "jogo", "Jogo", list(TEMAS),
         "Muda a aparência da janela e o contexto de inglês enviado ao modelo. "
         "Só pode ser trocado com a sessão parada — o contexto vai na abertura "
         "da conexão.",
+        destino=ajustes,
     )
     campo_jogo.currentTextChanged.connect(janela._trocar_jogo)
     campo_persona = campo(
         "persona", "Personalidade", personas_for(janela.tema),
         "O tom das respostas. A primeira da lista é a personagem do jogo escolhido.",
+        destino=ajustes,
     )
 
-    coluna.addSpacing(4)
-    secao("Ensino")
+    ajustes.addSpacing(4)
+    secao("Ensino", ajustes)
     campo_nivel = campo(
         "nivel", "Seu nível", list(NIVEIS),
         "Define o quanto o assistente fala em português e o que corrige.",
+        destino=ajustes,
     )
     campo_modo = campo(
         "modo", "Modo", list(MODOS),
         "Como ele ensina: tradução rápida, conversa, pronúncia, quiz das palavras "
         "vencidas ou imersão só em inglês.",
+        destino=ajustes,
     )
-    campo_voz = campo("voz", "Voz", list(VOZES), "Timbre da voz sintetizada.")
+    campo_voz = campo(
+        "voz", "Voz", list(VOZES), "Timbre da voz sintetizada.", destino=ajustes
+    )
 
-    coluna.addSpacing(4)
-    secao("Áudio")
+    def chave(texto: str, destino: QVBoxLayout) -> Botao:
+        botao = Botao(
+            texto, variante="chip", paleta=janela.paleta,
+            forma=janela.atmosfera.forma, alinhamento_esquerdo=True,
+        )
+        botao.setCheckable(True)
+        botao.setFont(janela.fonte("legenda"))
+        # Um interruptor não precisa da altura de um botão de ação; a
+        # hierarquia da coluna depende dessa diferença.
+        botao.setFixedHeight(33)
+        destino.addWidget(botao)
+        destino.addSpacing(5)
+        return botao
+
+    # A busca na web morava na seção de Áudio, entre o alto-falante e o som do
+    # jogo — e não tem nada de áudio: ela decide COMO o tutor responde, se
+    # consultando a web antes. É ajuste de ensino, e mora com os de ensino.
+    chip_busca = chave("Busca na web", ajustes)
+    chip_busca.setToolTip(
+        "Deixa o modelo consultar a web antes de responder. Reduz invenção sobre "
+        "lore e patches, ao custo de latência."
+    )
+
+    ajustes.addSpacing(8)
+    secao("Áudio", ajustes)
     # As duas listas chegam pela thread de enumeração (ver
     # _carregar_dispositivos); "Padrão do sistema" já é resposta completa para
     # quem não quer escolher aparelho nenhum.
     campo_entrada = campo(
         "entrada", "Microfone", ["Padrão do sistema"] + [d.label for d in janela._entradas],
         "Só pode ser trocado com a sessão parada.",
+        destino=ajustes,
     )
     campo_saida = campo(
         "saida", "Saída", ["Padrão do sistema"] + [d.label for d in janela._saidas],
         "Onde o assistente fala. Só pode ser trocado com a sessão parada.",
+        destino=ajustes,
     )
-
-    chip_alto_falante = Botao(
-        "Alto-falante (anti-eco)", variante="chip", paleta=janela.paleta,
-        forma=janela.atmosfera.forma, alinhamento_esquerdo=True,
-    )
-    chip_jogo = Botao(
-        "Ouvir o jogo", variante="chip", paleta=janela.paleta,
-        forma=janela.atmosfera.forma, alinhamento_esquerdo=True,
-    )
-    chip_busca = Botao(
-        "Busca na web", variante="chip", paleta=janela.paleta,
-        forma=janela.atmosfera.forma, alinhamento_esquerdo=True,
-    )
+    chip_alto_falante = chave("Alto-falante (anti-eco)", ajustes)
     chip_alto_falante.setToolTip(
         "Marque se você NÃO usa fone. Sem isso o assistente ouve a própria voz "
         "pelo alto-falante e se interrompe num laço."
     )
-    chip_busca.setToolTip(
-        "Deixa o modelo consultar a web antes de responder. Reduz invenção sobre "
-        "lore e patches, ao custo de latência."
-    )
+
+    # "Ouvir o jogo" fica FORA do bloco: é o único ajuste de áudio que muda com
+    # a sessão no ar. Na coluna parada ele continua a seção de Áudio, logo
+    # abaixo do alto-falante; com a sessão no ar, ele fica sozinho entre o
+    # resumo e a apresentação.
+    chip_jogo = chave("Ouvir o jogo", coluna)
     # A lista de dispositivos ainda não voltou da thread; até ela chegar, o
     # chip diz o que é verdade agora — não há loopback conhecido.
     chip_jogo.setToolTip(DICA_SEM_LOOPBACK)
-    for chip in (chip_alto_falante, chip_jogo, chip_busca):
-        chip.setCheckable(True)
-        chip.setFont(janela.fonte("legenda"))
-        # Um interruptor não precisa da altura de um botão de ação; a
-        # hierarquia da coluna depende dessa diferença.
-        chip.setFixedHeight(33)
-        coluna.addWidget(chip)
-        coluna.addSpacing(5)
     chip_jogo.setEnabled(janela._loopback is not None)
     chip_jogo.toggled.connect(janela._alternar_audio_do_jogo)
 
-    coluna.addSpacing(4)
+    bloco_volume = QWidget(objectName="blocoVolume")
+    volume = QVBoxLayout(bloco_volume)
+    volume.setContentsMargins(0, 0, 0, 0)
+    volume.setSpacing(0)
+    coluna.addWidget(bloco_volume)
+    volume.addSpacing(4)
+
     # Fica habilitado mesmo com 'Ouvir o jogo' desmarcado: é uma preferência, e
     # a dica já diz quando ela passa a valer. Amarrá-lo à caixa criaria dois
     # donos do mesmo `setEnabled` — a caixa e o travamento de sessão —
@@ -402,10 +545,11 @@ def _lateral(janela: Janela, alvo: QWidget) -> Lateral:
         "ganho_jogo", "Volume do jogo na mistura", list(NIVEIS_GANHO_JOGO),
         "Quanto do som do jogo entra junto da sua voz. Baixe se o jogo estiver "
         "abafando a pergunta. Vale para 'Ouvir o jogo' e só na próxima sessão.",
+        destino=volume,
     )
 
     coluna.addSpacing(4)
-    secao("Apresentação")
+    secao("Apresentação", coluna)
     campo_atmosfera = campo(
         "atmosfera", "Atmosfera do jogo", list(NIVEIS_ATMOSFERA),
         "Intensidade da varredura, do grão e das partículas. Reduza ou desligue "
@@ -429,6 +573,8 @@ def _lateral(janela: Janela, alvo: QWidget) -> Lateral:
         campo_saida=campo_saida, campo_ganho_jogo=campo_ganho_jogo,
         campo_atmosfera=campo_atmosfera, campo_tamanho_texto=campo_tamanho_texto,
         chip_alto_falante=chip_alto_falante, chip_jogo=chip_jogo, chip_busca=chip_busca,
+        ajustes_de_sessao=ajustes_de_sessao, bloco_volume=bloco_volume,
+        resumo_sessao=resumo_sessao,
     )
 
 
@@ -446,25 +592,36 @@ def _rodape(janela: Janela, alvo: QWidget) -> Rodape:
     # dentro, ao lado de ver, buscar e apagar.
     # Os botões de ação também são magnéticos, com uma folga menor que a do
     # INICIAR: o ímã deles é um aceno, não um convite.
+    # Lado a lado, e não empilhados: são dois destinos do mesmo nível, e um
+    # sobre o outro eles gastavam 60 px de altura numa coluna que, na janela
+    # mínima, empurrava para baixo da dobra justamente os controles de
+    # apresentação — os únicos ainda vivos durante a sessão. O nome completo
+    # de cada um continua na dica e no leitor de tela.
+    portas = QHBoxLayout()
+    portas.setContentsMargins(0, 0, 0, 0)
+    portas.setSpacing(8)
     botao_caderno = Botao(
-        f"{GLIFO_CADERNO}   Abrir caderno", variante="sutil",
+        f"{GLIFO_CADERNO}  Caderno", variante="sutil",
         paleta=janela.paleta, forma=janela.atmosfera.forma, magnetico=True, folga_ima=4,
     )
     botao_caderno.setFont(janela.fonte("corpo_forte"))
     botao_caderno.setToolTip("Ver, buscar e exportar o vocabulário salvo (Ctrl+B)")
+    botao_caderno.setAccessibleName("Abrir o caderno de vocabulário")
     botao_caderno.clicked.connect(janela.abrir_caderno)
-    caixa.addWidget(botao_caderno)
+    portas.addWidget(botao_caderno, 1)
 
     botao_historico = Botao(
-        "◷   Histórico", variante="sutil",
+        "◷  Histórico", variante="sutil",
         paleta=janela.paleta, forma=janela.atmosfera.forma, magnetico=True, folga_ima=4,
     )
     botao_historico.setFont(janela.fonte("corpo_forte"))
     botao_historico.setToolTip(
         "Reler as conversas de sessões anteriores — tudo fica só neste computador"
     )
+    botao_historico.setAccessibleName("Abrir o histórico de sessões")
     botao_historico.clicked.connect(janela.abrir_historico)
-    caixa.addWidget(botao_historico)
+    portas.addWidget(botao_historico, 1)
+    caixa.addLayout(portas)
 
     return Rodape(
         rotulo_caderno=rotulo_caderno,
