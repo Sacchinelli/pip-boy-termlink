@@ -54,6 +54,11 @@ def folha_da_janela(tema: GameTheme, forma: str) -> str:
     #submarca {{ color: {t.text_muted}; }}
     #secao    {{ color: {t.text_muted}; letter-spacing: 1px; }}
     #rotuloCampo, #meta {{ color: {t.text_muted}; }}
+    /* O resumo da sessão: o valor na cor do texto, e não na de um campo
+       travado — ele é para ser LIDO. A dica, discreta como uma legenda. */
+    #resumoSessao, #ajustesDeSessao, #blocoVolume {{ background: transparent; }}
+    #valorResumo {{ color: {t.primary}; }}
+    #dicaResumo  {{ color: {t.text_muted}; }}
     #regua    {{ background: {t.border}; }}
     #caderno  {{ color: {t.info_text}; }}
 
