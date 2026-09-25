@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import itertools
 import os
+import subprocess
 import sys
 import tempfile
 import traceback
@@ -205,11 +206,7 @@ def teste_portao_de_eco() -> None:
     interrompia e recomeçava.
     """
     print("portão de eco")
-    try:
-        from pipboy.audio import politica_de_portao
-    except ImportError as erro:  # pragma: no cover - pyaudio ausente
-        print(f"  ....  pulado ({erro.name} não instalado)")
-        return
+    from pipboy.audio import politica_de_portao
 
     def regra(**kw: bool) -> tuple[bool, bool]:
         base = {"mudo": False, "falando": False, "portao_acustico": False, "jogo_ligado": False}
@@ -244,6 +241,55 @@ def teste_portao_de_eco() -> None:
     checar(sem_portao == {True}, "o descarte do loopback independe da caixa de alto-falante")
 
 
+def teste_audio_sem_pyaudio() -> None:
+    """O núcleo carrega numa máquina sem PortAudio; só o hardware reclama.
+
+    Metade do ``audio.py`` é pura — portão de voz, piso de ruído, política de
+    eco, marcas de fala — e ``session.py`` importa dele. Com o PyAudio
+    importado no topo do módulo, uma máquina sem PortAudio (Linux sem o pacote
+    do sistema, uma CI barata) perdia as seções destas duas coisas: as guardas
+    de ``ImportError`` que existiam aqui imprimiam "pulado" e devolviam verde,
+    e verde sem rodar não protege nada.
+
+    Num PROCESSO separado, porque a forma de provar a ausência é bloquear os
+    dois módulos em ``sys.modules`` antes de qualquer import — e o processo
+    desta suíte já carregou o que carregou. Recarregar ``pipboy.audio`` aqui
+    trocaria as sentinelas de fala por baixo do ``session.py``.
+    """
+    print("áudio sem PyAudio")
+    codigo = (
+        "import sys\n"
+        "sys.modules['pyaudiowpatch'] = None\n"
+        "sys.modules['pyaudio'] = None\n"
+        "from pipboy.audio import AudioError, PortaoDeVoz, list_devices\n"
+        "from pipboy.session import LiveSessionWorker\n"
+        "print('carregou', PortaoDeVoz.__name__, LiveSessionWorker.__name__)\n"
+        "try:\n"
+        "    list_devices()\n"
+        "except AudioError as erro:\n"
+        "    print('AudioError:', erro)\n"
+        "else:\n"
+        "    print('listou sem biblioteca')\n"
+    )
+    raiz = Path(__file__).resolve().parent.parent
+    ambiente = {**os.environ, "PYTHONPATH": str(raiz), "PYTHONIOENCODING": "utf-8"}
+    resultado = subprocess.run(
+        [sys.executable, "-c", codigo],
+        cwd=raiz, env=ambiente, capture_output=True, text=True, encoding="utf-8", timeout=120,
+    )
+    saida = resultado.stdout.strip().splitlines()
+    problema = resultado.stderr.strip().splitlines()[-1:] if resultado.returncode else []
+    checar(
+        resultado.returncode == 0 and saida[:1] == ["carregou PortaoDeVoz LiveSessionWorker"],
+        "audio e session importam sem PyAudio" + (f" ({problema[0]})" if problema else ""),
+    )
+    ultima = saida[-1] if saida else ""
+    checar(
+        ultima.startswith("AudioError:") and "pip install" in ultima,
+        f"pedir hardware sem a biblioteca é AudioError com a instrução de instalação ({ultima})",
+    )
+
+
 def teste_portao_de_voz() -> None:
     """Economia de tokens sem comer a fala do jogador.
 
@@ -253,11 +299,7 @@ def teste_portao_de_voz() -> None:
     parte que estes testes protegem.
     """
     print("portão de voz")
-    try:
-        from pipboy.audio import PortaoDeVoz
-    except ImportError as erro:  # pragma: no cover
-        print(f"  ....  pulado ({erro.name} não instalado)")
-        return
+    from pipboy.audio import PortaoDeVoz
 
     BLOCO = 0.064
 
@@ -2647,6 +2689,7 @@ def main() -> int:
         teste_dsp,
         teste_vocabulario,
         teste_portao_de_eco,
+        teste_audio_sem_pyaudio,
         teste_portao_de_voz,
         teste_piso_de_ruido,
         teste_sinal_de_atividade,

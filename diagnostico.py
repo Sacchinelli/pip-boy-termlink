@@ -230,7 +230,7 @@ def checar_dispositivos() -> None:
         return
     try:
         sys.path.insert(0, str(RAIZ))
-        from pipboy.audio import HAS_LOOPBACK_SUPPORT, list_devices
+        from pipboy.audio import list_devices, suporta_loopback
     except Exception as error:
         falhar(f"Não foi possível carregar o módulo de áudio: {error}", "Resolva os itens acima.")
         return
@@ -256,7 +256,7 @@ def checar_dispositivos() -> None:
 
     if loopback is not None:
         print(f"{OK} Loopback disponível: {loopback.name}")
-    elif HAS_LOOPBACK_SUPPORT:
+    elif suporta_loopback():
         avisar("Loopback WASAPI não encontrado.", "'Ouvir o jogo' ficará desabilitado.")
     else:
         avisar("Sem suporte a loopback nesta plataforma.", "Recurso disponível apenas no Windows.")
