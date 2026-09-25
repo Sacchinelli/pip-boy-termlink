@@ -1033,6 +1033,7 @@ def teste_design() -> None:
         "primeira fonte desejada": [t.font_candidates[0] for t in TEMAS.values()],
         "cor de tela": [t.screen for t in TEMAS.values()],
         "acento": [t.accent for t in TEMAS.values()],
+        "saudação da tela inicial": [t.saudacao for t in TEMAS.values()],
         "timbre declarado": [(r.forma, r.grave, r.agudo) for r in RECEITAS.values()],
     }
     for nome_coluna, valores in colunas.items():

@@ -500,7 +500,7 @@ class TelaInicial(QWidget):
 
         self.glifo = rotulo("inicialGlifo")
         # O título se decifra quando a tela chega, como um terminal que liga.
-        self.titulo = RotuloDecifravel("Pronto para ouvir", objectName="inicialTitulo")
+        self.titulo = RotuloDecifravel(janela.tema.saudacao, objectName="inicialTitulo")
         self.titulo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.titulo.setWordWrap(True)
         self.corpo = rotulo("inicialCorpo")
@@ -580,6 +580,10 @@ class TelaInicial(QWidget):
             QFont.SpacingType.AbsoluteSpacing, janela.atmosfera.espacamento_titulo
         )
         self.titulo.setFont(fonte_titulo)
+        # A frase do jogo, e não uma frase de programa. Ela se decifra quando a
+        # tela chega, como já fazia; trocar de jogo com a tela à vista a troca.
+        if self.titulo.text() != t.saudacao:
+            self.titulo.setText(t.saudacao)
         self.secao_exemplos.setFont(janela.fonte_de_secao())
         for item, papel in (
             (self.corpo, "corpo"), (self.sequencia, "legenda"),
