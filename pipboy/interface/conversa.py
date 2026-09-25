@@ -41,6 +41,9 @@ from .tela_inicial import TelaInicial
 # Teto de falas guardadas. Uma sessão de horas não precisa carregar o começo
 # da noite, e cada bolha é um widget de verdade.
 LIMITE_FALAS = 400
+# Quanto a anotação de palavra salva recua sob a fala a que pertence: o
+# bastante para ler como nota presa a ela, e não como uma fala nova.
+RECUO_ANOTACAO = 16
 
 # Anotações não são conversa: a tela inicial convive com elas.
 _ANOTACOES = (Tag.SISTEMA, Tag.VOCAB)
@@ -174,11 +177,21 @@ class Conversa(QScrollArea):
         embrulho = QWidget()
         caixa = QHBoxLayout(embrulho)
         # A anotação pertence à fala que acabou de acontecer: cola nela por
-        # cima e se separa do próximo turno por baixo.
+        # cima, se separa do próximo turno por baixo — e fica do LADO dela,
+        # com um recuo, como uma nota presa à fala. Centralizada, ela flutuava
+        # no meio do painel, entre a coluna do tutor e a do jogador, sem
+        # pertencer a nenhuma das duas, e lia como aviso do sistema em vez de
+        # consequência do que o tutor acabou de ensinar.
         caixa.setContentsMargins(0, 2, 0, 8)
-        caixa.addStretch(1)
-        caixa.addWidget(rotulo)
-        caixa.addStretch(1)
+        anterior = self._itens[-1] if self._itens else None
+        if getattr(anterior, "direita", False):
+            caixa.addStretch(1)
+            caixa.addWidget(rotulo)
+            caixa.addSpacing(RECUO_ANOTACAO)
+        else:
+            caixa.addSpacing(RECUO_ANOTACAO)
+            caixa.addWidget(rotulo)
+            caixa.addStretch(1)
         return embrulho
 
     def _fala(
