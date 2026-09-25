@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
 
 from .. import design
 from ..events import Tag
-from .componentes import Bolha, LinhaFala, TransicaoDeTema
+from .componentes import Bolha, LinhaFala, TransicaoDeTema, largura_de_uma_linha
 from .movimento import animar_entrada
 from .tela_inicial import TelaInicial
 
@@ -171,7 +171,7 @@ class Conversa(QScrollArea):
         # com quebra de linha dentro de um layout encolhe até a largura mínima,
         # e "⊕ stimpak — estimulante médico" saía partido em duas linhas num
         # painel com espaço de sobra. Os 24 px são o padding horizontal.
-        ideal = QFontMetrics(rotulo.font()).horizontalAdvance(texto) + 24
+        ideal = largura_de_uma_linha(QFontMetrics(rotulo.font()), texto) + 24
         rotulo.setMinimumWidth(min(ideal, design.BOLHA_LARGURA_MAX))
 
         embrulho = QWidget()

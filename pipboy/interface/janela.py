@@ -559,6 +559,7 @@ class Janela(QWidget):
         self.botao_mudo = palco.botao_mudo
         self.botao_acao = palco.botao_acao
         self.conversa = palco.conversa
+        self.moldura_painel = palco.moldura_painel
         self.entrada_texto = palco.entrada_texto
         self.botao_enviar = palco.botao_enviar
 
@@ -644,6 +645,8 @@ class Janela(QWidget):
             campo.definir_cor_seta(t.text_muted)
             campo.definir_cor_luz(t.primary, raio_borda=raio)
         self._atualizar_pilula()
+        # A moldura do painel troca de traço — ou some — com o jogo.
+        self.moldura_painel.acompanhar()
         self._campainha.aplicar_tema()
         if self._capsula is not None:
             self._capsula.aplicar_tema()

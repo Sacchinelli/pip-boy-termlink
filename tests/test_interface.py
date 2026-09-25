@@ -3923,6 +3923,92 @@ def main() -> int:
     janela._aplicar_tema()
     aplicacao.processEvents()
 
+    print("a conversa ganha a moldura do jogo")
+    from PySide6.QtCore import QRectF as CaixaMoldura
+    from PySide6.QtGui import QFont as FonteLinha
+    from PySide6.QtGui import QFontMetrics as MetricaLinha
+
+    from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_MOLDURA
+    from pipboy.interface.componentes import largura_de_uma_linha
+    from pipboy.interface.ornamentos import FAIXA_MOLDURA, MOLDURAS, pintar_moldura
+    from pipboy.themes import TEMAS as TEMAS_MOLDURA
+
+    molduras = {nome: r.moldura for nome, r in RECEITAS_MOLDURA.items()}
+    checar(
+        all(m == "" or m in MOLDURAS for m in molduras.values()),
+        "toda receita pede uma moldura que existe, ou nenhuma",
+    )
+    com_moldura = [m for m in molduras.values() if m]
+    checar(
+        len(com_moldura) == len(set(com_moldura)) == 7,
+        f"sete jogos ganham moldura própria, e nenhum divide a sua ({len(set(com_moldura))})",
+    )
+    checar(
+        all(not molduras[n] for n in ("Fallout", "FPS / Multiplayer", "Genérico / Outro")),
+        "o terminal e o visor já têm a deles, e o neutro existe para não ter",
+    )
+
+    def tinta_da_moldura(estilo: str) -> bytes:
+        imagem = QImage(400, 300, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem.fill(0)
+        pintor_moldura = QPainter(imagem)
+        pintar_moldura(pintor_moldura, CaixaMoldura(0, 0, 400, 300), estilo, TEMAS_MOLDURA["GTA"])
+        pintor_moldura.end()
+        return bytes(imagem.constBits())
+
+    retratos = {estilo: tinta_da_moldura(estilo) for estilo in MOLDURAS}
+    faixa = int(FAIXA_MOLDURA)
+    invasoras = []
+    for estilo, retrato in retratos.items():
+        alfas_moldura = retrato[3::4]
+        miolo = sum(
+            alfas_moldura[y * 400 + x]
+            for y in range(faixa, 300 - faixa)
+            for x in range(faixa, 400 - faixa)
+        )
+        if miolo or not any(alfas_moldura):
+            invasoras.append(estilo)
+    checar(
+        not invasoras,
+        f"toda moldura desenha rente à borda e deixa o miolo para a conversa ({invasoras})",
+    )
+    iguais_moldura = sorted(
+        (a, b) for a in retratos for b in retratos if a < b and retratos[a] == retratos[b]
+    )
+    checar(not iguais_moldura, f"e cada uma desenha diferente das outras ({iguais_moldura})")
+
+    moldura_painel = janela.moldura_painel
+    janela.campo_jogo.setCurrentText("Elden Ring")
+    aplicacao.processEvents()
+    checar(
+        not moldura_painel.isHidden()
+        and moldura_painel.geometry() == janela.conversa.geometry()
+        and moldura_painel.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents),
+        "a moldura cobre o painel da conversa, e nenhum clique mora nela",
+    )
+    janela.resize(janela.width() + 40, janela.height())
+    aplicacao.processEvents()
+    checar(
+        moldura_painel.geometry() == janela.conversa.geometry(),
+        "e acompanha o painel quando a janela muda de tamanho",
+    )
+    janela.resize(janela.width() - 40, janela.height())
+    janela.campo_jogo.setCurrentText("Fallout")
+    aplicacao.processEvents()
+    checar(moldura_painel.isHidden(), "no terminal, que não tem moldura de painel, ela some")
+
+    # A largura de uma linha conta o que a itálica pende além do avanço.
+    italica = FonteLinha(janela.fonte("vocab", ui=False))
+    italica.setItalic(True)
+    metrica_linha = MetricaLinha(italica)
+    texto_linha = "⊕ wasteland — terra devastada"
+    checar(
+        largura_de_uma_linha(metrica_linha, texto_linha)
+        > max(metrica_linha.horizontalAdvance(texto_linha),
+              metrica_linha.boundingRect(texto_linha).width()),
+        "a largura de uma linha cobre a tinta, e não só o quanto a caneta anda",
+    )
+
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()
     # nunca voltaria e a suíte penduraria. O tiro agendado é esse alguém.

@@ -73,6 +73,18 @@ from .movimento import Transicao
 
 
 # ------------------------------------------------------------------- Geometria
+def largura_de_uma_linha(metricas: QFontMetrics, texto: str) -> int:
+    """A largura em que ``texto`` cabe numa linha só, com o que a letra pende.
+
+    ``horizontalAdvance`` mede quanto a caneta ANDA, e não até onde a tinta
+    vai: numa itálica a última letra pende além do avanço. Um rótulo com quebra
+    de linha dimensionado pelo avanço ficava 1 px curto e partia a última
+    palavra — "⊕ wasteland — terra / devastada" no Cyberpunk, onde a anotação
+    é itálica em Bahnschrift. Os 2 px de folga cobrem o arredondamento.
+    """
+    return max(metricas.horizontalAdvance(texto), metricas.boundingRect(texto).width()) + 2
+
+
 def caminho_forma(retangulo: QRectF, forma: str, raio: float) -> QPainterPath:
     """Contorno de uma superfície, no vocabulário geométrico do tema."""
     caminho = QPainterPath()
@@ -1581,7 +1593,7 @@ class Bolha(QFrame):
         # de um layout colapsa para a largura mínima, e a bolha sairia estreita
         # e alta em vez de acompanhar o texto até o limite.
         disponivel = largura_max - 30
-        ideal = QFontMetrics(fonte).horizontalAdvance(texto)
+        ideal = largura_de_uma_linha(QFontMetrics(fonte), texto)
         rotulo.setFixedWidth(max(80, min(disponivel, ideal)))
         caixa.addWidget(rotulo)
 
