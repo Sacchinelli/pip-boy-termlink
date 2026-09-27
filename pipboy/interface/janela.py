@@ -622,6 +622,8 @@ class Janela(QWidget):
         ativa = self._worker is not None
         self.botao_acao.setText(t.stop_label if ativa else t.start_label)
         self.botao_acao.variante = "perigo" if ativa else "primario"
+        # O convite do campo de texto é do jogo; o nome acessível dele, não.
+        self.entrada_texto.setPlaceholderText(t.convite)
 
         self._cenario.definir(t, self._atmosfera)
         # O jeito de o jogo marcar o que está escolhido vale no programa

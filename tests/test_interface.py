@@ -707,6 +707,11 @@ def main() -> int:
         tela.titulo.text() == "A trilha está aberta",
         f"e trocar de jogo troca a frase ({tela.titulo.text()})",
     )
+    checar(
+        janela.entrada_texto.placeholderText() == "Perguntar ao parceiro…"
+        and janela.entrada_texto.accessibleName() == "Perguntar por texto",
+        "e o convite do campo de texto — mas não o nome que o leitor de tela anuncia",
+    )
     janela.campo_jogo.setCurrentText(jogo_saudacao)
     aplicacao.processEvents()
     checar(

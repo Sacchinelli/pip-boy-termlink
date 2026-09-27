@@ -1023,7 +1023,7 @@ def teste_design() -> None:
 
     # --- Cada ambiente é mesmo um ambiente ---
     # A promessa do seletor é que trocar o jogo troca a janela inteira. Estas
-    # quatro colunas são o que sustenta isso, e duas delas já tinham colidido
+    # colunas são o que sustenta isso, e duas delas já tinham colidido
     # em silêncio no passado: temas diferentes caindo na MESMA fonte de
     # reserva. Colisão aqui não quebra nada — ela só apaga a identidade, que é
     # o defeito mais fácil de não ver.
@@ -1034,6 +1034,8 @@ def teste_design() -> None:
         "cor de tela": [t.screen for t in TEMAS.values()],
         "acento": [t.accent for t in TEMAS.values()],
         "saudação da tela inicial": [t.saudacao for t in TEMAS.values()],
+        "convite do campo de texto": [t.convite for t in TEMAS.values()],
+        "verbo do botão de partida": [t.start_label for t in TEMAS.values()],
         "timbre declarado": [(r.forma, r.grave, r.agudo) for r in RECEITAS.values()],
     }
     for nome_coluna, valores in colunas.items():

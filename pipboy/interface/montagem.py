@@ -758,7 +758,7 @@ def _palco(janela: Janela, alvo: QWidget) -> Palco:
     linha = QHBoxLayout()
     linha.setSpacing(8)
     entrada_texto = QLineEdit(objectName="entrada")
-    entrada_texto.setPlaceholderText("Perguntar por texto…")
+    entrada_texto.setPlaceholderText(janela.tema.convite)
     entrada_texto.setFont(janela.fonte("corpo"))
     entrada_texto.setToolTip("Perguntar sem falar. Ctrl+L traz o cursor para cá.")
     entrada_texto.setAccessibleName("Perguntar por texto")

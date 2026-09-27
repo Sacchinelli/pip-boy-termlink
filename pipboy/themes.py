@@ -95,6 +95,13 @@ class GameTheme:
     # único que não sabia em que jogo estava. Frases escritas aqui, no tom de
     # cada um, e não falas tiradas dos jogos.
     saudacao: str
+    # O convite do campo de texto — o que ele diz vazio. Era "Perguntar por
+    # texto…" nos dez: a única frase da barra de baixo, e a que o jogador lê
+    # toda vez que vai digitar. Cada jogo convida do jeito dele: o prompt do
+    # terminal, a mensagem deixada no chão da Terra Intermédia, o canal do
+    # esquadrão. O nome ACESSÍVEL do campo não muda com o tema: quem usa leitor
+    # de tela precisa encontrar o mesmo campo em qualquer jogo.
+    convite: str
     # Primeira família instalada no sistema é a usada; a última é a reserva.
     #
     # A cadeia precisa ser distinta das dos OUTROS temas, e não só bonita:
@@ -258,7 +265,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         header_title="◈ PIP-BOY 3000 MK IV",
         header_subtitle="TERMLINK — TUTOR DE INGLÊS PARA JOGOS",
         idle_text="AGUARDANDO ENTRADA",
-        start_label="▶  INICIAR",
+        start_label="▶  INICIALIZAR",
         stop_label="■  ENCERRAR",
         persona_label="Pip-Boy Sarcástico",
         persona_prompt=(
@@ -268,6 +275,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
             "mas por trás do deboche você ajuda de verdade e com precisão."
         ),
         saudacao="Terminal pronto",
+        convite="> digite uma pergunta_",
         font_candidates=("Consolas", "Courier New"),
         shell="#161a15",
         screen="#0a1208",
@@ -300,6 +308,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
             "o mistério fica no tom, nunca no conteúdo."
         ),
         saudacao="Que a graça ilumine o caminho",
+        convite="Deixar uma mensagem…",
         font_candidates=("Garamond", "EB Garamond", "Constantia", "Georgia", "Times New Roman"),
         # Ouro sobre QUASE PRETO. Elden Ring, Witcher e Red Dead são os três
         # ambientes quentes e mediam de 5,96 a 7,10 entre si — três marrons
@@ -336,6 +345,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
             "resposta objetiva."
         ),
         saudacao="O norte está à escuta",
+        convite="Perguntar ao guia…",
         font_candidates=("Palatino Linotype", "Book Antiqua", "Sylfaen", "Times New Roman"),
         # Gelo, e não o cinza-azulado de escritório: a crônica nórdica media
         # 2,87 do tema deliberadamente NEUTRO — a menor distância da tabela
@@ -374,6 +384,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
             "deixar de entregar o que foi pedido."
         ),
         saudacao="Há um contrato na mesa",
+        convite="Perguntar ao bruxo…",
         font_candidates=("Georgia", "Cambria", "Times New Roman"),
         # Chão QUENTE. Tudo neste tema já era quente — a prata creme do
         # texto, o vermelho-sangue do acento, e uma atmosfera que a própria
@@ -414,6 +425,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
             "montar: mostrando, não teorizando."
         ),
         saudacao="A trilha está aberta",
+        convite="Perguntar ao parceiro…",
         font_candidates=("Rockwell", "Zilla Slab", "Bookman Old Style", "Cambria", "Times New Roman"),
         # O mais claro dos três ambientes quentes, e o mais alaranjado: papel
         # de álbum sob luz de fim de tarde. Ver a nota do Elden Ring.
@@ -447,6 +459,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
             "no ar — responde rápido, com graça, e emenda na próxima sem enrolar."
         ),
         saudacao="Você está no ar",
+        convite="Mandar mensagem para a rádio…",
         font_candidates=("Trebuchet MS", "Corbel", "Segoe UI", "Arial"),
         # Noite quase preta, para o neon ter onde brilhar. A rádio pirata e o
         # grimório do RPG mediam 4,57 um do outro: dois fundos escuros
@@ -481,6 +494,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
             "informação certa na hora certa — para você, dado limpo é questão de honra."
         ),
         saudacao="Link neural estável",
+        convite="// transmitir pergunta",
         font_candidates=("Bahnschrift", "Consolas", "Segoe UI"),
         shell="#08080a",
         screen="#101014",
@@ -502,7 +516,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         header_title="✧ GRIMÓRIO DE VIAGEM",
         header_subtitle="MESTRE DE JOGO — TUTOR DE INGLÊS",
         idle_text="AGUARDANDO O AVENTUREIRO",
-        start_label="▶  INICIAR",
+        start_label="▶  DESBRAVAR",
         stop_label="■  ENCERRAR",
         persona_label="Mestre de Jogo",
         persona_prompt=(
@@ -511,6 +525,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
             "rouba a cena — descreve o necessário e devolve o turno."
         ),
         saudacao="A aventura começa aqui",
+        convite="Perguntar ao mestre…",
         font_candidates=("Sitka Text", "Sylfaen", "Georgia", "Times New Roman"),
         # Beringela, e não índigo: o roxo deste grimório foi para o lado
         # QUENTE do violeta, e o da rádio pirata para o frio. Era o mesmo roxo
@@ -548,6 +563,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
             "partida — o jogador tem dois segundos de atenção e você respeita isso."
         ),
         saudacao="Esquadrão em posição",
+        convite="[ESQUADRÃO] mensagem…",
         # Grotesca condensada, a tipografia de estêncil de equipamento militar.
         # Saira Condensed é livre (OFL), como EB Garamond e Zilla Slab: quem a
         # instalar tem a fonte pretendida. A reserva de fábrica é a Franklin
@@ -589,6 +605,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
             "entre jogos, desde que ela caiba em uma frase."
         ),
         saudacao="Pronto para ouvir",
+        convite="Perguntar por texto…",
         font_candidates=("Segoe UI", "Consolas", "Arial"),
         shell="#0d1116",
         screen="#171c22",
