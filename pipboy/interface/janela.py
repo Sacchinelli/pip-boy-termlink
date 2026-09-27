@@ -677,6 +677,8 @@ class Janela(QWidget):
         self._atualizar_pilula()
         # A moldura do painel troca de traço — ou some — com o jogo.
         self.moldura_painel.acompanhar()
+        # A moldura do jogo novo entra do jeito dele (ver ornamentos.MONTAGENS).
+        self.moldura_painel.montar()
         self.aviso_de_palavra.recolher()
         self._campainha.aplicar_tema()
         if self._capsula is not None:
@@ -816,8 +818,9 @@ class Janela(QWidget):
         if not self._ja_apareceu:
             self._ja_apareceu = True
             # O aparelho liga: o nome dele se decifra na primeira vez que a
-            # janela aparece.
+            # janela aparece, e a moldura do painel se monta.
             self.marca.decifrar()
+            self.moldura_painel.montar()
             # O aparecimento tem a mesma cortesia do resto: um fade curto em
             # vez de um estalo — a menos que a atmosfera esteja desligada.
             if self._intensidade_atmosfera > 0.0:

@@ -3965,6 +3965,115 @@ def main() -> int:
     janela.campo_jogo.setCurrentText(jogo_icone)
     aplicacao.processEvents()
 
+    print("a moldura do jogo se monta")
+    from PySide6.QtCore import QRectF as CaixaMontagem
+
+    from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_MONTAGEM
+    from pipboy.interface.ornamentos import MONTAGENS, aplicar_montagem
+    from pipboy.interface.ornamentos import pintar_moldura as pintar_moldura_montada
+    from pipboy.themes import TEMAS as TEMAS_MONTAGEM
+
+    montagens = {nome: (r.montagem, r.moldura) for nome, r in RECEITAS_MONTAGEM.items()}
+    checar(
+        all(m in MONTAGENS for m, moldura in montagens.values() if moldura)
+        and all(not m for m, moldura in montagens.values() if not moldura),
+        "todo jogo com moldura diz como ela se monta; sem moldura, não há o que montar",
+    )
+
+    def tinta_montada(jogo: str, progresso: float) -> QImage:
+        montagem, moldura = montagens[jogo]
+        imagem_m = QImage(800, 500, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem_m.fill(0)
+        pintor_m = QPainter(imagem_m)
+        aplicar_montagem(pintor_m, CaixaMontagem(0, 0, 800, 500), montagem, progresso)
+        pintar_moldura_montada(pintor_m, CaixaMontagem(0, 0, 800, 500), moldura, TEMAS_MONTAGEM[jogo])
+        pintor_m.end()
+        return imagem_m
+
+    def soma(imagem_m: QImage, x0: int = 0, y0: int = 0, x1: int = 800, y1: int = 500) -> int:
+        return sum(
+            imagem_m.pixelColor(x, y).alpha()
+            for y in range(y0, y1, 2) for x in range(x0, x1, 2)
+        )
+
+    crescimento = []
+    for jogo_m, (_, moldura_m) in montagens.items():
+        if not moldura_m:
+            continue
+        passos = [soma(tinta_montada(jogo_m, p)) for p in (0.0, 0.3, 0.6, 1.0)]
+        if not (passos[0] < passos[1] <= passos[2] <= passos[3] and passos[0] < passos[3] * 0.2):
+            crescimento.append(f"{jogo_m}: {passos}")
+    checar(
+        not crescimento,
+        f"toda moldura entra do quase nada até inteira, sem voltar atrás ({crescimento})",
+    )
+    cantos_m = tinta_montada("The Witcher 3", 0.2)
+    checar(
+        soma(cantos_m, 0, 0, 60, 60) > 0 and soma(cantos_m, 740, 440, 800, 500) == 0,
+        "as ferragens do bruxo chegam quina por quina, no sentido horário",
+    )
+    tracado_m = tinta_montada("Cyberpunk 2077", 0.25)
+    checar(
+        soma(tracado_m, 0, 0, 120, 40) > 0 and soma(tracado_m, 740, 0, 800, 60) == 0,
+        "o circuito da Night City corre pela borda a partir de um canto",
+    )
+    varredura_m = tinta_montada("Red Dead", 0.4)
+    checar(
+        soma(varredura_m, 0, 0, 300, 500) > 0 and soma(varredura_m, 340, 0, 800, 500) == 0,
+        "o cartaz do velho oeste desenrola da esquerda para a direita",
+    )
+
+    # Na janela: trocar de jogo monta a moldura do jogo novo; desligada, ela
+    # aparece pronta.
+    jogo_montagem = janela.campo_jogo.currentText()
+    atmosfera_montagem = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    janela.campo_jogo.setCurrentText("Cyberpunk 2077")
+    aplicacao.processEvents()
+    moldura_janela = janela.moldura_painel
+    checar(
+        moldura_janela.progresso_da_montagem < 1.0 or not janela.conversa.isVisible(),
+        "trocar de jogo faz a moldura do jogo novo entrar montando",
+    )
+    checar(
+        aguardar(lambda: moldura_janela.progresso_da_montagem >= 1.0, 3000),
+        "e ela termina inteira",
+    )
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QRegion
+    from PySide6.QtWidgets import QWidget as WidgetMontagem
+
+    def tinta_da_moldura_real() -> int:
+        imagem_real = QImage(moldura_janela.size(), QImage.Format.Format_ARGB32_Premultiplied)
+        imagem_real.fill(0)
+        moldura_janela.render(
+            imagem_real, QPoint(), QRegion(), WidgetMontagem.RenderFlag.DrawChildren
+        )
+        alfas_real = bytes(imagem_real.constBits())[3::4]
+        return len(alfas_real) - alfas_real.count(0)
+
+    inteira_real = tinta_da_moldura_real()
+    moldura_janela.montar()
+    moldura_janela._animacao.pause()
+    moldura_janela._animacao.setCurrentTime(moldura_janela._animacao.duration() // 4)
+    no_meio_real = tinta_da_moldura_real()
+    moldura_janela._animacao.stop()
+    moldura_janela.progresso_da_montagem = 1.0
+    checar(
+        0 <= no_meio_real < inteira_real * 0.7,
+        f"e a moldura da janela é de fato pintada montando ({no_meio_real} de {inteira_real} pixels)",
+    )
+    janela.campo_atmosfera.setCurrentText("Desligada")
+    janela.campo_jogo.setCurrentText("The Witcher 3")
+    aplicacao.processEvents()
+    checar(
+        moldura_janela.progresso_da_montagem == 1.0,
+        "com a atmosfera desligada, a moldura aparece pronta",
+    )
+    janela.campo_atmosfera.setCurrentText(atmosfera_montagem)
+    janela.campo_jogo.setCurrentText(jogo_montagem)
+    aplicacao.processEvents()
+
     print("cada jogo mira do seu jeito")
     from PySide6.QtGui import QColor as CorMira
 

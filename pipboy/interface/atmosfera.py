@@ -125,6 +125,9 @@ class Atmosfera:
     # O conjunto de ícones do caderno e do histórico (ver icones.ICONES);
     # vazio, os glifos de sempre.
     icones: str = ""
+    # Como a moldura do painel ENTRA quando o jogo entra (ver
+    # ornamentos.MONTAGENS); vazio, aparece pronta.
+    montagem: str = ""
     # O ritmo do jogo (ver movimento.definir_ritmo): um fator sobre as
     # durações de ``design`` e o nome de uma curva — a alta fantasia anda
     # devagar e solene, o visor seco e depressa, o GTA passa do ponto, o
@@ -157,6 +160,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
      brilho_texto=0.6,),
     # Luz dourada baixa e partículas subindo, contra pergaminho.
     "Elden Ring": Atmosfera(
+        montagem="esmaecer",
         icones="graca",
         mira="graca",
         tempo=1.7, curva="solene", letras="revelar",
@@ -173,6 +177,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # para ver, e o que faltava para esta crônica não ser o tema neutro com
     # neve. O halo do fundo desceu: com a aurora no alto, os dois brigavam.
     "Skyrim": Atmosfera(
+        montagem="esmaecer",
         icones="nordico",
         mira="arcos",
         constelacao=0.7,
@@ -187,6 +192,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     ),
     # Couro e vela: grão grosso, halo quente lateral, brasas lentas.
     "The Witcher 3": Atmosfera(
+        montagem="cantos",
         icones="bruxo",
         mira="medalhao",
         tempo=1.15, curva="suave", letras="revelar",
@@ -203,6 +209,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # chão quente com Elden Ring e Witcher; o que só o velho oeste tem não é
     # a cor, é o SUPORTE.
     "Red Dead": Atmosfera(
+        montagem="varredura",
         icones="oeste",
         mira="olho_morto",
         tempo=1.25, curva="suave", letras="escrever",
@@ -218,6 +225,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # o pôr do sol de neon no horizonte — a imagem inteira deste ambiente, e
     # o que ele não tinha. O halo saiu do alto: o brilho agora sobe da linha.
     "GTA": Atmosfera(
+        montagem="acender",
         icones="celular",
         mira="neon",
         tempo=0.8, curva="mola", letras="acender",
@@ -232,6 +240,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
      brilho_texto=0.32,),
     # Interferência digital, varredura fina e chuva de dados descendo.
     "Cyberpunk 2077": Atmosfera(
+        montagem="tracado",
         icones="dados",
         mira="chanfro",
         tempo=0.7, curva="seco", letras="decifrar",
@@ -248,6 +257,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # ele este ambiente e a rádio pirata eram dois fundos escuros arroxeados,
     # a 4,57 um do outro.
     "RPG / Aventura (geral)": Atmosfera(
+        montagem="esmaecer",
         icones="grimorio",
         mira="runas",
         tempo=1.3, curva="solene", letras="escrever",
