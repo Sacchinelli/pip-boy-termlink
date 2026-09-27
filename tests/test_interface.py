@@ -941,6 +941,31 @@ def main() -> int:
         == design_letra.escalar(design_letra.TIPO["display"].tamanho, janela._escala_texto),
         "e o título no corpo que o desenho dele pede, sem ajuste",
     )
+    from PySide6.QtGui import QFont as FonteTitulo
+
+    titulo_norte = janela.fonte("display", ui=False)
+    checar(
+        titulo_norte.capitalization() == FonteTitulo.Capitalization.AllUppercase
+        and titulo_norte.weight() == FonteTitulo.Weight.Light and not titulo_norte.bold(),
+        "os títulos do norte são Futura fina em maiúsculas, como os menus do Skyrim",
+    )
+    checar(
+        janela.conversa.tela_inicial.titulo.text() == "O norte está à escuta"
+        and janela.conversa.tela_inicial.titulo.accessibleName() == "O norte está à escuta",
+        "a caixa alta é da letra: o texto e o que o leitor de tela lê continuam como foram escritos",
+    )
+    checar(
+        janela.fonte("corpo", ui=False).capitalization() == FonteTitulo.Capitalization.MixedCase
+        and janela.fonte("rotulo").capitalization() == FonteTitulo.Capitalization.MixedCase,
+        "e a fala e os controles do norte nunca viram caixa alta",
+    )
+    janela.campo_jogo.setCurrentText("Elden Ring")
+    aplicacao.processEvents()
+    titulo_graca = janela.fonte("display", ui=False)
+    checar(
+        titulo_graca.capitalization() == FonteTitulo.Capitalization.MixedCase and titulo_graca.bold(),
+        "e onde o jogo não pede, os títulos seguem como eram",
+    )
     janela.campo_jogo.setCurrentText(jogo_letra)
     aplicacao.processEvents()
 

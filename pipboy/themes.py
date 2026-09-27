@@ -136,6 +136,12 @@ class GameTheme:
     # inscrição da Terra Intermédia, o tipo de madeira dos cartazes. Vazia,
     # os títulos usam a fonte do tema.
     titulos: tuple[str, ...] = ()
+    # E como os títulos são compostos: os menus do Skyrim são Futura FINA em
+    # maiúsculas; o terminal, a Night City e o visor titulam em caixa alta.
+    # O texto continua o de verdade — é a letra que muda de caixa, e o leitor
+    # de tela lê a frase como ela foi escrita.
+    titulos_leves: bool = False
+    titulos_em_caixa_alta: bool = False
 
     # --- Cores derivadas -------------------------------------------------
     # Calculadas, nunca declaradas. Duas famílias:
@@ -304,6 +310,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         accent="#ffb000",
         alert="#ff5c5c",
         info="#7ad4ff",
+        titulos_em_caixa_alta=True,
         interface=("Roboto Condensed",),
     ),
     GameTheme(
@@ -381,6 +388,8 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         accent="#d8c48a",
         alert="#b0483c",
         info="#8fd0b0",
+        titulos_leves=True,
+        titulos_em_caixa_alta=True,
         interface=("Jost",),
     ),
     GameTheme(
@@ -528,6 +537,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         accent="#00f0ff",
         alert="#ff003c",
         info="#ff4fd8",
+        titulos_em_caixa_alta=True,
         interface=("Rajdhani",),
     ),
     GameTheme(
@@ -612,6 +622,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         # no AA por uma casa decimal.
         alert="#d81f28",
         info="#79c7e8",
+        titulos_em_caixa_alta=True,
         interface=("Barlow Condensed",),
     ),
     GameTheme(

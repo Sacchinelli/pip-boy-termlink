@@ -89,7 +89,7 @@ from .componentes import (
 from .cursor import CampoMagnetico, RastreadorDeCursor, abraco_de, centro_de
 from .dialogo import avisar
 from .estilo import RAIO_PADRAO, RAIO_POR_FORMA, folha_da_janela
-from .fontes import ajuste_optico, registrar_fontes, tem_negrito
+from .fontes import ajuste_optico, compor_titulo, registrar_fontes, tem_negrito
 from .moldura import (
     GripsRedimensionamento,
     aplicar_cantos_do_sistema,
@@ -448,6 +448,8 @@ class Janela(QWidget):
         fonte = QFont(familia, design.escalar(tipo.tamanho, self._escala_texto * ajuste))
         fonte.setBold(tipo.peso == "bold" and tem_negrito(familia))
         fonte.setItalic(tipo.estilo == "italic")
+        if papel == "display" and not ui:
+            compor_titulo(fonte, self._tema)
         return fonte
 
     def fonte_de_secao(self) -> QFont:

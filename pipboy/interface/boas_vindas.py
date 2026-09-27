@@ -27,7 +27,7 @@ from ..config import ConfigurationError, Preferences, salvar_chave
 from ..themes import GameTheme, paleta_de, theme_for
 from .atmosfera import atmosfera_de
 from .componentes import Botao, caminho_forma
-from .fontes import ajuste_optico, registrar_fontes, tem_negrito
+from .fontes import ajuste_optico, compor_titulo, registrar_fontes, tem_negrito
 
 LARGURA = 560
 ENDERECO_CHAVE = "https://aistudio.google.com/apikey"
@@ -56,6 +56,8 @@ class _ProvedorMinimo:
         ajuste = 1.0 if papel == "display" else ajuste_optico(familia)
         fonte = QFont(familia, max(1, round(tipo.tamanho * ajuste)))
         fonte.setBold(tipo.peso == "bold" and tem_negrito(familia))
+        if papel == "display" and not ui:
+            compor_titulo(fonte, self.tema)
         fonte.setItalic(tipo.estilo == "italic")
         return fonte
 

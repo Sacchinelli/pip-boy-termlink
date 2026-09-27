@@ -29,6 +29,7 @@ from __future__ import annotations
 import logging
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from PySide6.QtGui import QFont, QFontDatabase, QFontMetricsF
 
@@ -77,6 +78,20 @@ def tem_negrito(familia: str) -> bool:
     # Família desconhecida (uma reserva que nem está instalada): quem decide
     # é o Qt, como sempre decidiu.
     return not estilos or any("bold" in estilo.lower() for estilo in estilos)
+
+
+def compor_titulo(fonte: QFont, tema: Any) -> None:
+    """Peso e caixa dos títulos do jogo (ver GameTheme.titulos_leves).
+
+    A caixa alta é da LETRA (``setCapitalization``), e não do texto: o rótulo
+    continua dizendo "O norte está à escuta", e é isso que o leitor de tela
+    lê e que a busca encontra.
+    """
+    if getattr(tema, "titulos_leves", False):
+        fonte.setBold(False)
+        fonte.setWeight(QFont.Weight.Light)
+    if getattr(tema, "titulos_em_caixa_alta", False):
+        fonte.setCapitalization(QFont.Capitalization.AllUppercase)
 
 
 @lru_cache(maxsize=64)
