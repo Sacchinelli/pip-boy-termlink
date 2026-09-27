@@ -51,6 +51,17 @@ _ANOTACOES = (Tag.SISTEMA, Tag.VOCAB)
 
 
 
+def quem_fala(estilo: str, autor: str) -> str:
+    """O nome de quem fala no formato do jogo, sem a hora (ver cabecalho_da_fala)."""
+    if estilo == "terminal":
+        return f"[{autor}]"
+    if estilo == "holo":
+        return f"// {autor}"
+    if estilo == "radio":
+        return f"[ESQUADRÃO] {autor}"
+    return autor
+
+
 def cabecalho_da_fala(estilo: str, autor: str, hora: str, tema: Any) -> str:
     """Quem fala e quando, do jeito que o jogo escreve isso.
 

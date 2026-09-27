@@ -21,9 +21,11 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
+from typing import Any
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
+from PySide6.QtWidgets import QWidget
 
 # O que se desenha quando o jogo não tem ícone próprio: os glifos de antes.
 GLIFOS_PADRAO: dict[str, str] = {"caderno": "◫", "historico": "◷"}
@@ -291,3 +293,36 @@ def pintar_icone(
     pintor.setBrush(Qt.BrushStyle.NoBrush)
     desenhar(pintor, cor)
     pintor.restore()
+
+
+class IconeDoJogo(QWidget):
+    """O ícone do jogo em vigor, sozinho: ao lado do título de uma janela.
+
+    Lê o tema a cada pintura — trocar de jogo com a janela aberta troca o
+    desenho sem ninguém avisar este widget.
+    """
+
+    def __init__(self, provedor: Any, nome: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._provedor = provedor
+        self.nome = nome
+        self._lado = 24
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setAccessibleName("")
+
+    def definir_lado(self, lado: int) -> None:
+        self._lado = max(12, lado)
+        self.setFixedSize(self._lado, self._lado)
+        self.update()
+
+    def sizeHint(self) -> QSize:
+        return QSize(self._lado, self._lado)
+
+    def paintEvent(self, _evento: Any) -> None:
+        pintor = QPainter(self)
+        pintor.setFont(self.font())
+        pintar_icone(
+            pintor, self.nome, QRectF(self.rect()).adjusted(1, 1, -1, -1),
+            QColor(self._provedor.tema.accent_text),
+        )
+        pintor.end()

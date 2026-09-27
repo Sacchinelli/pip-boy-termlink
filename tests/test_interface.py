@@ -4179,6 +4179,111 @@ def main() -> int:
     janela.campo_jogo.setCurrentText(jogo_fala)
     aplicacao.processEvents()
 
+    print("o caderno e o histórico vestem o jogo")
+    from pipboy.interface.icones import IconeDoJogo
+    from pipboy.interface.ornamentos import FAIXA_MOLDURA as FAIXA_JANELAS
+
+    jogo_janelas = janela.campo_jogo.currentText()
+    atmosfera_janelas = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    janela.campo_jogo.setCurrentText("Red Dead")
+    aplicacao.processEvents()
+    janela.abrir_caderno()
+    aplicacao.processEvents()
+    caderno_j = janela._caderno
+    checar(
+        caderno_j.titulo.text() == "Diário" == janela.tema.nome_do_caderno
+        and "caderno de vocabulário" in caderno_j.resumo.text()
+        and caderno_j.windowTitle() == "Caderno de vocabulário",
+        "no velho oeste, o caderno é o Diário — com a função escrita ao lado e na barra",
+    )
+    checar(
+        isinstance(caderno_j.icone_titulo, IconeDoJogo) and caderno_j.icone_titulo.nome == "caderno"
+        and caderno_j.icone_titulo.width() == QFontMetrics(caderno_j.titulo.font()).height(),
+        "e o diário de correia ao lado do título, na altura da letra dele",
+    )
+    moldura_cad = caderno_j.moldura_lista
+    checar(
+        moldura_cad.parentWidget() is caderno_j.rolagem.parentWidget()
+        and moldura_cad.isVisible() and moldura_cad.geometry() == caderno_j.rolagem.geometry(),
+        "a moldura do cartaz contorna a lista, por cima dela e do tamanho dela",
+    )
+    margens_cad = caderno_j._fluxo.contentsMargins()
+    checar(
+        margens_cad.left() >= FAIXA_JANELAS and margens_cad.top() >= FAIXA_JANELAS,
+        "e os cartões se afastam da borda, para o ornamento não passar por cima de nenhum",
+    )
+    caderno_j.close()
+    caderno_j.show()
+    checar(
+        moldura_cad.progresso_da_montagem < 1.0,
+        "reaberto, o caderno monta a moldura do jogo de novo",
+    )
+    aguardar(lambda: moldura_cad.progresso_da_montagem >= 1.0, 3000)
+    caderno_j.close()
+
+    janela.abrir_historico()
+    aplicacao.processEvents()
+    visor_j = janela._visor_historico
+    moldura_hist = visor_j.moldura_falas
+    checar(
+        visor_j.titulo.text() == "Trilhas percorridas" and visor_j.subtitulo.text() == "histórico de sessões"
+        and visor_j.icone_titulo.nome == "historico",
+        "o histórico é o das trilhas percorridas, com a fogueira ao lado",
+    )
+    checar(
+        moldura_hist.parentWidget() is visor_j._rolagem_falas.parentWidget()
+        and moldura_hist.parentWidget() is not None and moldura_hist.isVisible(),
+        "a moldura contorna a transcrição, dentro da janela — e não solta fora dela",
+    )
+    visor_j.close()
+
+    # A transcrição fala no formato do jogo, como a conversa.
+    import html as html_janelas
+
+    historico_j = janela._historico
+    sessao_j = historico_j.iniciar_sessao(jogo="Fallout", modo="Tutor", nivel="B1")
+    historico_j.registrar_fala(sessao_j, autor="VOCÊ", tag="usuario", texto="What's a bounty?")
+    historico_j.registrar_fala(sessao_j, autor="COMANDO", tag="assistente", texto="A reward, soldier.")
+    textos_por_jogo = {}
+    for jogo_j in ("Fallout", "FPS / Multiplayer", "Red Dead"):
+        janela.campo_jogo.setCurrentText(jogo_j)
+        aplicacao.processEvents()
+        janela.abrir_conversa(sessao_j)
+        aplicacao.processEvents()
+        visor_t = janela._visor_historico
+        textos_por_jogo[jogo_j] = [
+            html_janelas.unescape(b.text()) for b in visor_t._interno_falas.findChildren(QLabel)
+        ]
+        visor_t.close()
+    checar(
+        any("[COMANDO]" in t for t in textos_por_jogo["Fallout"])
+        and any("> What" in t or "&gt;" in t or ">\xa0What" in t for t in textos_por_jogo["Fallout"]),
+        "no terminal, quem fala vem entre colchetes, e o jogador depois do prompt",
+    )
+    checar(
+        any("[ESQUADRÃO] COMANDO" in t for t in textos_por_jogo["FPS / Multiplayer"]),
+        "no visor, com o canal na frente do nome",
+    )
+    checar(
+        any("font-weight:600" in t and "COMANDO" in t for t in textos_por_jogo["Red Dead"]),
+        "e na legenda do velho oeste, o nome em destaque",
+    )
+    historico_j.remover_sessao(sessao_j)
+    janela.campo_jogo.setCurrentText("FPS / Multiplayer")
+    aplicacao.processEvents()
+    janela.abrir_caderno()
+    aplicacao.processEvents()
+    checar(
+        not janela._caderno.moldura_lista.isVisible()
+        and janela._caderno._fluxo.contentsMargins().left() < FAIXA_JANELAS,
+        "o visor não tem moldura de painel: a lista fica sem ela, e sem folga à toa",
+    )
+    janela._caderno.close()
+    janela.campo_jogo.setCurrentText(jogo_janelas)
+    janela.campo_atmosfera.setCurrentText(atmosfera_janelas)
+    aplicacao.processEvents()
+
     print("cada jogo mira do seu jeito")
     from PySide6.QtGui import QColor as CorMira
 
@@ -4706,7 +4811,8 @@ def main() -> int:
     )
     titulo_cab, resumo_cab = caderno_pares.titulo, caderno_pares.resumo
     checar(
-        titulo_cab.text() == "CADERNO"
+        titulo_cab.text() == janela.tema.nome_do_caderno
+        and "vocabulário" not in titulo_cab.text().lower()
         and titulo_cab.geometry().bottom() >= resumo_cab.geometry().top()
         and resumo_cab.x() > titulo_cab.x(),
         "o título não repete a barra de título, e os números moram na linha dele",

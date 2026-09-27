@@ -535,6 +535,11 @@ class MolduraDoPainel(QWidget):
 
     def acompanhar(self) -> None:
         """Cobre o painel de novo, por cima dele."""
+        # Mora sempre no mesmo pai que o painel: se ele mudou de pai — ou só
+        # ganhou um depois de a moldura nascer —, a moldura vai atrás.
+        pai = self._painel.parentWidget()
+        if pai is not None and self.parentWidget() is not pai:
+            self.setParent(pai)
         self.setGeometry(self._painel.geometry())
         self.setVisible(self._painel.isVisible() and bool(self.estilo))
         self.raise_()
