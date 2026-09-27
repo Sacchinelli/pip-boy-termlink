@@ -3812,6 +3812,138 @@ def main() -> int:
         "e a 'Desligada' o apaga",
     )
 
+    print("cada jogo mira do seu jeito")
+    from PySide6.QtGui import QColor as CorMira
+
+    from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_MIRA
+    from pipboy.interface.atmosfera import MIRAS, pintar_mira, pintar_onda
+
+    miras = {nome: r.mira for nome, r in RECEITAS_MIRA.items()}
+    checar(all(m == "" or m in MIRAS for m in miras.values()), "todo jogo pede uma mira que existe")
+    proprias_mira = [m for m in miras.values() if m]
+    checar(
+        len(proprias_mira) == len(set(proprias_mira)) == 9 and miras["Genérico / Outro"] == "",
+        f"nove jogos miram do seu jeito, nenhum copia outro, e o neutro fica com o anel ({proprias_mira})",
+    )
+
+    def retrato_da_mira(estilo: str, raio: float, crescido: float) -> QImage:
+        imagem_mira = QImage(120, 120, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem_mira.fill(0)
+        pintor_mira = QPainter(imagem_mira)
+        pintar_mira(pintor_mira, estilo, QPointF(60.0, 60.0), raio, CorMira("#ff8800"), crescido)
+        pintor_mira.end()
+        return imagem_mira
+
+    retratos_mira = {m: retrato_da_mira(m, 13.0, 0.0) for m in MIRAS}
+    iguais_mira = sorted(
+        (a, b) for a in retratos_mira for b in retratos_mira
+        if a < b and retratos_mira[a] == retratos_mira[b]
+    )
+    checar(not iguais_mira, f"e cada mira desenha diferente das outras ({iguais_mira})")
+    checar(
+        all(retrato_da_mira(m, 22.0, 1.0) != retratos_mira[m] for m in MIRAS),
+        "sobre o que é clicável, toda mira cresce",
+    )
+
+    # Sem rastro: com a mira de cada jogo — solta, crescida e com ondas de
+    # clique em várias idades —, nada se pinta fora da caixa que o quadro
+    # manda repintar. O que vazasse ficaria na tela atrás do cursor.
+    vazadas = []
+    for jogo_mira in TEMAS_CURSOR:
+        for sobre in (False, True):
+            cena_mira = CenarioCursor()
+            # Só o anel e as ondas: partículas, tremulação e as faixas de
+            # interferência pedem repintura por conta própria, e uma faixa
+            # passando por cima esconderia o que a mira vazasse.
+            cena_mira.definir(
+                TEMAS_CURSOR[jogo_mira],
+                trocar_campos(
+                    atmosfera_de(jogo_mira), densidade=0, interferencia=0.0, tremulacao=0.0
+                ),
+            )
+            cena_mira.redimensionar(600, 400)
+            cena_mira.definir_cursor(QPointF(300.0, 200.0), sobre_clicavel=sobre)
+            for idade_mira in range(40):
+                # Longe do cursor: a caixa de uma onda perto dele cobriria o
+                # que a mira vazasse, e o vazamento passaria sem ser visto.
+                if idade_mira in (0, 6, 14):
+                    cena_mira.pulsar(QPointF(100.0 + idade_mira, 320.0))
+                cena_mira.avancar(0.016)
+                if idade_mira % 8 == 3:
+                    acesos, fora = vazamento(
+                        cena_mira._pintar_anel_e_ondas, cena_mira._caixas_vivas(), 600, 400
+                    )
+                    if acesos == 0 or fora:
+                        vazadas.append(f"{jogo_mira}/{'clicável' if sobre else 'solta'}: {fora}")
+    checar(not vazadas, f"nenhuma mira nem onda deixa rastro fora da caixa repintada ({vazadas[:3]})")
+
+    # O clique responde na língua da mira.
+    def retrato_da_onda(estilo: str, progresso: float) -> QImage:
+        imagem_onda = QImage(120, 120, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem_onda.fill(0)
+        pintor_onda = QPainter(imagem_onda)
+        pintar_onda(
+            pintor_onda, estilo, QPointF(60.0, 60.0), progresso, CorMira("#3388ff"), CorMira("#dd2222")
+        )
+        pintor_onda.end()
+        return imagem_onda
+
+    acerto = retrato_da_onda("cruz", 0.3)
+    na_diagonal = sum(acerto.pixelColor(60 + d, 60 + d).alpha() for d in range(8, 20))
+    no_eixo = sum(acerto.pixelColor(60 + d, 60).alpha() for d in range(6, 30))
+    checar(
+        na_diagonal > 0 and no_eixo == 0,
+        f"no visor, o clique é o marcador de acerto: traços na diagonal, nada nos eixos ({na_diagonal}, {no_eixo})",
+    )
+    marca_x = retrato_da_onda("olho_morto", 0.3)
+    centro_x = marca_x.pixelColor(60, 60)
+    checar(
+        centro_x.alpha() > 0 and centro_x.red() > centro_x.green() + 60,
+        f"no velho oeste, o X vermelho do Dead Eye marca onde se clicou ({centro_x.name()})",
+    )
+    checar(
+        retrato_da_onda("colchetes", 0.3) != retrato_da_onda("", 0.3)
+        and retrato_da_onda("graca", 0.3) == retrato_da_onda("", 0.3),
+        "no terminal a onda é um quadrado; nos outros, a onda redonda de sempre",
+    )
+
+    # Abraçando um botão, a mira vira o contorno dele, como sempre.
+    def anel_abracando(jogo: str) -> tuple[int, int]:
+        cena_abraco = CenarioCursor()
+        cena_abraco.definir(TEMAS_CURSOR["FPS / Multiplayer"], atmosfera_de(jogo))
+        cena_abraco.redimensionar(600, 400)
+        cena_abraco.definir_cursor(QPointF(300.0, 200.0), sobre_clicavel=True)
+        cena_abraco.definir_abraco((RetanguloAbraco(250.0, 180.0, 120.0, 40.0), 8.0))
+        for _ in range(60):
+            cena_abraco.avancar(0.033)
+        return vazamento(cena_abraco._pintar_anel_e_ondas, [], 600, 400)
+
+    checar(
+        anel_abracando("FPS / Multiplayer") == anel_abracando("Genérico / Outro"),
+        "abraçando um botão, a mira do jogo vira o contorno dele — o mesmo do anel de sempre",
+    )
+
+    def anel_solto(jogo: str) -> QImage:
+        cena_solta = CenarioCursor()
+        cena_solta.definir(TEMAS_CURSOR["FPS / Multiplayer"], atmosfera_de(jogo))
+        cena_solta.redimensionar(600, 400)
+        cena_solta.definir_cursor(QPointF(300.0, 200.0))
+        for _ in range(60):
+            cena_solta.avancar(0.033)
+        imagem_solta = QImage(600, 400, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem_solta.fill(0)
+        pintor_solto = QPainter(imagem_solta)
+        cena_solta._pintar_anel_e_ondas(pintor_solto)
+        pintor_solto.end()
+        return imagem_solta
+
+    solto_fps = anel_solto("FPS / Multiplayer")
+    checar(
+        solto_fps != anel_solto("Genérico / Outro")
+        and solto_fps.pixelColor(300, 200).alpha() > 0,
+        "solto, o cursor do visor é a cruz com o ponto no centro, e não o anel",
+    )
+
     print("cada ambiente tem uma camada só dele")
     # As camadas de assinatura são o que impede um ambiente de ser outro com
     # outra cor. A régua (ferramentas/distancia_dos_temas.py) media 2,87 entre
