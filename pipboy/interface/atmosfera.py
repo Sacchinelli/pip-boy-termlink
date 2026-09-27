@@ -35,6 +35,8 @@ from typing import TYPE_CHECKING, Final
 from PySide6.QtCore import QEasingCurve, QPointF, QRect, QRectF, Qt
 from PySide6.QtGui import (
     QColor,
+    QFont,
+    QFontMetricsF,
     QImage,
     QLinearGradient,
     QPainter,
@@ -74,6 +76,9 @@ class Atmosfera:
     selo: float = 0.0               # círculo arcano, como marca-d'água
     horizonte: float = 0.0          # linha de neon com brilho, baixa na tela
     arranhoes: float = 0.0          # riscos verticais de filme velho
+    digitais: float = 0.0           # marcas de dedo e gordura no vidro do aparelho
+    constelacao: float = 0.0        # a constelação sobre uma nebulosa pintada
+    estencil: float = 0.0           # marcação de esquadrão pintada com molde
     fibras: float = 0.0             # fibras horizontais de papel/couro
 
     # Camadas vivas
@@ -132,6 +137,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # Terminal de fósforo: varredura densa, brilho sangrando do centro, tubo
     # abaulado e a tremulação característica de um CRT malcuidado.
     "Fallout": Atmosfera(
+        digitais=0.6,
         tempo=0.85, curva="degraus", letras="datilografar",
         menu="abas",
         aviso="terminal",
@@ -156,6 +162,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # para ver, e o que faltava para esta crônica não ser o tema neutro com
     # neve. O halo do fundo desceu: com a aurora no alto, os dois brigavam.
     "Skyrim": Atmosfera(
+        constelacao=0.7,
         tempo=1.4, curva="solene", letras="revelar",
         menu="lista_centrada",
         aviso="descoberta",
@@ -236,6 +243,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # grade volta ao papel de retícula de fundo. O pó é cinza de cinza, e não
     # laranja: partícula na cor do acento vira vaga-lume, e aqui é escombro.
     "FPS / Multiplayer": Atmosfera(
+        estencil=0.6,
         tempo=0.6, curva="seco", letras="varrer",
         menu="abas",
         aviso="abate",
@@ -983,6 +991,7 @@ class Cenario:
             brilho=a.brilho * i, grade=a.grade * i, fibras=a.fibras * i,
             cantoneiras=a.cantoneiras * i, aurora=a.aurora * i, selo=a.selo * i,
             horizonte=a.horizonte * i, arranhoes=a.arranhoes * i,
+            digitais=a.digitais * i, constelacao=a.constelacao * i, estencil=a.estencil * i,
             tremulacao=a.tremulacao * i, interferencia=a.interferencia * i,
             densidade=int(a.densidade * i),
         )
@@ -1376,6 +1385,15 @@ class Cenario:
                 self._camada_horizonte(pintor, largura, altura, a, self._tema)
             if a.arranhoes > 0:
                 self._camada_arranhoes(pintor, largura, altura, a, self._tema)
+            # E as três do material de cada aparelho: o vidro engordurado do
+            # Pip-Boy, o céu das habilidades do norte, o inventário pintado
+            # com molde do visor.
+            if a.digitais > 0:
+                self._camada_digitais(pintor, largura, altura, a, self._tema)
+            if a.constelacao > 0:
+                self._camada_constelacao(pintor, largura, altura, a, self._tema)
+            if a.estencil > 0:
+                self._camada_estencil(pintor, largura, altura, a, self._tema)
         if a.cantoneiras > 0 and self._tema is not None:
             self._camada_cantoneiras(pintor, largura, altura, a, self._tema)
         if a.vinheta > 0:
@@ -1584,6 +1602,215 @@ class Cenario:
             pintor.setPen(caneta)
             pintor.drawLine(QPointF(x, topo), QPointF(x + rng.uniform(-1.5, 1.5), fundo))
         pintor.restore()
+
+    @staticmethod
+    def _camada_digitais(
+        pintor: QPainter, largura: int, altura: int, a: Atmosfera, t: GameTheme
+    ) -> None:
+        """Digitais e gordura no vidro do Pip-Boy.
+
+        É o último acabamento que a equipe de arte da Bethesda conta ter dado
+        à tela do aparelho: uma camada de sujeira e marcas de dedo. É o que
+        faz o verde de fósforo parecer um VIDRO na frente de um tubo, e não
+        uma cor de fundo — o aparelho é usado, no pulso de alguém, num mundo
+        de poeira.
+
+        As marcas ficam onde um polegar encosta num aparelho de pulso: nos
+        cantos e nas bordas, nunca no meio da conversa. Cada digital é um
+        punhado de arcos elípticos concêntricos, com falhas — as cristas —,
+        sobre uma mancha de gordura que pega a luz.
+        """
+        rng = random.Random(a.semente * 13 + 5)
+        pintor.save()
+        pintor.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
+        pintor.setBrush(Qt.BrushStyle.NoBrush)
+        lugares = (
+            (0.93, 0.86, 1.0), (0.06, 0.12, 0.8), (0.97, 0.20, 0.7), (0.30, 0.95, 0.6),
+        )
+        for fx, fy, peso in lugares:
+            centro = QPointF(largura * fx, altura * fy)
+            raio = min(largura, altura) * rng.uniform(0.045, 0.06)
+            # A gordura: um borrão que pega a luz, mais largo que a digital.
+            mancha = QRadialGradient(centro, raio * 2.2)
+            perto = QColor(t.primary)
+            perto.setAlphaF(min(1.0, a.digitais * 0.05 * peso))
+            longe = QColor(perto)
+            longe.setAlphaF(0.0)
+            mancha.setColorAt(0.0, perto)
+            mancha.setColorAt(1.0, longe)
+            pintor.setPen(Qt.PenStyle.NoPen)
+            pintor.setBrush(mancha)
+            pintor.drawEllipse(centro, raio * 2.2, raio * 2.2)
+            pintor.setBrush(Qt.BrushStyle.NoBrush)
+            # As cristas: arcos concêntricos, levemente achatados e girados.
+            giro = rng.uniform(-40.0, 40.0)
+            pintor.save()
+            pintor.translate(centro)
+            pintor.rotate(giro)
+            for anel in range(1, 9):
+                r = raio * anel / 8
+                crista = QColor(t.primary)
+                crista.setAlphaF(min(1.0, a.digitais * 0.07 * peso))
+                caneta = QPen(crista)
+                caneta.setWidthF(0.9)
+                pintor.setPen(caneta)
+                inicio = rng.uniform(0, 360)
+                vao = rng.uniform(30, 90)
+                caixa = QRectF(-r, -r * 1.3, r * 2, r * 2.6)
+                pintor.drawArc(caixa, int(inicio * 16), int((360 - vao) * 16))
+            pintor.restore()
+        pintor.restore()
+
+    @staticmethod
+    def _camada_constelacao(
+        pintor: QPainter, largura: int, altura: int, a: Atmosfera, t: GameTheme
+    ) -> None:
+        """A constelação sobre uma nebulosa pintada: o céu das habilidades.
+
+        No Skyrim, subir de nível é olhar para cima: cada árvore de talentos
+        é uma constelação sobre nebulosas pintadas à mão — que depois foram
+        parar no céu de Sovngarde. A aurora já estava aqui; o que faltava era
+        o desenho no céu, que é o que se reconhece.
+
+        A figura é uma espada — a do Guerreiro, a primeira das pedras-guia —,
+        no alto, encostada à direita, fora da coluna lateral e do texto da
+        tela inicial. As linhas são finas e apagadas; as estrelas, pontos
+        pequenos com halo: um céu, e não um diagrama.
+        """
+        # Encostada na borda direita: o texto da tela inicial é centrado e
+        # chega a dois terços da largura; ali só passam as falas do jogador,
+        # e as estrelas são pontos de dois pixels.
+        caixa = QRectF(largura * 0.82, altura * 0.07, largura * 0.15, altura * 0.40)
+        pintor.save()
+        pintor.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
+        pintor.setPen(Qt.PenStyle.NoPen)
+        # A nebulosa: três nuvens sobrepostas, em cores frias.
+        for cor_base, fx, fy, fr, forca in (
+            (t.info, 0.45, 0.35, 0.95, 0.09),
+            (t.accent, 0.62, 0.60, 0.70, 0.06),
+            (t.primary, 0.35, 0.72, 0.60, 0.05),
+        ):
+            centro = QPointF(caixa.left() + caixa.width() * fx, caixa.top() + caixa.height() * fy)
+            raio = caixa.width() * fr
+            nuvem = QRadialGradient(centro, raio)
+            perto = QColor(cor_base)
+            perto.setAlphaF(min(1.0, a.constelacao * forca))
+            longe = QColor(perto)
+            longe.setAlphaF(0.0)
+            nuvem.setColorAt(0.0, perto)
+            nuvem.setColorAt(1.0, longe)
+            pintor.setBrush(nuvem)
+            pintor.drawEllipse(centro, raio, raio)
+
+        def ponto(fx: float, fy: float) -> QPointF:
+            return QPointF(caixa.left() + caixa.width() * fx, caixa.top() + caixa.height() * fy)
+
+        # A espada: ponta, lâmina, guarda, punho e pomo — e duas estrelas
+        # soltas, que toda constelação de verdade tem.
+        estrelas = {
+            "ponta": ponto(0.50, 0.02), "lamina": ponto(0.52, 0.34), "guarda": ponto(0.50, 0.62),
+            "esq": ponto(0.28, 0.58), "dir": ponto(0.74, 0.66), "punho": ponto(0.49, 0.80),
+            "pomo": ponto(0.51, 0.90), "solta1": ponto(0.16, 0.24), "solta2": ponto(0.86, 0.30),
+        }
+        tracos = (
+            ("ponta", "lamina"), ("lamina", "guarda"), ("esq", "guarda"), ("guarda", "dir"),
+            ("guarda", "punho"), ("punho", "pomo"),
+        )
+        linha = QColor(t.primary)
+        linha.setAlphaF(min(1.0, a.constelacao * 0.16))
+        caneta = QPen(linha)
+        caneta.setWidthF(0.9)
+        pintor.setPen(caneta)
+        for de, ate in tracos:
+            pintor.drawLine(estrelas[de], estrelas[ate])
+        pintor.setPen(Qt.PenStyle.NoPen)
+        for nome, centro in estrelas.items():
+            tamanho = 1.4 if nome.startswith("solta") else 2.0
+            halo = QRadialGradient(centro, tamanho * 4)
+            brilho = QColor(t.primary)
+            brilho.setAlphaF(min(1.0, a.constelacao * 0.45))
+            apagado = QColor(brilho)
+            apagado.setAlphaF(0.0)
+            halo.setColorAt(0.0, brilho)
+            halo.setColorAt(0.25, brilho)
+            halo.setColorAt(1.0, apagado)
+            pintor.setBrush(halo)
+            pintor.drawEllipse(centro, tamanho * 4, tamanho * 4)
+        pintor.restore()
+
+    ESTENCIL = "A-04"
+
+    @staticmethod
+    def molde_do_estencil(
+        largura: int, altura: int, t: GameTheme
+    ) -> tuple[QFont, QPointF, list[QRectF]]:
+        """A fonte, a linha de base e as pontes da marcação em estêncil.
+
+        À parte da pintura porque as pontes são a regra que faz um estêncil —
+        e a suíte confere que, onde elas passam, não sobra tinta nenhuma.
+        """
+        fonte = QFont(t.font_candidates[0])
+        fonte.setBold(True)
+        fonte.setPixelSize(max(40, int(altura * 0.26)))
+        fonte.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, altura * 0.012)
+        metricas = QFontMetricsF(fonte)
+        largura_texto = metricas.horizontalAdvance(Cenario.ESTENCIL)
+        base = QPointF(largura * 0.97 - largura_texto, altura * 0.93)
+        topo = base.y() - metricas.ascent()
+        passo = metricas.averageCharWidth() * 0.55
+        espessura = max(2.0, altura * 0.006)
+        pontes: list[QRectF] = []
+        x = base.x() + passo * 0.5
+        while x < base.x() + largura_texto:
+            pontes.append(QRectF(x, topo, espessura, metricas.ascent()))
+            x += passo
+        return fonte, base, pontes
+
+    @staticmethod
+    def _camada_estencil(
+        pintor: QPainter, largura: int, altura: int, a: Atmosfera, t: GameTheme
+    ) -> None:
+        """A marcação em estêncil do esquadrão, grande e apagada, no fundo.
+
+        O Battlefield 6 usa uma variante em estêncil da sua fonte utilitária
+        como elemento decorativo de fundo das telas — a marcação pintada com
+        molde que se vê em caixa de munição e em casco de blindado. Um
+        visor é equipamento; o equipamento tem inventário pintado nele.
+
+        As pontes do estêncil — as falhas verticais que o molde deixa na
+        letra — são cortadas depois de escrever, com a composição que APAGA:
+        é o que separa uma marcação pintada de um número qualquer.
+        """
+        fonte, base, pontes = Cenario.molde_do_estencil(largura, altura, t)
+        metricas = QFontMetricsF(fonte)
+        topo = base.y() - metricas.ascent()
+        # Numa imagem à parte, para o corte das pontes não abrir buracos no
+        # resto do vidro.
+        molde = QImage(largura, altura, QImage.Format.Format_ARGB32_Premultiplied)
+        molde.fill(QColor(0, 0, 0, 0))
+        tinta = QPainter(molde)
+        tinta.setRenderHint(QPainter.RenderHint.Antialiasing)
+        cor = QColor(t.primary)
+        cor.setAlphaF(min(1.0, a.estencil * 0.07))
+        tinta.setPen(cor)
+        tinta.setFont(fonte)
+        tinta.drawText(base, Cenario.ESTENCIL)
+        tinta.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+        for ponte in pontes:
+            tinta.fillRect(ponte, QColor(0, 0, 0))
+        # E a legenda pequena, em cima, como a de uma caixa de carga.
+        tinta.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+        rotulo = QFont(t.font_candidates[0])
+        rotulo.setBold(True)
+        rotulo.setPixelSize(max(9, int(altura * 0.018)))
+        rotulo.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 3.0)
+        legenda = QColor(t.primary)
+        legenda.setAlphaF(min(1.0, a.estencil * 0.12))
+        tinta.setPen(legenda)
+        tinta.setFont(rotulo)
+        tinta.drawText(QPointF(base.x(), topo - altura * 0.012), "ESQUADRÃO ALFA · UNIDADE 04")
+        tinta.end()
+        pintor.drawImage(0, 0, molde)
 
     @staticmethod
     def _camada_cantoneiras(

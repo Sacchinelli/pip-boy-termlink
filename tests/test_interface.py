@@ -3734,6 +3734,9 @@ def main() -> int:
         "horizonte": "GTA",
         "arranhoes": "Red Dead",
         "cantoneiras": "FPS / Multiplayer",
+        "digitais": "Fallout",
+        "constelacao": "Skyrim",
+        "estencil": "FPS / Multiplayer",
     }
     for campo, dono in assinaturas.items():
         donos = sorted(
@@ -3806,10 +3809,73 @@ def main() -> int:
         f"os riscos da película são verticais ({colunas_risco} colunas, {linhas_risco} linhas)",
     )
 
-    # -- Todas as quatro obedecem à intensidade da atmosfera, como as antigas.
+    # -- As digitais ficam onde um polegar encosta: cantos e bordas, nunca no
+    #    meio da conversa — e fracas, porque são vidro sujo, e não mancha.
+    vidro_sujo = alfas_da_camada("_camada_digitais", "Fallout")
+    meio_sujo = sum(
+        vidro_sujo[y * 900 + x] for y in range(150, 450) for x in range(225, 675)
+    )
+    checar(
+        sum(vidro_sujo) > 0 and meio_sujo == 0 and max(vidro_sujo) <= 40,
+        f"as digitais ficam nas bordas do vidro, e fracas ({meio_sujo} no meio, máx {max(vidro_sujo)})",
+    )
+
+    # -- A constelação é um céu encostado à direita, no alto: fora do texto.
+    ceu_norte = alfas_da_camada("_camada_constelacao", "Skyrim")
+    fora_do_ceu = sum(
+        ceu_norte[y * 900 + x] for y in range(600) for x in range(900)
+        if x < 900 * 0.70 or y > 600 * 0.62
+    )
+    checar(
+        sum(ceu_norte) > 0 and fora_do_ceu == 0,
+        f"a constelação fica no alto, encostada à direita, longe do texto ({fora_do_ceu})",
+    )
+
+    # -- O estêncil tem PONTES: a falha vertical que o molde deixa na letra.
+    #    Sem elas, é só um número grande. Conferido onde as pontes passam, e
+    #    não pela forma das letras: sem as fontes do sistema, cada letra da
+    #    suíte é uma caixa, e a geometria muda de máquina para máquina.
+    molde = alfas_da_camada("_camada_estencil", "FPS / Multiplayer")
+    colunas_tinta = [x for x in range(900) if any(molde[y * 900 + x] for y in range(0, 600, 2))]
+    linhas_tinta = [y for y in range(600) if any(molde[y * 900 + x] for x in range(0, 900, 2))]
+    checar(
+        bool(colunas_tinta) and max(colunas_tinta) > 900 * 0.85 and min(linhas_tinta) > 600 * 0.5,
+        "a marcação do esquadrão fica embaixo, encostada à direita",
+    )
+    _, _, pontes_molde = CenarioVisor.molde_do_estencil(900, 600, TEMAS_VISOR["FPS / Multiplayer"])
+    tinta_nas_pontes = sum(
+        molde[y * 900 + x]
+        for ponte in pontes_molde
+        for y in range(int(ponte.top()) + 1, int(ponte.bottom()) - 1)
+        for x in range(int(ponte.left()) + 1, int(ponte.right()))
+        if 0 <= x < 900 and 0 <= y < 600
+    )
+    checar(
+        len(pontes_molde) >= 3 and tinta_nas_pontes == 0,
+        f"e as letras vêm cortadas pelas pontes do molde ({len(pontes_molde)} pontes, "
+        f"{tinta_nas_pontes} de tinta nelas)",
+    )
+
+    # -- E as três do material entram no vidro de verdade, o que a janela
+    #    pinta por cima de tudo — e não só quando chamadas na mão.
+    for campo, jogo in (
+        ("digitais", "Fallout"), ("constelacao", "Skyrim"), ("estencil", "FPS / Multiplayer"),
+    ):
+        com_camada = CenarioVisor()
+        com_camada.definir(TEMAS_VISOR[jogo], RECEITAS_VISOR[jogo])
+        sem_camada = CenarioVisor()
+        sem_camada.definir(TEMAS_VISOR[jogo], trocar_campos(RECEITAS_VISOR[jogo], **{campo: 0.0}))
+        checar(
+            com_camada._compor_vidro(600, 400).toImage()
+            != sem_camada._compor_vidro(600, 400).toImage(),
+            f"'{campo}' entra no vidro da janela do {jogo}",
+        )
+
+    # -- Todas obedecem à intensidade da atmosfera, como as antigas.
     for campo, jogo in (
         ("aurora", "Skyrim"), ("selo", "RPG / Aventura (geral)"),
         ("horizonte", "GTA"), ("arranhoes", "Red Dead"),
+        ("digitais", "Fallout"), ("constelacao", "Skyrim"), ("estencil", "FPS / Multiplayer"),
     ):
         cheia = sum(alfas_da_camada(f"_camada_{campo}", jogo))
         fraca = sum(alfas_da_camada(f"_camada_{campo}", jogo, forca=0.2 * getattr(
