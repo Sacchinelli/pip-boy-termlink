@@ -1776,9 +1776,19 @@ class Bolha(QFrame):
         acento: str = "",
         perguntavel: bool = False,
         dica_da_palavra: Callable[[str], str] | None = None,
+        estilo: str = "",
+        do_jogador: bool = False,
+        marca: str = "",
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        # Como o jogo desenha uma fala (ver FALAS): o balão de sempre, o
+        # registro de terminal, a legenda de diálogo, a mensagem de celular,
+        # a holochamada, o chat de esquadrão. ``marca`` é a cor do detalhe do
+        # estilo — o prompt, a calha, a aba de canal.
+        self.estilo = estilo
+        self._do_jogador = do_jogador
+        self._marca = QColor(marca or acento or cor_texto)
         self._fundo = QColor(fundo)
         self._contorno = QColor(contorno) if contorno else None
         self._forma = forma
@@ -1830,17 +1840,87 @@ class Bolha(QFrame):
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
+    def _caminho_do_estilo(self, caixa: QRectF) -> QPainterPath:
+        """O contorno da fala no estilo do jogo."""
+        estilo = self.estilo
+        caminho = QPainterPath()
+        if estilo == "mensagem":
+            # O balão do celular: bem redondo, com a ponta do lado de quem fala.
+            corpo = caixa.adjusted(0, 0, 0, -6)
+            caminho.addRoundedRect(corpo, 16.0, 16.0)
+            ponta = QPainterPath()
+            if self._do_jogador:
+                ponta.moveTo(corpo.right() - 18, corpo.bottom() - 2)
+                ponta.lineTo(corpo.right() - 2, caixa.bottom())
+                ponta.lineTo(corpo.right() - 6, corpo.bottom() - 10)
+            else:
+                ponta.moveTo(corpo.left() + 18, corpo.bottom() - 2)
+                ponta.lineTo(corpo.left() + 2, caixa.bottom())
+                ponta.lineTo(corpo.left() + 6, corpo.bottom() - 10)
+            ponta.closeSubpath()
+            return caminho.united(ponta)
+        if estilo == "holo":
+            corte = 12.0
+            caminho.moveTo(caixa.left(), caixa.top())
+            caminho.lineTo(caixa.right() - corte, caixa.top())
+            caminho.lineTo(caixa.right(), caixa.top() + corte)
+            caminho.lineTo(caixa.right(), caixa.bottom())
+            caminho.lineTo(caixa.left(), caixa.bottom())
+            caminho.closeSubpath()
+            return caminho
+        if estilo in ("radio", "terminal", "legenda"):
+            caminho.addRect(caixa)
+            return caminho
+        return caminho_forma(caixa, self._forma, design.RAIO)
+
     def paintEvent(self, _evento: Any) -> None:
         pintor = QPainter(self)
         pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
-        caminho = caminho_forma(
-            QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), self._forma, design.RAIO
-        )
+        caixa = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        caminho = self._caminho_do_estilo(caixa)
+        estilo = self.estilo
         pintor.setPen(Qt.PenStyle.NoPen)
+        if estilo == "terminal":
+            # Um registro de terminal não tem balão: a fala do aparelho corre
+            # ao lado de uma calha de fósforo; a do jogador vem depois do
+            # prompt, como uma linha digitada.
+            if self._do_jogador:
+                pintor.setPen(self._marca)
+                pintor.setFont(self._rotulo.font())
+                pintor.drawText(
+                    QRectF(caixa.left() + 2, caixa.top() + 11, 12, QFontMetricsF(self._rotulo.font()).height()),
+                    int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), ">",
+                )
+            else:
+                calha = QColor(self._marca)
+                calha.setAlphaF(0.7)
+                pintor.fillRect(QRectF(caixa.left() + 4, caixa.top() + 8, 2, caixa.height() - 16), calha)
+            acender_borda(pintor, self, caminho)
+            pintor.end()
+            return
+        if estilo == "legenda":
+            # A legenda de diálogo: sem caixa, sobre uma sombra que nasce do
+            # lado de quem fala e se apaga do outro.
+            gradiente = QLinearGradient(caixa.topLeft(), caixa.topRight())
+            cheio, vazio = QColor(self._fundo), QColor(self._fundo)
+            cheio.setAlphaF(0.78)
+            vazio.setAlphaF(0.0)
+            gradiente.setColorAt(0.0, vazio if self._do_jogador else cheio)
+            gradiente.setColorAt(0.55, cheio)
+            gradiente.setColorAt(1.0, cheio if self._do_jogador else vazio)
+            pintor.fillRect(caixa, QBrush(gradiente))
+            acender_borda(pintor, self, caminho)
+            pintor.end()
+            return
         pintor.setBrush(self._fundo)
         pintor.drawPath(caminho)
+        if estilo in ("holo", "radio"):
+            # A aba de canal na borda de quem fala: a barra da holochamada e a
+            # etiqueta de cor do chat de esquadrão.
+            barra = 3.0 if estilo == "holo" else 4.0
+            pintor.fillRect(QRectF(caixa.left(), caixa.top(), barra, caixa.height()), self._marca)
 
-        if self._contorno is not None:
+        if self._contorno is not None and estilo != "mensagem":
             # O painel da conversa é translúcido de propósito, e por isso a
             # bolha do assistente ficava a 1.27:1 dele — presente na conta,
             # quase nada no olho. Encher mais a bolha mataria a atmosfera que

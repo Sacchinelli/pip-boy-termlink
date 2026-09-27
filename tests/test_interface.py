@@ -4074,6 +4074,111 @@ def main() -> int:
     janela.campo_jogo.setCurrentText(jogo_montagem)
     aplicacao.processEvents()
 
+    print("cada jogo fala do seu jeito na conversa")
+    from pipboy import design as design_fala
+    from pipboy.events import Tag as TagFala
+    from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_FALA
+    from pipboy.interface.componentes import Bolha as BolhaFala
+    from pipboy.interface.conversa import cabecalho_da_fala
+    from pipboy.themes import TEMAS as TEMAS_FALA
+
+    estilos_fala = {nome: r.fala for nome, r in RECEITAS_FALA.items()}
+    checar(
+        set(estilos_fala.values()) <= {"", "terminal", "legenda", "mensagem", "holo", "radio"}
+        and estilos_fala["Fallout"] == "terminal" and estilos_fala["GTA"] == "mensagem"
+        and estilos_fala["FPS / Multiplayer"] == "radio" and estilos_fala["Genérico / Outro"] == "",
+        "o terminal loga, o GTA manda mensagem, o visor fala no canal e o neutro usa o balão",
+    )
+    tema_legenda = TEMAS_FALA["Elden Ring"]
+    checar(
+        cabecalho_da_fala("terminal", "PIP-BOY", "17:43", tema_legenda) == "[PIP-BOY 17:43]"
+        and cabecalho_da_fala("terminal", "", "17:43", tema_legenda) == "[17:43]"
+        and cabecalho_da_fala("radio", "COMANDO", "17:43", tema_legenda).startswith("[ESQUADRÃO] COMANDO")
+        and cabecalho_da_fala("holo", "RELIC", "17:43", tema_legenda).startswith("// RELIC")
+        and cabecalho_da_fala("", "TUTOR", "17:43", tema_legenda) == "TUTOR  ·  17:43"
+        and cabecalho_da_fala("mensagem", "", "17:43", tema_legenda) == "17:43",
+        "o cabeçalho de quem fala segue o jogo: colchetes, canal, barras de comentário",
+    )
+    legenda_html = cabecalho_da_fala("legenda", "DEDO <x>", "17:43", tema_legenda)
+    checar(
+        "font-weight:600" in legenda_html and "&lt;x&gt;" in legenda_html,
+        "a legenda põe o nome de quem fala em destaque — escapado, que nome não é HTML",
+    )
+
+    def bolha_no_estilo(estilo: str, do_jogador: bool) -> BolhaFala:
+        bolha_f = BolhaFala(
+            "Say it again, please — slower.", fundo="#202020", cor_texto="#e0e0e0",
+            fonte=janela.fonte("corpo"), largura_max=420, acento="#ff9900",
+            estilo=estilo, do_jogador=do_jogador, marca="#33ccff",
+            contorno="" if estilo in ("terminal", "legenda") else "#555555",
+        )
+        bolha_f.resize(bolha_f.sizeHint())
+        return bolha_f
+
+    retratos_fala = {
+        (e, j): bolha_no_estilo(e, j).grab().toImage()
+        for e in ("", "terminal", "legenda", "mensagem", "holo", "radio") for j in (False, True)
+    }
+    iguais_fala = sorted(
+        (a, b) for a in retratos_fala for b in retratos_fala
+        if a < b and a[1] == b[1] and retratos_fala[a] == retratos_fala[b]
+    )
+    checar(not iguais_fala, f"cada estilo desenha a fala de um jeito ({iguais_fala})")
+
+    def azul(imagem_f: QImage, x0: int, x1: int) -> int:
+        return sum(
+            1 for y in range(imagem_f.height()) for x in range(x0, x1)
+            if (c := imagem_f.pixelColor(x, y)).blue() > 150 and c.red() < 120
+        )
+
+    checar(
+        azul(retratos_fala[("terminal", True)], 0, 14) > 0
+        and azul(retratos_fala[("terminal", False)], 3, 7) > 0,
+        "no terminal, o jogador escreve depois do prompt e o aparelho ao lado da calha",
+    )
+    legenda_f = retratos_fala[("legenda", False)]
+    meio_f = legenda_f.height() // 2
+    checar(
+        legenda_f.pixelColor(3, 2).alpha() > legenda_f.pixelColor(legenda_f.width() - 3, 2).alpha(),
+        "a legenda nasce escura do lado de quem fala e se apaga do outro",
+    )
+    mensagem_f = retratos_fala[("mensagem", True)]
+    checar(
+        mensagem_f.pixelColor(mensagem_f.width() - 4, mensagem_f.height() - 2).alpha() > 0
+        and mensagem_f.pixelColor(4, mensagem_f.height() - 2).alpha() == 0,
+        "a mensagem enviada tem a ponta do lado de quem mandou",
+    )
+    checar(meio_f > 0, "a bolha tem altura")
+
+    # Na janela: toda fala de todo jogo lê em AA contra o que fica atrás da
+    # letra — o balão, a sombra da legenda ou o próprio painel.
+    jogo_fala = janela.campo_jogo.currentText()
+    ilegiveis_fala = []
+    for nome_fala in TEMAS_FALA:
+        janela.campo_jogo.setCurrentText(nome_fala)
+        aplicacao.processEvents()
+        tema_fala = janela.tema
+        for tag_fala, autor_fala in ((TagFala.ASSISTENTE, tema_fala.assistant_name), (TagFala.USUARIO, "VOCÊ")):
+            janela.conversa.adicionar("Try saying it out loud.", tag_fala, autor_fala)
+            aplicacao.processEvents()
+            bolha_j = janela.conversa._itens[-1].findChildren(BolhaFala)[0]
+            cor_f = bolha_j._cor_texto
+            fundos_f = [bolha_j._fundo.name()]
+            if bolha_j.estilo in ("terminal", "legenda"):
+                fundos_f.append(tema_fala.surface)
+            pior_f = min(design_fala.contraste(cor_f, f) for f in fundos_f)
+            if pior_f < 4.5:
+                ilegiveis_fala.append(f"{nome_fala}/{tag_fala.value}: {pior_f:.2f}")
+            if tag_fala is TagFala.ASSISTENTE and 'href="' not in bolha_j._rotulo.text():
+                ilegiveis_fala.append(f"{nome_fala}: fala sem palavras tocáveis")
+        janela.conversa.limpar()
+    checar(
+        not ilegiveis_fala,
+        f"toda fala lê em AA no estilo do jogo, e as palavras do tutor continuam tocáveis ({ilegiveis_fala})",
+    )
+    janela.campo_jogo.setCurrentText(jogo_fala)
+    aplicacao.processEvents()
+
     print("cada jogo mira do seu jeito")
     from PySide6.QtGui import QColor as CorMira
 
