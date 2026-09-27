@@ -1,4 +1,4 @@
-"""Os ícones de cada jogo: o caderno e o histórico, desenhados no traço dele.
+"""Os ícones de cada jogo: as quatro portas, desenhadas no traço dele.
 
 As duas portas da janela — o caderno de palavras e o histórico de conversas —
 eram dois símbolos do bloco Geometric Shapes, os mesmos nos dez ambientes:
@@ -9,6 +9,15 @@ City, as plaquetas de identificação no visor. O histórico é o terminal, o
 brilho de uma graça, o pergaminho enrolado do norte, o aviso de contrato
 pregado no quadro do bruxo, a fogueira do acampamento, o rádio, o
 braindance, a ampulheta, a prancheta do relatório de missão.
+
+A revisão e o progresso seguem a mesma regra, e cada um é o lugar do jogo em
+que já se treina e já se mede: a folha de respostas do Teste G.O.A.T. e o
+mostrador do Pip-Boy, a pedra de brilho que se memoriza numa graça e a
+Árvore Térrea, a muralha de palavras e a constelação das habilidades, o
+relógio da meditação e as duas espadas do bruxo, as cartas na mesa e a
+estrela de xerife, o quadro do golpe e as barras de estatística, a matriz
+do protocolo de invasão e os degraus da reputação, o dado de vinte faces e a
+ficha de personagem, o alvo do estande e as divisas da patente.
 
 Tudo desenhado com ``QPainter`` numa caixa de lado 1 — cada ícone é uma
 função pura de (pintor, cor), sem imagem nenhuma — e com caneta cosmética:
@@ -28,7 +37,12 @@ from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
 # O que se desenha quando o jogo não tem ícone próprio: os glifos de antes.
-GLIFOS_PADRAO: dict[str, str] = {"caderno": "◫", "historico": "◷"}
+GLIFOS_PADRAO: dict[str, str] = {
+    "caderno": "◫", "historico": "◷", "revisao": "▶", "progresso": "◔",
+}
+
+# As quatro portas que todo conjunto desenha.
+NOMES_DE_ICONE: tuple[str, ...] = ("caderno", "historico", "revisao", "progresso")
 
 Desenho = Callable[[QPainter, QColor], None]
 
@@ -94,6 +108,31 @@ def _terminal(p: QPainter, cor: QColor) -> None:
     p.fillRect(QRectF(0.44, 0.46, 0.14, 0.08), cor)
 
 
+def _folha_de_respostas(p: QPainter, cor: QColor) -> None:
+    """A folha do Teste G.O.A.T.: três perguntas, uma bolinha marcada em cada."""
+    p.drawRect(QRectF(0.18, 0.1, 0.64, 0.8))
+    for linha, marcada in ((0.3, 0), (0.5, 1), (0.7, 0)):
+        for coluna in range(2):
+            x = 0.38 + coluna * 0.24
+            if coluna == marcada:
+                _ponto(p, x, linha, 0.075, cor)
+            else:
+                p.drawEllipse(QPointF(x, linha), 0.07, 0.07)
+
+
+def _mostrador(p: QPainter, cor: QColor) -> None:
+    """O mostrador de ponteiro do Pip-Boy, com a escala e a agulha subindo."""
+    p.drawArc(QRectF(0.12, 0.26, 0.76, 0.76), 0, 180 * 16)
+    _linha(p, (0.12, 0.64), (0.88, 0.64))
+    for passo in range(5):
+        angulo = math.pi * passo / 4
+        dx, dy = math.cos(angulo), -math.sin(angulo)
+        _linha(p, (0.5 + dx * 0.3, 0.64 + dy * 0.3), (0.5 + dx * 0.38, 0.64 + dy * 0.38))
+    _linha(p, (0.5, 0.64), (0.68, 0.4))
+    _ponto(p, 0.5, 0.64, 0.05, cor)
+    _linha(p, (0.3, 0.8), (0.7, 0.8))
+
+
 # --------------------------------------------------------------- Elden Ring
 def _tomo(p: QPainter, cor: QColor) -> None:
     """O tomo de encantamentos, com o losango de ouro na capa e o fecho."""
@@ -112,6 +151,29 @@ def _graca(p: QPainter, cor: QColor) -> None:
     _linha(p, (0.22, 0.9), (0.78, 0.9))
 
 
+def _pedra_de_brilho(p: QPainter, cor: QColor) -> None:
+    """A pedra de brilho da feitiçaria, lapidada, com o lampejo ao lado."""
+    _fechado(p, (0.46, 0.1), (0.66, 0.36), (0.46, 0.9), (0.26, 0.36))
+    _linha(p, (0.26, 0.36), (0.66, 0.36))
+    _linha(p, (0.38, 0.36), (0.46, 0.9), (0.54, 0.36))
+    _linha(p, (0.8, 0.16), (0.8, 0.36))
+    _linha(p, (0.7, 0.26), (0.9, 0.26))
+
+
+def _arvore_terrea(p: QPainter, cor: QColor) -> None:
+    """A Árvore Térrea: o tronco dourado e os galhos que sobem em leque."""
+    _linha(p, (0.5, 0.9), (0.5, 0.2))
+    for lado in (-1, 1):
+        for altura, abertura in ((0.66, 0.3), (0.48, 0.24), (0.32, 0.16)):
+            galho = QPainterPath(QPointF(0.5, altura))
+            galho.quadTo(
+                QPointF(0.5 + lado * abertura * 0.8, altura - 0.02),
+                QPointF(0.5 + lado * abertura, altura - 0.16),
+            )
+            p.drawPath(galho)
+    _linha(p, (0.3, 0.9), (0.7, 0.9))
+
+
 # ------------------------------------------------------------------- Skyrim
 def _tomo_de_palavras(p: QPainter, cor: QColor) -> None:
     """O tomo com a escrita dos dragões: três garras riscadas na capa."""
@@ -128,6 +190,28 @@ def _pergaminho(p: QPainter, cor: QColor) -> None:
         p.drawEllipse(QPointF(x, 0.5), 0.07, 0.24)
     _linha(p, (0.34, 0.44), (0.66, 0.44))
     _linha(p, (0.34, 0.56), (0.6, 0.56))
+
+
+def _muralha(p: QPainter, cor: QColor) -> None:
+    """A muralha de palavras: o arco de pedra com a escrita das garras."""
+    arco = QPainterPath(QPointF(0.14, 0.88))
+    arco.lineTo(QPointF(0.14, 0.4))
+    arco.quadTo(QPointF(0.5, 0.02), QPointF(0.86, 0.4))
+    arco.lineTo(QPointF(0.86, 0.88))
+    arco.closeSubpath()
+    p.drawPath(arco)
+    for x in (0.36, 0.52, 0.68):
+        _linha(p, (x + 0.04, 0.42), (x - 0.04, 0.58))
+    _linha(p, (0.3, 0.72), (0.7, 0.72))
+
+
+def _constelacao(p: QPainter, cor: QColor) -> None:
+    """Uma constelação de habilidade: estrelas ligadas por um fio."""
+    estrelas = ((0.16, 0.74), (0.36, 0.52), (0.56, 0.6), (0.7, 0.3), (0.86, 0.18))
+    _linha(p, *estrelas)
+    _linha(p, (0.56, 0.6), (0.78, 0.82))
+    for x, y in (*estrelas, (0.78, 0.82)):
+        _ponto(p, x, y, 0.06, cor)
 
 
 # ------------------------------------------------------------ The Witcher 3
@@ -153,6 +237,27 @@ def _contrato(p: QPainter, cor: QColor) -> None:
     _ponto(p, 0.5, 0.2, 0.06, cor)
 
 
+def _meditacao(p: QPainter, cor: QColor) -> None:
+    """O relógio da meditação: os quatro quartos do dia e o ponteiro."""
+    p.drawEllipse(QPointF(0.5, 0.5), 0.34, 0.34)
+    for dx, dy in ((0, -1), (1, 0), (0, 1), (-1, 0)):
+        _linha(p, (0.5 + dx * 0.34, 0.5 + dy * 0.34), (0.5 + dx * 0.44, 0.5 + dy * 0.44))
+    _linha(p, (0.5, 0.5), (0.66, 0.3))
+    _ponto(p, 0.5, 0.5, 0.05, cor)
+
+
+def _duas_espadas(p: QPainter, cor: QColor) -> None:
+    """As duas espadas do bruxo — a de aço e a de prata — cruzadas."""
+    for sinal in (-1, 1):
+        ponta = (0.5 + sinal * 0.34, 0.12)
+        cabo = (0.5 - sinal * 0.3, 0.84)
+        _linha(p, ponta, cabo)
+        # O guarda-mão atravessa a lâmina perto do cabo, e o pomo fecha.
+        gx, gy = 0.5 - sinal * 0.22, 0.72
+        _linha(p, (gx - 0.08, gy - sinal * 0.06), (gx + 0.08, gy + sinal * 0.06))
+        _ponto(p, cabo[0], cabo[1], 0.045, cor)
+
+
 # ----------------------------------------------------------------- Red Dead
 def _diario(p: QPainter, cor: QColor) -> None:
     """O diário de couro, fechado pela correia com fivela."""
@@ -173,6 +278,32 @@ def _fogueira(p: QPainter, cor: QColor) -> None:
     p.drawPath(chama)
 
 
+def _cartas(p: QPainter, cor: QColor) -> None:
+    """Duas cartas de baralho abertas em leque, a da frente com o naipe."""
+    for giro in (-12, 10):
+        p.save()
+        p.translate(0.5, 0.86)
+        p.rotate(giro)
+        p.translate(-0.5, -0.86)
+        p.drawRoundedRect(QRectF(0.3, 0.14, 0.4, 0.62), 0.05, 0.05)
+        if giro > 0:
+            _fechado(p, (0.5, 0.32), (0.58, 0.46), (0.5, 0.58), (0.42, 0.46), cheio=cor)
+        p.restore()
+
+
+def _estrela_de_xerife(p: QPainter, cor: QColor) -> None:
+    """A estrela de xerife: cinco pontas, cada uma com a bolinha na ponta."""
+    pontos = []
+    for passo in range(10):
+        angulo = -math.pi / 2 + math.pi * passo / 5
+        raio = 0.34 if passo % 2 == 0 else 0.15
+        pontos.append((0.5 + raio * math.cos(angulo), 0.54 + raio * math.sin(angulo)))
+    _fechado(p, *pontos)
+    for x, y in pontos[::2]:
+        _ponto(p, x, y, 0.045, cor)
+    p.drawEllipse(QPointF(0.5, 0.54), 0.06, 0.06)
+
+
 # ---------------------------------------------------------------------- GTA
 def _celular(p: QPainter, cor: QColor) -> None:
     """O celular: é por ele que tudo passa na cidade."""
@@ -191,6 +322,23 @@ def _radio(p: QPainter, cor: QColor) -> None:
         _linha(p, (0.5 + dx * 0.19, 0.5 + dy * 0.19), (0.5 + dx * 0.3, 0.5 + dy * 0.3))
 
 
+def _quadro_do_golpe(p: QPainter, cor: QColor) -> None:
+    """O quadro do golpe: fotos pregadas e o barbante ligando uma à outra."""
+    p.drawRect(QRectF(0.1, 0.16, 0.8, 0.68))
+    p.drawRect(QRectF(0.2, 0.28, 0.22, 0.2))
+    p.drawRect(QRectF(0.58, 0.52, 0.22, 0.2))
+    _linha(p, (0.31, 0.48), (0.5, 0.62), (0.58, 0.62))
+    _ponto(p, 0.31, 0.28, 0.045, cor)
+    _ponto(p, 0.69, 0.52, 0.045, cor)
+
+
+def _barras_de_estatistica(p: QPainter, cor: QColor) -> None:
+    """As barras do menu de estatísticas: o trilho e o quanto já encheu."""
+    for y, cheio in ((0.24, 0.52), (0.5, 0.34), (0.76, 0.6)):
+        p.drawRect(QRectF(0.12, y - 0.06, 0.76, 0.12))
+        p.fillRect(QRectF(0.12, y - 0.06, cheio, 0.12), cor)
+
+
 # ---------------------------------------------------------------- Cyberpunk
 def _fragmento(p: QPainter, cor: QColor) -> None:
     """O fragmento de dados, com o canto cortado e os contatos no pé."""
@@ -206,6 +354,26 @@ def _braindance(p: QPainter, cor: QColor) -> None:
     for inicio in (20, 140, 260):
         p.drawArc(caixa, inicio * 16, 95 * 16)
     _fechado(p, (0.42, 0.34), (0.66, 0.5), (0.42, 0.66), cheio=cor)
+
+
+def _matriz_de_codigo(p: QPainter, cor: QColor) -> None:
+    """A matriz do protocolo de invasão: a grade e o caminho escolhido nela."""
+    for linha in range(3):
+        for coluna in range(3):
+            x, y = 0.2 + coluna * 0.3, 0.2 + linha * 0.3
+            p.drawRect(QRectF(x - 0.07, y - 0.07, 0.14, 0.14))
+    caminho = ((0.2, 0.2), (0.8, 0.2), (0.8, 0.8), (0.5, 0.8))
+    _linha(p, *caminho)
+    for x, y in caminho:
+        p.fillRect(QRectF(x - 0.07, y - 0.07, 0.14, 0.14), cor)
+
+
+def _degraus_de_reputacao(p: QPainter, cor: QColor) -> None:
+    """Os degraus da reputação nas ruas, o último chanfrado e aceso."""
+    for indice, altura in enumerate((0.2, 0.36, 0.52)):
+        x = 0.12 + indice * 0.2
+        p.drawRect(QRectF(x, 0.86 - altura, 0.14, altura))
+    _fechado(p, (0.72, 0.18), (0.8, 0.1), (0.88, 0.1), (0.88, 0.86), (0.72, 0.86), cheio=cor)
 
 
 # ---------------------------------------------------------------------- RPG
@@ -226,6 +394,34 @@ def _ampulheta(p: QPainter, cor: QColor) -> None:
     _linha(p, (0.24, 0.9), (0.76, 0.9))
     _fechado(p, (0.3, 0.1), (0.7, 0.1), (0.5, 0.5), (0.7, 0.9), (0.3, 0.9), (0.5, 0.5))
     _fechado(p, (0.38, 0.8), (0.62, 0.8), (0.5, 0.64), cheio=cor)
+
+
+def _dado_de_vinte(p: QPainter, cor: QColor) -> None:
+    """O dado de vinte faces: o hexágono e o triângulo da face da frente."""
+    hexagono = [
+        (
+            0.5 + 0.4 * math.cos(math.pi / 6 + math.pi * k / 3),
+            0.5 + 0.4 * math.sin(math.pi / 6 + math.pi * k / 3),
+        )
+        for k in range(6)
+    ]
+    _fechado(p, *hexagono)
+    frente = ((0.5, 0.26), (0.72, 0.64), (0.28, 0.64))
+    _fechado(p, *frente)
+    _linha(p, frente[0], hexagono[4])
+    _linha(p, frente[1], hexagono[0])
+    _linha(p, frente[2], hexagono[2])
+
+
+def _ficha(p: QPainter, cor: QColor) -> None:
+    """A ficha de personagem: o retrato no canto e os atributos anotados."""
+    p.drawRect(QRectF(0.18, 0.1, 0.64, 0.8))
+    p.drawEllipse(QPointF(0.36, 0.3), 0.1, 0.1)
+    _linha(p, (0.54, 0.26), (0.72, 0.26))
+    _linha(p, (0.54, 0.36), (0.66, 0.36))
+    for y in (0.54, 0.66, 0.78):
+        _linha(p, (0.28, y), (0.5, y))
+        p.fillRect(QRectF(0.58, y - 0.035, 0.12, 0.07), cor)
 
 
 # ---------------------------------------------------------------------- FPS
@@ -252,16 +448,59 @@ def _prancheta(p: QPainter, cor: QColor) -> None:
     _linha(p, (0.52, 0.68), (0.7, 0.68))
 
 
+def _alvo(p: QPainter, cor: QColor) -> None:
+    """O alvo do estande de tiro, com a marca do disparo fora do centro."""
+    p.drawEllipse(QPointF(0.5, 0.5), 0.36, 0.36)
+    p.drawEllipse(QPointF(0.5, 0.5), 0.2, 0.2)
+    _ponto(p, 0.5, 0.5, 0.06, cor)
+    for dx, dy in ((0, -1), (1, 0), (0, 1), (-1, 0)):
+        _linha(p, (0.5 + dx * 0.28, 0.5 + dy * 0.28), (0.5 + dx * 0.44, 0.5 + dy * 0.44))
+    _ponto(p, 0.62, 0.38, 0.035, cor)
+
+
+def _divisas(p: QPainter, cor: QColor) -> None:
+    """As divisas da patente: três vês empilhados, apontando para cima."""
+    for y in (0.3, 0.5, 0.7):
+        _linha(p, (0.18, y + 0.16), (0.5, y - 0.04), (0.82, y + 0.16))
+
+
 ICONES: dict[str, dict[str, Desenho]] = {
-    "terminal": {"caderno": _holotape, "historico": _terminal},
-    "graca": {"caderno": _tomo, "historico": _graca},
-    "nordico": {"caderno": _tomo_de_palavras, "historico": _pergaminho},
-    "bruxo": {"caderno": _bestiario, "historico": _contrato},
-    "oeste": {"caderno": _diario, "historico": _fogueira},
-    "celular": {"caderno": _celular, "historico": _radio},
-    "dados": {"caderno": _fragmento, "historico": _braindance},
-    "grimorio": {"caderno": _grimorio, "historico": _ampulheta},
-    "tatico": {"caderno": _plaquetas, "historico": _prancheta},
+    "terminal": {
+        "caderno": _holotape, "historico": _terminal,
+        "revisao": _folha_de_respostas, "progresso": _mostrador,
+    },
+    "graca": {
+        "caderno": _tomo, "historico": _graca,
+        "revisao": _pedra_de_brilho, "progresso": _arvore_terrea,
+    },
+    "nordico": {
+        "caderno": _tomo_de_palavras, "historico": _pergaminho,
+        "revisao": _muralha, "progresso": _constelacao,
+    },
+    "bruxo": {
+        "caderno": _bestiario, "historico": _contrato,
+        "revisao": _meditacao, "progresso": _duas_espadas,
+    },
+    "oeste": {
+        "caderno": _diario, "historico": _fogueira,
+        "revisao": _cartas, "progresso": _estrela_de_xerife,
+    },
+    "celular": {
+        "caderno": _celular, "historico": _radio,
+        "revisao": _quadro_do_golpe, "progresso": _barras_de_estatistica,
+    },
+    "dados": {
+        "caderno": _fragmento, "historico": _braindance,
+        "revisao": _matriz_de_codigo, "progresso": _degraus_de_reputacao,
+    },
+    "grimorio": {
+        "caderno": _grimorio, "historico": _ampulheta,
+        "revisao": _dado_de_vinte, "progresso": _ficha,
+    },
+    "tatico": {
+        "caderno": _plaquetas, "historico": _prancheta,
+        "revisao": _alvo, "progresso": _divisas,
+    },
 }
 
 

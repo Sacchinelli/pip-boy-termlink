@@ -148,6 +148,13 @@ class GameTheme:
     # vocabulário") e na barra de título: o nome do jogo é a voz, não a pista.
     nome_do_caderno: str = "Caderno"
     nome_do_historico: str = "Histórico"
+    # E o nome que o jogo dá a treinar e a medir o quanto se avançou: o
+    # Teste G.O.A.T. e o STAT do Pip-Boy, a meditação e o painel de
+    # personagem do bruxo, o estande de tiro e a carreira no visor. Cada um
+    # é o lugar do jogo onde já se faz a mesma coisa — memorizar magias numa
+    # graça, subir o nível de runas, ensaiar o golpe antes de dar o golpe.
+    nome_da_revisao: str = "Revisão"
+    nome_do_progresso: str = "Progresso"
 
     # --- Cores derivadas -------------------------------------------------
     # Calculadas, nunca declaradas. Duas famílias:
@@ -318,6 +325,8 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         info="#7ad4ff",
         nome_do_caderno="Holotapes",
         nome_do_historico="Registros",
+        nome_da_revisao="Teste G.O.A.T.",
+        nome_do_progresso="STAT",
         titulos_em_caixa_alta=True,
         interface=("Roboto Condensed",),
     ),
@@ -359,6 +368,8 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         info="#9fb8c8",
         nome_do_caderno="Tomo de palavras",
         nome_do_historico="Graças visitadas",
+        nome_da_revisao="Memorizar magias",
+        nome_do_progresso="Nível de runas",
         titulos=("Cinzel",),
     ),
     GameTheme(
@@ -400,6 +411,8 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         info="#8fd0b0",
         nome_do_caderno="Palavras de poder",
         nome_do_historico="Missões",
+        nome_da_revisao="Muralha de palavras",
+        nome_do_progresso="Habilidades",
         titulos_leves=True,
         titulos_em_caixa_alta=True,
         interface=("Jost",),
@@ -446,6 +459,8 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         info="#7fa8c0",
         nome_do_caderno="Glossário",
         nome_do_historico="Contratos",
+        nome_da_revisao="Meditação",
+        nome_do_progresso="Personagem",
         interface=("D-DIN",),
     ),
     GameTheme(
@@ -485,6 +500,8 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         info="#9ec4a0",
         nome_do_caderno="Diário",
         nome_do_historico="Trilhas percorridas",
+        nome_da_revisao="Cartas na mesa",
+        nome_do_progresso="Desafios",
         titulos=("Rye",),
     ),
     GameTheme(
@@ -523,6 +540,8 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         info="#24d3ff",
         nome_do_caderno="Agenda",
         nome_do_historico="Mensagens",
+        nome_da_revisao="Ensaio do golpe",
+        nome_do_progresso="Estatísticas",
     ),
     GameTheme(
         name="Cyberpunk 2077",
@@ -557,6 +576,8 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         info="#ff4fd8",
         nome_do_caderno="Fragmentos",
         nome_do_historico="Braindances",
+        nome_da_revisao="Protocolo de invasão",
+        nome_do_progresso="Reputação",
         titulos_em_caixa_alta=True,
         interface=("Rajdhani",),
     ),
@@ -595,6 +616,8 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         info="#7fd4c0",
         nome_do_caderno="Grimório",
         nome_do_historico="Crônicas",
+        nome_da_revisao="Teste de perícia",
+        nome_do_progresso="Ficha de personagem",
     ),
     GameTheme(
         name="FPS / Multiplayer",
@@ -646,6 +669,8 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         info="#79c7e8",
         nome_do_caderno="Arsenal",
         nome_do_historico="Relatórios",
+        nome_da_revisao="Estande de tiro",
+        nome_do_progresso="Carreira",
         titulos_em_caixa_alta=True,
         interface=("Barlow Condensed",),
     ),

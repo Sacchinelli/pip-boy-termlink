@@ -21,6 +21,11 @@ Cada gesto tem resposta na tela, e cada resposta diz alguma coisa:
 * **O cartão respondido sai deslizando** enquanto o próximo entra, e a borda
   acende na cor do resultado. Com a atmosfera desligada, tudo acontece num
   quadro — o recado e a barra continuam dizendo o que houve.
+
+E a rodada acontece no lugar do jogo em que já se treina: o Teste G.O.A.T. do
+abrigo, a graça onde se memorizam magias, a meditação do bruxo, o estande de
+tiro. O nome e o objeto dele vão no alto, e a moldura do jogo se monta em
+volta do cartão quando a janela abre.
 """
 
 from __future__ import annotations
@@ -44,7 +49,9 @@ from ..vocabulary import VocabularyStore
 from .atmosfera import ATENUACAO_NO_FUNDO_NU, Cenario, so_o_cursor
 from .componentes import Botao, RotuloElidido, acender_borda, caminho_forma
 from .cursor import CursorVivo
+from .icones import IconeDoJogo
 from .movimento import ImagemQueSai, Transicao, animar_entrada
+from .ornamentos import FAIXA_MOLDURA, MolduraDoPainel
 
 LARGURA = 520
 
@@ -167,6 +174,23 @@ class JanelaRevisao(QDialog):
             etiqueta.setWordWrap(wrap)
             return etiqueta
 
+        # O cabeçalho: o objeto do jogo e o nome que ele dá a treinar, com a
+        # função escrita ao lado, miúda — como no caderno e no histórico.
+        cabecalho = QHBoxLayout()
+        cabecalho.setSpacing(10)
+        self.icone_titulo = IconeDoJogo(janela, "revisao")
+        cabecalho.addWidget(self.icone_titulo, 0, Qt.AlignmentFlag.AlignBottom)
+        self.titulo = rotulo("display", tema.primary, ui=False, wrap=False)
+        self.titulo.setText(tema.nome_da_revisao)
+        self.icone_titulo.definir_lado(QFontMetrics(self.titulo.font()).height())
+        cabecalho.addWidget(self.titulo, 0, Qt.AlignmentFlag.AlignBottom)
+        cabecalho.addStretch(1)
+        self.subtitulo = rotulo("legenda", tema.text_muted, wrap=False)
+        self.subtitulo.setText("revisão de vocabulário")
+        cabecalho.addWidget(self.subtitulo, 0, Qt.AlignmentFlag.AlignBottom)
+        coluna.addLayout(cabecalho)
+        coluna.addSpacing(4)
+
         topo = QHBoxLayout()
         topo.setSpacing(12)
         self._progresso = rotulo("micro", tema.text_muted, wrap=False)
@@ -186,7 +210,10 @@ class JanelaRevisao(QDialog):
         # troca: termo, metadados e verso saem juntos.
         self._cartao = QWidget()
         pilha = QVBoxLayout(self._cartao)
-        pilha.setContentsMargins(0, 0, 0, 0)
+        # Com moldura, o cartão se afasta dela o bastante para os ornamentos
+        # não passarem por cima do termo.
+        folga = round(FAIXA_MOLDURA) + 2 if janela.atmosfera.moldura else 0
+        pilha.setContentsMargins(folga, folga, folga, folga)
         pilha.setSpacing(10)
         self._termo = rotulo("display", tema.primary, ui=False)
         self._meta = rotulo("micro", tema.text_muted)
@@ -216,6 +243,9 @@ class JanelaRevisao(QDialog):
         self._verso = verso
         pilha.addWidget(verso)
         coluna.addWidget(self._cartao)
+        # A moldura do jogo em volta do cartão — por cima dele, montando ao
+        # abrir; a foto do cartão que sai desliza por baixo dela.
+        self.moldura_cartao = MolduraDoPainel(janela, self._cartao)
         coluna.addSpacing(10)
 
         acoes = QHBoxLayout()
@@ -308,9 +338,7 @@ class JanelaRevisao(QDialog):
             self._mostrar_resumo()
             return
         self._revelado = False
-        self._progresso.setText(
-            f"REVISÃO · CARTÃO {self._rodada.posicao} DE {self._rodada.total}"
-        )
+        self._progresso.setText(f"CARTÃO {self._rodada.posicao} DE {self._rodada.total}")
         self._termo.setText(cartao.termo)
         partes = [p for p in (cartao.jogo, f"vista {cartao.encontros}×") if p]
         self._meta.setText(" · ".join(partes))
@@ -384,7 +412,7 @@ class JanelaRevisao(QDialog):
         self._revelado = False
         restantes = self._store.pendentes()
         if self._rodada.total == 0:
-            self._progresso.setText("REVISÃO")
+            self._progresso.setText("FILA VAZIA")
             self._termo.setText("Nada vencido")
             self._meta.setText("Todas as palavras estão agendadas para o futuro.")
         else:
@@ -430,6 +458,7 @@ class JanelaRevisao(QDialog):
 
     def showEvent(self, evento: Any) -> None:
         super().showEvent(evento)
+        self.moldura_cartao.montar()
         self._cursor_vivo.reposicionar()
 
     def hideEvent(self, evento: Any) -> None:

@@ -22,6 +22,11 @@ Duas camadas de leitura, e a regra que separa uma da outra:
 
 As barras crescem ao abrir, em cascata, e cada gráfico começa um pouco depois
 do de cima: o olho percorre a tela na ordem em que ela se lê.
+
+E o painel é a tela do jogo em que já se mede o quanto se avançou: o STAT do
+Pip-Boy, o nível de runas, as habilidades do Skyrim, a carreira do visor. O
+nome e o objeto dela vão no alto, e a moldura do jogo se monta em volta dos
+gráficos quando a janela abre.
 """
 
 from __future__ import annotations
@@ -38,7 +43,9 @@ from ..vocabulary import DIAS_PARA_DOMINIO, VocabularyStore
 from .atmosfera import ATENUACAO_NO_FUNDO_NU, Cenario, so_o_cursor
 from .componentes import Botao, acender_borda, caminho_forma
 from .cursor import CursorVivo
+from .icones import IconeDoJogo
 from .movimento import Crescimento, Transicao
+from .ornamentos import FAIXA_MOLDURA, MolduraDoPainel
 
 LARGURA = 640
 ALTURA_GRAFICO = 150
@@ -499,6 +506,14 @@ class JanelaProgresso(QDialog):
         coluna.setContentsMargins(30, 24, 30, 22)
         coluna.setSpacing(8)
 
+        # Os gráficos moram num painel próprio, para a moldura do jogo ter o
+        # que contornar; o cabeçalho e o botão ficam fora dela.
+        self.painel = QWidget()
+        pilha = QVBoxLayout(self.painel)
+        folga = round(FAIXA_MOLDURA) + 2 if janela.atmosfera.moldura else 0
+        pilha.setContentsMargins(folga, max(0, folga - 10), folga, folga)
+        pilha.setSpacing(8)
+
         def secao(texto: str) -> None:
             etiqueta = QLabel(texto.upper())
             etiqueta.setFont(janela.fonte("secao"))
@@ -506,16 +521,32 @@ class JanelaProgresso(QDialog):
                 f"color: {design.garantir_contraste(tema.text_muted, self._fundo)};"
                 " background: transparent;"
             )
-            coluna.addSpacing(10)
-            coluna.addWidget(etiqueta)
+            pilha.addSpacing(10)
+            pilha.addWidget(etiqueta)
 
-        titulo = QLabel("PROGRESSO")
+        # O cabeçalho: o objeto do jogo e o nome que ele dá a esta tela, com a
+        # função escrita ao lado, miúda — como no caderno e no histórico.
+        cabecalho = QHBoxLayout()
+        cabecalho.setSpacing(10)
+        self.icone_titulo = IconeDoJogo(janela, "progresso")
+        cabecalho.addWidget(self.icone_titulo, 0, Qt.AlignmentFlag.AlignBottom)
+        titulo = self.titulo = QLabel(tema.nome_do_progresso)
         titulo.setFont(janela.fonte("display", ui=False))
         titulo.setStyleSheet(
             f"color: {design.garantir_contraste(tema.primary, self._fundo)};"
             " background: transparent;"
         )
-        coluna.addWidget(titulo)
+        self.icone_titulo.definir_lado(QFontMetrics(titulo.font()).height())
+        cabecalho.addWidget(titulo, 0, Qt.AlignmentFlag.AlignBottom)
+        cabecalho.addStretch(1)
+        self.subtitulo = QLabel("progresso do caderno")
+        self.subtitulo.setFont(janela.fonte("legenda"))
+        self.subtitulo.setStyleSheet(
+            f"color: {design.garantir_contraste(tema.text_muted, self._fundo)};"
+            " background: transparent;"
+        )
+        cabecalho.addWidget(self.subtitulo, 0, Qt.AlignmentFlag.AlignBottom)
+        coluna.addLayout(cabecalho)
 
         partes = [f"{estatisticas.total} termos no caderno"]
         if estatisticas.acertos or estatisticas.erros:
@@ -537,18 +568,20 @@ class JanelaProgresso(QDialog):
 
         secao("Palavras novas por semana")
         self.grafico_semanas = _GraficoSemanas(janela, store.novas_por_semana(8))
-        coluna.addWidget(self.grafico_semanas)
+        pilha.addWidget(self.grafico_semanas)
 
         secao("Domínio")
         self.regua = _ReguaDominio(janela, novas, aprendendo, dominadas)
-        coluna.addWidget(self.regua)
+        pilha.addWidget(self.regua)
 
         por_jogo = store.por_jogo(6)
         self.grafico_jogos: _GraficoJogos | None = None
         if por_jogo:
             secao("Por jogo")
             self.grafico_jogos = _GraficoJogos(janela, por_jogo, estatisticas.total)
-            coluna.addWidget(self.grafico_jogos)
+            pilha.addWidget(self.grafico_jogos)
+        coluna.addWidget(self.painel)
+        self.moldura_graficos = MolduraDoPainel(janela, self.painel)
 
         acoes = QHBoxLayout()
         acoes.addStretch(1)
@@ -569,6 +602,7 @@ class JanelaProgresso(QDialog):
 
     def showEvent(self, evento: Any) -> None:
         super().showEvent(evento)
+        self.moldura_graficos.montar()
         self._cursor_vivo.reposicionar()
 
     def hideEvent(self, evento: Any) -> None:

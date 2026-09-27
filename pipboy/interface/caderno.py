@@ -634,13 +634,17 @@ class JanelaCaderno(QDialog):
         # procura a ação principal. Um "Fechar" em cor de acento disputava
         # esse lugar com ela — e fechar já tinha o × da barra de título e o
         # Esc, como em toda janela do sistema. Saiu.
-        self.botao_progresso = Botao("◔   Progresso", variante="sutil", paleta=self._janela.paleta)
+        self.botao_progresso = Botao(
+            "Progresso", variante="sutil", icone="progresso", paleta=self._janela.paleta
+        )
         self.botao_progresso.setToolTip("O caderno em números: ritmo, domínio e jogos")
         self.botao_progresso.clicked.connect(self._abrir_progresso)
         # A revisão offline mora aqui, ao lado do dado que ela consome: cobra
         # as vencidas com a mesma repetição espaçada do Quiz, mas sem sessão,
         # sem rede e sem gastar um token.
-        self.botao_revisar = Botao("▶   Revisar", variante="primario", paleta=self._janela.paleta)
+        self.botao_revisar = Botao(
+            "Revisar", variante="primario", icone="revisao", paleta=self._janela.paleta
+        )
         self.botao_revisar.setToolTip(
             "Cartões das palavras vencidas — funciona offline, sem gastar tokens"
         )
@@ -929,7 +933,7 @@ class JanelaCaderno(QDialog):
         # O botão de revisar anuncia o tamanho da dívida e some do caminho
         # quando não há dívida nenhuma.
         self.botao_revisar.setText(
-            f"▶   Revisar ({estatisticas.vencidas})" if estatisticas.vencidas else "▶   Revisar"
+            f"Revisar ({estatisticas.vencidas})" if estatisticas.vencidas else "Revisar"
         )
         self.botao_revisar.setEnabled(estatisticas.vencidas > 0)
 

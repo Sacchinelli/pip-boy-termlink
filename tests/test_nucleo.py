@@ -1038,6 +1038,8 @@ def teste_design() -> None:
         "verbo do botão de partida": [t.start_label for t in TEMAS.values()],
         "nome do caderno": [t.nome_do_caderno for t in TEMAS.values()],
         "nome do histórico": [t.nome_do_historico for t in TEMAS.values()],
+        "nome da revisão": [t.nome_da_revisao for t in TEMAS.values()],
+        "nome do progresso": [t.nome_do_progresso for t in TEMAS.values()],
         "timbre declarado": [(r.forma, r.grave, r.agudo) for r in RECEITAS.values()],
     }
     for nome_coluna, valores in colunas.items():

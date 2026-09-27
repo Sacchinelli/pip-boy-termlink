@@ -3883,7 +3883,13 @@ def main() -> int:
     from PySide6.QtGui import QColor as CorIcone
 
     from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_ICONE
-    from pipboy.interface.icones import ICONES, estilo_de_icone, pintar_icone
+    from pipboy.interface.icones import (
+        GLIFOS_PADRAO,
+        ICONES,
+        NOMES_DE_ICONE,
+        estilo_de_icone,
+        pintar_icone,
+    )
 
     conjuntos = {nome: r.icones for nome, r in RECEITAS_ICONE.items()}
     checar(all(c == "" or c in ICONES for c in conjuntos.values()), "todo jogo pede um conjunto que existe")
@@ -3893,8 +3899,9 @@ def main() -> int:
         "nove jogos com os seus ícones, nenhum copiado, e o neutro com os glifos de sempre",
     )
     checar(
-        all(set(desenhos) == {"caderno", "historico"} for desenhos in ICONES.values()),
-        "cada conjunto desenha o caderno e o histórico",
+        all(set(desenhos) == set(NOMES_DE_ICONE) for desenhos in ICONES.values())
+        and set(GLIFOS_PADRAO) == set(NOMES_DE_ICONE),
+        "cada conjunto desenha as quatro portas, e o neutro tem glifo para todas",
     )
 
     def retrato_do_icone(nome: str, estilo: str, lado: int = 24) -> QImage:
@@ -3909,7 +3916,7 @@ def main() -> int:
 
     fora_icone, vazios_icone = [], []
     for estilo_icone in ICONES:
-        for nome_icone in ("caderno", "historico"):
+        for nome_icone in NOMES_DE_ICONE:
             imagem_icone = retrato_do_icone(nome_icone, estilo_icone)
             tinta_icone = [
                 (x, y) for y in range(60) for x in range(60) if imagem_icone.pixelColor(x, y).alpha()
@@ -3921,7 +3928,7 @@ def main() -> int:
     checar(not vazios_icone, f"todo ícone desenha alguma coisa ({vazios_icone})")
     checar(not fora_icone, f"e fica dentro da caixa que lhe deram ({fora_icone})")
     retratos_icone = {
-        (e, n): retrato_do_icone(n, e) for e in ICONES for n in ("caderno", "historico")
+        (e, n): retrato_do_icone(n, e) for e in ICONES for n in NOMES_DE_ICONE
     }
     iguais_icone = sorted(
         (a, b) for a in retratos_icone for b in retratos_icone
@@ -4282,6 +4289,100 @@ def main() -> int:
     janela._caderno.close()
     janela.campo_jogo.setCurrentText(jogo_janelas)
     janela.campo_atmosfera.setCurrentText(atmosfera_janelas)
+    aplicacao.processEvents()
+
+    print("a revisão e o progresso vestem o jogo")
+    from pipboy.interface.progresso import JanelaProgresso as ProgressoDoJogo
+    from pipboy.interface.revisao import JanelaRevisao as RevisaoDoJogo
+
+    caderno_do_jogo = VocabularyStore(dados / "revisao-do-jogo.sqlite3")
+    caderno_do_jogo.registrar("bounty", "recompensa", "A bounty on your head.", "Red Dead")
+    caderno_do_jogo.registrar("outlaw", "fora da lei", "", "Red Dead")
+    jogo_rp = janela.campo_jogo.currentText()
+    atmosfera_rp = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    janela.campo_jogo.setCurrentText("Red Dead")
+    aplicacao.processEvents()
+    rodada_jogo = RevisaoDoJogo(janela, caderno_do_jogo, parent=janela)
+    rodada_jogo.show()
+    aplicacao.processEvents()
+    checar(
+        rodada_jogo.titulo.text() == "Cartas na mesa" == janela.tema.nome_da_revisao
+        and rodada_jogo.subtitulo.text() == "revisão de vocabulário"
+        and rodada_jogo.windowTitle() == "Revisão",
+        "no velho oeste, revisar é pôr as cartas na mesa — com a função escrita ao lado e na barra",
+    )
+    checar(
+        rodada_jogo.icone_titulo.nome == "revisao"
+        and rodada_jogo.icone_titulo.width() == QFontMetrics(rodada_jogo.titulo.font()).height(),
+        "e as cartas abertas em leque ao lado do título, na altura da letra dele",
+    )
+    checar(
+        rodada_jogo._progresso.text() == "CARTÃO 1 DE 2",
+        f"o contador não repete o nome que o título já disse ({rodada_jogo._progresso.text()})",
+    )
+    moldura_rev = rodada_jogo.moldura_cartao
+    checar(
+        moldura_rev.parentWidget() is rodada_jogo._cartao.parentWidget()
+        and moldura_rev.isVisible() and moldura_rev.geometry() == rodada_jogo._cartao.geometry(),
+        "a moldura do cartaz contorna o cartão, por cima dele e do tamanho dele",
+    )
+    checar(
+        moldura_rev.progresso_da_montagem < 1.0,
+        "e se monta quando a rodada abre",
+    )
+    margens_rev = rodada_jogo._cartao.layout().contentsMargins()
+    checar(
+        margens_rev.left() >= FAIXA_JANELAS and margens_rev.top() >= FAIXA_JANELAS,
+        "o termo se afasta da moldura, para o ornamento não passar por cima dele",
+    )
+    aguardar(lambda: moldura_rev.progresso_da_montagem >= 1.0, 3000)
+    rodada_jogo.close()
+
+    painel_jogo = ProgressoDoJogo(janela, caderno_do_jogo, parent=janela)
+    painel_jogo.show()
+    aplicacao.processEvents()
+    checar(
+        painel_jogo.titulo.text() == "Desafios" == janela.tema.nome_do_progresso
+        and painel_jogo.subtitulo.text() == "progresso do caderno"
+        and painel_jogo.icone_titulo.nome == "progresso",
+        "o progresso do velho oeste é a tela de desafios, com a estrela de xerife",
+    )
+    moldura_prog = painel_jogo.moldura_graficos
+    checar(
+        moldura_prog.isVisible() and moldura_prog.geometry() == painel_jogo.painel.geometry()
+        and painel_jogo.grafico_semanas.parentWidget() is painel_jogo.painel,
+        "a moldura contorna os gráficos, e só eles",
+    )
+    painel_jogo.close()
+
+    janela.campo_jogo.setCurrentText("FPS / Multiplayer")
+    aplicacao.processEvents()
+    rodada_visor = RevisaoDoJogo(janela, caderno_do_jogo, parent=janela)
+    rodada_visor.show()
+    aplicacao.processEvents()
+    checar(
+        rodada_visor.titulo.text() == "Estande de tiro"
+        and not rodada_visor.moldura_cartao.isVisible()
+        and rodada_visor._cartao.layout().contentsMargins().left() == 0,
+        "no visor, o estande de tiro — sem moldura de painel, e sem folga à toa",
+    )
+    rodada_visor.close()
+
+    janela.abrir_caderno()
+    aplicacao.processEvents()
+    caderno_portas = janela._caderno
+    checar(
+        caderno_portas.botao_revisar.icone == "revisao"
+        and caderno_portas.botao_progresso.icone == "progresso"
+        and caderno_portas.botao_revisar.text().startswith("Revisar")
+        and caderno_portas.botao_progresso.text() == "Progresso",
+        "no caderno, as duas portas trazem o objeto do jogo ao lado do nome de sempre",
+    )
+    caderno_portas.close()
+    caderno_do_jogo.close()
+    janela.campo_jogo.setCurrentText(jogo_rp)
+    janela.campo_atmosfera.setCurrentText(atmosfera_rp)
     aplicacao.processEvents()
 
     print("cada jogo mira do seu jeito")
