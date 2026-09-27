@@ -3878,6 +3878,93 @@ def main() -> int:
         "e a 'Desligada' o apaga",
     )
 
+    print("cada jogo tem os seus ícones")
+    from PySide6.QtCore import QRectF as CaixaIcone
+    from PySide6.QtGui import QColor as CorIcone
+
+    from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_ICONE
+    from pipboy.interface.icones import ICONES, estilo_de_icone, pintar_icone
+
+    conjuntos = {nome: r.icones for nome, r in RECEITAS_ICONE.items()}
+    checar(all(c == "" or c in ICONES for c in conjuntos.values()), "todo jogo pede um conjunto que existe")
+    proprios_icone = [c for c in conjuntos.values() if c]
+    checar(
+        len(proprios_icone) == len(set(proprios_icone)) == 9 and conjuntos["Genérico / Outro"] == "",
+        "nove jogos com os seus ícones, nenhum copiado, e o neutro com os glifos de sempre",
+    )
+    checar(
+        all(set(desenhos) == {"caderno", "historico"} for desenhos in ICONES.values()),
+        "cada conjunto desenha o caderno e o histórico",
+    )
+
+    def retrato_do_icone(nome: str, estilo: str, lado: int = 24) -> QImage:
+        imagem_icone = QImage(60, 60, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem_icone.fill(0)
+        pintor_icone = QPainter(imagem_icone)
+        pintar_icone(
+            pintor_icone, nome, CaixaIcone(18, 18, lado, lado), CorIcone("#ffffff"), estilo=estilo
+        )
+        pintor_icone.end()
+        return imagem_icone
+
+    fora_icone, vazios_icone = [], []
+    for estilo_icone in ICONES:
+        for nome_icone in ("caderno", "historico"):
+            imagem_icone = retrato_do_icone(nome_icone, estilo_icone)
+            tinta_icone = [
+                (x, y) for y in range(60) for x in range(60) if imagem_icone.pixelColor(x, y).alpha()
+            ]
+            if not tinta_icone:
+                vazios_icone.append(f"{estilo_icone}/{nome_icone}")
+            elif any(not (16 <= x <= 44 and 16 <= y <= 44) for x, y in tinta_icone):
+                fora_icone.append(f"{estilo_icone}/{nome_icone}")
+    checar(not vazios_icone, f"todo ícone desenha alguma coisa ({vazios_icone})")
+    checar(not fora_icone, f"e fica dentro da caixa que lhe deram ({fora_icone})")
+    retratos_icone = {
+        (e, n): retrato_do_icone(n, e) for e in ICONES for n in ("caderno", "historico")
+    }
+    iguais_icone = sorted(
+        (a, b) for a in retratos_icone for b in retratos_icone
+        if a < b and retratos_icone[a] == retratos_icone[b]
+    )
+    checar(not iguais_icone, f"e nenhum ícone repete outro, de jogo nenhum ({iguais_icone})")
+    checar(
+        retrato_do_icone("caderno", "desconhecido") == retrato_do_icone("caderno", ""),
+        "estilo desconhecido cai nos glifos de sempre, como o tema neutro",
+    )
+
+    # Na janela: as portas e o trilho desenham o ícone do jogo em vigor.
+    jogo_icone = janela.campo_jogo.currentText()
+    janela.campo_jogo.setCurrentText("Red Dead")
+    aplicacao.processEvents()
+    checar(estilo_de_icone() == "oeste", "no Red Dead, o conjunto em vigor é o do oeste")
+    checar(
+        janela.botao_caderno.icone == "caderno" and janela.botao_caderno.text() == "Caderno"
+        and janela.botao_historico.icone == "historico"
+        and janela.trilho_caderno.icone == "caderno" and janela.trilho_caderno.text() == ""
+        and janela.trilho_caderno.accessibleName() == "Abrir o caderno de vocabulário",
+        "as portas trazem o ícone ao lado do nome; o trilho, só o ícone — com o nome para o leitor de tela",
+    )
+    porta_oeste = janela.botao_caderno.grab().toImage()
+    janela.botao_caderno.icone = ""
+    porta_sem_icone = janela.botao_caderno.grab().toImage()
+    janela.botao_caderno.icone = "caderno"
+    checar(porta_oeste != porta_sem_icone, "a porta desenha o ícone do jogo ao lado do nome")
+    janela.campo_jogo.setCurrentText("Cyberpunk 2077")
+    aplicacao.processEvents()
+    porta_dados = janela.botao_caderno.grab().toImage()
+    checar(porta_oeste != porta_dados, "trocar de jogo troca o desenho da porta")
+    from pipboy.interface.componentes import Botao as BotaoIcone
+
+    com_icone = BotaoIcone("Caderno", icone="caderno")
+    sem_icone = BotaoIcone("Caderno")
+    checar(
+        com_icone.sizeHint().width() > sem_icone.sizeHint().width(),
+        "o botão com ícone pede a largura do ícone, e o rótulo não é cortado",
+    )
+    janela.campo_jogo.setCurrentText(jogo_icone)
+    aplicacao.processEvents()
+
     print("cada jogo mira do seu jeito")
     from PySide6.QtGui import QColor as CorMira
 

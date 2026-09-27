@@ -49,6 +49,7 @@ from PySide6.QtGui import (
     QEnterEvent,
     QFont,
     QFontMetrics,
+    QFontMetricsF,
     QHoverEvent,
     QLinearGradient,
     QPainter,
@@ -71,6 +72,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import design
+from .icones import pintar_icone
 from .movimento import Transicao, curva_do_ritmo, em_degraus, no_ritmo
 from .ornamentos import (
     ESTILOS_QUE_ENCHEM,
@@ -233,6 +235,8 @@ class Botao(QAbstractButton):
 
     DURACAO_HOVER = 160
     DURACAO_PRESSAO = 90
+    # Entre o ícone e o rótulo.
+    RESPIRO_ICONE = 8.0
     # O botão magnético é desenhado com esta folga em volta do corpo, que é o
     # espaço para onde ele pode ser puxado: um widget não pinta fora de si.
     FOLGA_IMA = 8
@@ -250,11 +254,15 @@ class Botao(QAbstractButton):
         alinhamento_esquerdo: bool = False,
         magnetico: bool = False,
         folga_ima: int | None = None,
+        icone: str = "",
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._halo_suspenso = False
         self.setText(texto)
+        # O ícone desenhado do jogo (ver icones.py), à esquerda do rótulo; sem
+        # rótulo, sozinho no meio do botão.
+        self.icone = icone
         # A folga é o quanto o botão pode ser puxado. O principal ganha a folga
         # inteira; os secundários, uma menor — o ímã deles é um aceno, e uma
         # folga grande em todo botão incharia a janela.
@@ -440,9 +448,14 @@ class Botao(QAbstractButton):
             self._atualizar_halo()
         self.update()
 
+    def _lado_do_icone(self) -> float:
+        return QFontMetricsF(self.font()).height() * 0.95
+
     def sizeHint(self) -> QSize:
         metricas = QFontMetrics(self.font())
         largura = metricas.horizontalAdvance(self.text()) + 46
+        if self.icone and self.text():
+            largura += round(self._lado_do_icone() + self.RESPIRO_ICONE)
         folga = 2 * self._folga
         return QRectF(0, 0, max(self._largura_min, largura) + folga, 38 + folga).size().toSize()
 
@@ -686,7 +699,35 @@ class Botao(QAbstractButton):
         # virou uma caixinha vazia. O recuo nunca pode comer mais que um quarto
         # da largura de cada lado.
         recuo_h = min(14.0, area.width() / 4.0)
-        pintor.drawText(area.adjusted(recuo_h, 0, -recuo_h, 0), int(bandeiras), self.text())
+        if not self.icone:
+            pintor.drawText(area.adjusted(recuo_h, 0, -recuo_h, 0), int(bandeiras), self.text())
+            return
+        texto = self.text()
+        if not texto:
+            # Botão só de ícone, como os do trilho: o desenho no meio, com a
+            # metade do lado menor — o resto é a folga de um alvo de clique.
+            lado = min(area.width(), area.height()) * 0.5
+            pintar_icone(
+                pintor, self.icone,
+                QRectF(area.center().x() - lado / 2, area.center().y() - lado / 2, lado, lado),
+                frente,
+            )
+            return
+        lado = self._lado_do_icone()
+        largura_texto = QFontMetricsF(self.font()).horizontalAdvance(texto)
+        conjunto = lado + self.RESPIRO_ICONE + largura_texto
+        if self._esquerdo:
+            x = area.left() + recuo_h
+        else:
+            x = area.center().x() - conjunto / 2
+        pintar_icone(
+            pintor, self.icone, QRectF(x, area.center().y() - lado / 2, lado, lado), frente
+        )
+        pintor.setPen(frente)
+        pintor.drawText(
+            QRectF(x + lado + self.RESPIRO_ICONE, area.top(), largura_texto + 2, area.height()),
+            int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), texto,
+        )
 
 
 class BotaoDeEstado(Botao):

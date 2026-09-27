@@ -259,7 +259,7 @@ class CartaoTermo(QFrame):
         # O botão só existe quando há conversa: desabilitado, ele diz por quê,
         # em vez de simplesmente não reagir ao clique.
         self.botao_conversa = conversa = Botao(
-            "◷", variante="sutil", paleta=janela.paleta, forma=self._forma
+            "", variante="sutil", icone="historico", paleta=janela.paleta, forma=self._forma
         )
         conversa.setFont(janela.fonte("corpo_forte"))
         conversa.setEnabled(sessao is not None)
