@@ -11,7 +11,7 @@ executável procura o ``.env`` ao lado de si mesmo (e na pasta de dados), como
 
 import os
 
-# `datas=[]` garante que o .env não entra DENTRO do binário. Não garante o que
+# `datas` só com as fontes garante que o .env não entra DENTRO do binário. Não garante o que
 # importa na prática: que ele não esteja ao LADO dele. Como o executável procura
 # o .env na própria pasta, um arquivo esquecido em dist/ viaja junto no primeiro
 # zip que alguém mandar para um amigo — e a chave vai junto. O build para aqui
@@ -30,11 +30,17 @@ if os.path.isfile(_env_no_dist):
         "o build; a sua cópia de trabalho na raiz do projeto não é afetada.\n"
     )
 
+# As fontes que acompanham o programa (pipboy/fontes, cada família com a sua
+# licença OFL ao lado) vão dentro do binário, no mesmo caminho relativo que
+# pipboy/interface/fontes.py procura. É a ÚNICA pasta de dados: o .env
+# continua fora, pela razão acima.
+_fontes = os.path.join(_raiz, "pipboy", "fontes")
+
 a = Analysis(
     ["pip_boy.py"],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[(_fontes, os.path.join("pipboy", "fontes"))],
     # O loopback WASAPI é carregado dinamicamente conforme a plataforma; o
     # tkinter não é usado desde a migração para o Qt e só engordaria o pacote.
     # QtNetwork fica: o QtMultimedia (campainha de blips) depende dele.

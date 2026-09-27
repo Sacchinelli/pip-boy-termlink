@@ -135,6 +135,10 @@ def main() -> int:
     from PySide6.QtWidgets import QApplication
 
     QApplication(sys.argv)
+    # As fontes que acompanham o programa contam: são elas que ele usa.
+    from pipboy.interface.fontes import registrar_fontes
+
+    registrar_fontes()
     instaladas = {str(f) for f in QFontDatabase.families()}
     if not instaladas:
         # Acontece em backends sem base de fontes — o offscreen é um deles.
@@ -160,6 +164,7 @@ def main() -> int:
         for papel, candidatas in (
             ("controles", tema.ui_font_candidates),
             ("tema", tema.font_candidates),
+            ("títulos", tema.display_candidates),
         ):
             familias.setdefault(primeira(candidatas), []).append(f"{nome}/{papel}")
     familias.setdefault(primeira(FONTES_MONO), []).append("rodapé/mono")

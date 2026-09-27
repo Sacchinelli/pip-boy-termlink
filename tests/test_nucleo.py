@@ -2643,6 +2643,75 @@ def teste_lancamento_sem_console() -> None:
         LOGGER.handlers.extend(handlers_originais)
 
 
+def teste_fontes_embutidas() -> None:
+    """As fontes que acompanham o programa: livres, licenciadas e empacotadas.
+
+    Redistribuir uma fonte é redistribuir software, e a licença OFL exige ir
+    junto com ela. Uma pasta de fonte sem o texto da licença é um pacote que
+    não pode ser publicado; um executável sem as fontes é um programa que
+    volta, sem avisar, às reservas de fábrica.
+    """
+    print("fontes embutidas")
+    from pipboy.themes import TEMAS
+
+    raiz = Path(__file__).resolve().parent.parent
+    pasta = raiz / "pipboy" / "fontes"
+    familias = [p for p in sorted(pasta.iterdir()) if p.is_dir()]
+    checar(len(familias) >= 9, f"as famílias estão na pasta ({len(familias)})")
+    sem_licenca = [
+        p.name
+        for p in familias
+        if not any(
+            "SIL Open Font License" in lic.read_text(encoding="utf-8", errors="replace")
+            for lic in (p / "OFL.txt", p / "COPYING.txt")
+            if lic.is_file()
+        )
+    ]
+    checar(not sem_licenca, f"cada família leva a sua licença OFL ao lado ({sem_licenca})")
+    checar(
+        all(any(p.glob("*.ttf")) for p in familias),
+        "e cada pasta tem ao menos um arquivo de fonte",
+    )
+    receita = (raiz / "pip_boy.spec").read_text(encoding="utf-8")
+    checar(
+        '"pipboy", "fontes"' in receita and "datas=[(_fontes" in receita,
+        "o executável leva as fontes, no caminho em que o programa as procura",
+    )
+
+    # Uma letra de interface por jogo que declara uma, e nenhuma repetida: a
+    # tipografia é o que o olho reconhece primeiro.
+    interfaces = [t.interface[0] for t in TEMAS.values() if t.interface]
+    titulos = [t.titulos[0] for t in TEMAS.values() if t.titulos]
+    checar(
+        len(interfaces) >= 5 and len(set(interfaces)) == len(interfaces),
+        f"os jogos com letra de interface não repetem a de outro ({interfaces})",
+    )
+    checar(
+        len(set(titulos)) == len(titulos) and TEMAS["Elden Ring"].titulos == ("Cinzel",)
+        and TEMAS["Red Dead"].titulos == ("Rye",),
+        f"e os títulos próprios também não ({titulos})",
+    )
+    checar(
+        all(
+            t.ui_font_candidates[-len(design_fontes_ui()):] == design_fontes_ui()
+            and t.display_candidates[-len(t.font_candidates):] == t.font_candidates
+            for t in TEMAS.values()
+        ),
+        "a neutra e a fonte do tema continuam de reserva no fim de cada cadeia",
+    )
+    checar(
+        not TEMAS["GTA"].interface and not TEMAS["GTA"].titulos
+        and not TEMAS["Genérico / Outro"].interface,
+        "o GTA fica sem (as letras dele não são livres), e o neutro com a neutra",
+    )
+
+
+def design_fontes_ui() -> tuple[str, ...]:
+    from pipboy import design
+
+    return design.FONTES_UI
+
+
 def main() -> int:
     global _falhas
     for teste in (
@@ -2681,6 +2750,7 @@ def main() -> int:
         teste_correcao_de_palavra,
         teste_teto_do_intervalo,
         teste_lancamento_sem_console,
+        teste_fontes_embutidas,
     ):
         try:
             teste()

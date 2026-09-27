@@ -52,7 +52,7 @@ Cada jogo tem o seu ambiente. A troca é imediata, sem reiniciar o programa.
 | FPS / Multiplayer | Rede tática de esquadrão: grafite de oliva, laranja de sinalização e o enquadramento de um visor |
 | Genérico / Outro | Tema neutro escuro para qualquer jogo |
 
-Cada ambiente tem também uma **atmosfera** — varredura, grão, vinheta, partículas, interferência e a forma dos cantos — sintetizada com o QPainter. Não há textura, arte, logotipo ou fonte de terceiros no repositório: o que caracteriza um jogo na tela não é a cor, é o material, e material se desenha. A intensidade tem três níveis na coluna lateral (**Completa**, **Discreta**, **Desligada**), porque varredura e cintilação são obstáculo real para baixa visão.
+Cada ambiente tem também uma **atmosfera** — varredura, grão, vinheta, partículas, interferência e a forma dos cantos — sintetizada com o QPainter. Não há textura, arte ou logotipo de terceiros no repositório: o que caracteriza um jogo na tela não é a cor, é o material, e material se desenha. As únicas peças que vêm de fora são fontes livres (veja *Tipografia de cada jogo*, abaixo). A intensidade tem três níveis na coluna lateral (**Completa**, **Discreta**, **Desligada**), porque varredura e cintilação são obstáculo real para baixa visão.
 
 **Cada ambiente tem uma camada que só ele tem.** É o que impede um jogo de ser outro com outra cor, e foi a régua que mostrou onde isso faltava: *Skyrim* media 2,87 do tema neutro, e a rádio pirata do *GTA* media 4,57 do grimório do *RPG* — dois fundos escuros parecidos e nada que dissesse de que jogo eram. Hoje a crônica nórdica tem a **aurora** cruzando o alto do céu, o grimório tem o **selo** arcano desenhado na página, a rádio tem a **linha do horizonte** de neon com o brilho subindo dela, o velho oeste tem os **riscos** verticais de uma película gasta e o visor tático tem as **cantoneiras**. Nenhuma delas custa por quadro: todas vão no pixmap do vidro, que só se refaz ao mudar de tamanho ou de tema. As paletas foram junto — gelo no lugar do ardósia, beringela no lugar do índigo, ouro sobre quase preto — e o par mais parecido da tabela passou de **2,87 para 5,27**.
 
@@ -65,6 +65,23 @@ Na primeira execução, quem tem **"Efeitos de animação" desligado no Windows*
 Ao lado dela, **Tamanho do texto** (Padrão, Grande, Maior) multiplica a rampa tipográfica inteira — e junto com ela a coluna lateral, que é uma coluna de texto e só trocaria "pequeno demais" por "cortado" se ficasse parada. Vale na janela, no caderno, no histórico e na cápsula, porque toda a tipografia do programa passa por um ponto só. Os dois controles de apresentação são os **únicos que continuam livres durante a sessão**: o travamento existe para o que vai na abertura da conexão (jogo, nível, microfone), e letra e atmosfera não vão a lugar nenhum — quem precisa de letra maior para ler a conversa precisa disso durante a conversa, não depois dela.
 
 O jogo escolhido define quatro coisas de uma vez: a aparência, o contexto linguístico enviado ao modelo (que inglês esperar naquele título), o nome do assistente no registro e a primeira persona da lista — a persona temática. As personas gerais (Assistente Amigável, Instrutor Rígido, Professor Nativo) continuam disponíveis em qualquer jogo.
+
+### Tipografia de cada jogo
+
+A letra é o que o olho reconhece primeiro, e era por aproximação: Consolas no lugar do terminal, Bahnschrift no lugar da Night City, Segoe nos controles dos dez. Agora o programa traz fontes livres (OFL) escolhidas pelo que os próprios jogos usam, ou pelo que mais se parece com isso — e a escolha virou um sistema de três níveis por tema: a letra dos **títulos** (marca, saudação, anúncios), a de **ler** (a fala do assistente) e a dos **controles**.
+
+| Jogo | Títulos e fala | Controles |
+| --- | --- | --- |
+| Fallout | Share Tech Mono — a do Pip-Boy do Fallout 4 | Roboto Condensed — a dos rótulos do mesmo Pip-Boy |
+| Elden Ring | Cinzel nos títulos, a romana de inscrição mais próxima da dos títulos do jogo | neutra |
+| Skyrim | Jost, parente livre da Futura dos menus | Jost |
+| The Witcher 3 | Georgia | D-DIN — a interface do jogo é um DIN |
+| Red Dead | Rye nos títulos, o tipo de madeira dos cartazes | neutra |
+| Cyberpunk 2077 | Rajdhani — a da interface do jogo | Rajdhani |
+| RPG | IM FELL English, tipo de livro antigo | neutra |
+| FPS | Barlow Condensed — a do Battlefield 6 deriva dela | Barlow Condensed |
+
+A regra antiga — controles sempre na letra neutra — continua valendo para letra de título: serifa de inscrição e tipo de madeira não servem para rótulo de nove pontos. Mas quando o jogo tem uma letra de **interface**, desenhada para exatamente isso, a neutra era só a letra de outro produto. Duas regras acompanham: negrito só onde a família tem negrito (a Rye engrossada na marra vira borrão), e um **ajuste óptico** — o `font-size-adjust` do CSS —, que mede a altura-x de cada família e a iguala à da letra neutra, para a letra de ler não sair maior nem menor só por trocar de jogo. O GTA fica nas letras de antes: Pricedown e Chalet não são livres.
 
 ### Adicionar um jogo
 
@@ -365,6 +382,13 @@ Sem garantia de espécie alguma — é um projeto pessoal, não um produto.
 Ela vale para **este código**. Os jogos citados nos temas — Fallout, Elden
 Ring, Skyrim, The Witcher, Red Dead, GTA, Cyberpunk 2077 — são marcas dos seus
 respectivos estúdios, e este projeto não tem afiliação com nenhum deles nem com
-o Google. Nenhum recurso dos jogos é usado: cada paleta, fonte, atmosfera e
-blip é sintetizado por código, e é por isso que não há um único arquivo binário
-no repositório.
+o Google. Nenhum recurso dos jogos é usado: cada paleta, atmosfera e blip é
+sintetizado por código.
+
+Os únicos arquivos binários do repositório são as fontes de `pipboy/fontes/`,
+todas livres sob a [SIL Open Font License 1.1](https://openfontlicense.org), cada
+família com o texto da licença ao lado, como a licença exige. Elas vêm do
+[google/fonts](https://github.com/google/fonts) — Share Tech Mono, Roboto
+Condensed, Cinzel, Jost, Rye, Rajdhani, Barlow Condensed e IM FELL English — e do
+[datto-d-din](https://github.com/amcchord/datto-d-din) (D-DIN, © Datto Inc.). A
+MIT deste código não se aplica a elas; a OFL, sim.

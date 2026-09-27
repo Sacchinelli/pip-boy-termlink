@@ -10,9 +10,9 @@ letreiro de missão cumprida (GTA), a medalha de pontos do abate (Battlefield):
 quem jogou reconhece o anúncio antes de ler. Aprender uma palavra é a conquista
 deste programa, e ela ganha o anúncio que o jogo daria.
 
-Pela regra de ``ornamentos``: nada de imagem, fonte ou logotipo de terceiros —
-só ``QPainter`` sobre a paleta do tema, e o que se evoca é o estilo, não a
-marca. Cada estilo é uma função de (pintor, painel, recado, contexto) que não
+Pela regra de ``ornamentos``: nada de imagem ou logotipo de terceiros — só
+``QPainter`` sobre a paleta do tema e as fontes livres de ``fontes.py`` —, e o
+que se evoca é o estilo, não a marca. Cada estilo é uma função de (pintor, painel, recado, contexto) que não
 guarda estado; toda letra passa por ``_escrever``, que anota onde caiu e em que
 cor, e é por essa anotação que a suíte mede o contraste sobre o que foi
 pintado embaixo.
@@ -83,6 +83,8 @@ class Contexto:
     familia_tema: str
     familia_ui: str
     escala: float = 1.0
+    # A letra dos títulos do jogo (ver GameTheme.titulos); vazia, a do tema.
+    familia_titulo: str = ""
     entrada: float = 1.0
     vida: float = 0.5
     movimento: bool = True
@@ -91,9 +93,13 @@ class Contexto:
 
     def fonte(
         self, tamanho: float, *, tema: bool = True, negrito: bool = False,
-        italico: bool = False, espaco: float = 0.0,
+        italico: bool = False, espaco: float = 0.0, titulo: bool = False,
     ) -> QFont:
-        fonte = QFont(self.familia_tema if tema else self.familia_ui)
+        if titulo and self.familia_titulo:
+            familia = self.familia_titulo
+        else:
+            familia = self.familia_tema if tema else self.familia_ui
+        fonte = QFont(familia)
         fonte.setPointSizeF(tamanho * self.escala)
         fonte.setBold(negrito)
         fonte.setItalic(italico)
@@ -109,6 +115,7 @@ def contexto_de(provedor: Any, **ajustes: Any) -> Contexto:
         tema=provedor.tema,
         familia_tema=provedor.fonte("corpo", ui=False).family(),
         familia_ui=corpo.family(),
+        familia_titulo=provedor.fonte("display", ui=False).family(),
         escala=corpo.pointSizeF() / design.TIPO["corpo"].tamanho,
         **ajustes,
     )
@@ -302,8 +309,8 @@ def _graca(pintor: QPainter, painel: QRectF, r: Recado, c: Contexto) -> QRectF:
     Surge devagar e se aproxima quase nada enquanto está na tela."""
     t = c.tema
     veu = _escuro(t, 0.6)
-    manchete_f = c.fonte(9, espaco=3.0)
-    termo_f = c.fonte(26, espaco=3.0)
+    manchete_f = c.fonte(9, espaco=3.0, titulo=True)
+    termo_f = c.fonte(26, espaco=3.0, titulo=True)
     traducao_f = c.fonte(11, italico=True)
     limite = painel.width() * 0.6
     termo = _encurtar(termo_f, r.termo.upper(), limite)
@@ -459,7 +466,7 @@ def _cartaz(pintor: QPainter, painel: QRectF, r: Recado, c: Contexto) -> QRectF:
     régua dupla dos cartazes embaixo dela."""
     t = c.tema
     fundo = _escuro(t, 0.45)
-    manchete_f = c.fonte(10, negrito=True, espaco=1.5)
+    manchete_f = c.fonte(11, espaco=1.5, titulo=True)
     termo_f = c.fonte(16, negrito=True)
     traducao_f = c.fonte(10, italico=True)
     limite = painel.width() * 0.45

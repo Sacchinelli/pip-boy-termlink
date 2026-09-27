@@ -855,6 +855,95 @@ def main() -> int:
     janela.resize(tamanho_antes)
     aplicacao.processEvents()
 
+    print("cada jogo escreve na letra dele")
+    from pipboy import design as design_letra
+    from pipboy.interface.fontes import (
+        AJUSTE_MAXIMO,
+        AJUSTE_MINIMO,
+        ajuste_optico,
+        registrar_fontes,
+    )
+
+    familias_embutidas = registrar_fontes()
+    checar(
+        set(familias_embutidas) >= {
+            "Share Tech Mono", "Roboto Condensed", "Cinzel", "Jost", "D-DIN", "Rye",
+            "Rajdhani", "Barlow Condensed", "IM FELL English",
+        },
+        f"as nove famílias do programa entram no banco do Qt ({familias_embutidas})",
+    )
+    checar(registrar_fontes() == familias_embutidas, "e registrar de novo não duplica nada")
+
+    jogo_letra = janela.campo_jogo.currentText()
+    janela.campo_jogo.setCurrentText("Red Dead")
+    aplicacao.processEvents()
+    titulo_rdr = janela.fonte("display", ui=False)
+    checar(
+        titulo_rdr.family() == "Rye" and not titulo_rdr.bold(),
+        "no Red Dead, os títulos no tipo de madeira — sem o negrito falso que a Rye não tem",
+    )
+    checar(
+        janela.fonte("corpo", ui=False).family() != "Rye"
+        and janela.fonte("rotulo").family() != "Rye",
+        "e a fala e os controles continuam numa letra de ler",
+    )
+    checar(
+        janela.marca.font().family() == "Rye"
+        and janela.conversa.tela_inicial.titulo.font().family() == "Rye",
+        "a marca da lateral e a saudação vestem a letra do título",
+    )
+    janela.campo_jogo.setCurrentText("Cyberpunk 2077")
+    aplicacao.processEvents()
+    checar(
+        janela.fonte("rotulo").family() == "Rajdhani"
+        and janela.fonte("corpo", ui=False).family() == "Rajdhani",
+        "na Night City, controles e fala em Rajdhani, a letra da interface do jogo",
+    )
+    janela.campo_jogo.setCurrentText("Elden Ring")
+    aplicacao.processEvents()
+    checar(
+        janela.fonte("display", ui=False).family() == "Cinzel"
+        and janela.fonte("display", ui=False).bold(),
+        "no Elden Ring, a romana de inscrição nos títulos, com o negrito que ela tem",
+    )
+    checar(
+        janela.fonte("rotulo").family() not in familias_embutidas,
+        "e os controles na neutra: letra de título não serve para rótulo de nove pontos",
+    )
+    janela.campo_jogo.setCurrentText("GTA")
+    aplicacao.processEvents()
+    checar(
+        all(
+            janela.fonte(papel, ui=ui).family() not in familias_embutidas
+            for papel, ui in (("rotulo", True), ("corpo", False), ("display", False))
+        ),
+        "o GTA segue nas letras de antes: as dele não são livres",
+    )
+
+    # O ajuste óptico: a letra de ler no corpo aparente da referência; o
+    # título, no corpo que o desenho dele pede.
+    checar(
+        all(AJUSTE_MINIMO <= ajuste_optico(f) <= AJUSTE_MAXIMO for f in familias_embutidas),
+        "o ajuste óptico de toda família fica dentro dos limites",
+    )
+    janela.campo_jogo.setCurrentText("Skyrim")
+    aplicacao.processEvents()
+    fala_skyrim = janela.fonte("corpo", ui=False)
+    esperado_skyrim = design_letra.escalar(
+        design_letra.TIPO["corpo"].tamanho, janela._escala_texto * ajuste_optico(fala_skyrim.family())
+    )
+    checar(
+        fala_skyrim.family() == "Jost" and fala_skyrim.pointSize() == esperado_skyrim,
+        f"no norte, a fala em Jost, no corpo aparente da referência ({fala_skyrim.pointSize()} pt)",
+    )
+    checar(
+        janela.fonte("display", ui=False).pointSize()
+        == design_letra.escalar(design_letra.TIPO["display"].tamanho, janela._escala_texto),
+        "e o título no corpo que o desenho dele pede, sem ajuste",
+    )
+    janela.campo_jogo.setCurrentText(jogo_letra)
+    aplicacao.processEvents()
+
     print("a tela inicial é o menu do jogo")
     from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_MENU
 
@@ -4526,9 +4615,13 @@ def main() -> int:
         for x in range(imagem_chip.width())
         if abs(imagem_chip.pixelColor(x, y).red() - cor_rotulo.red())
         + abs(imagem_chip.pixelColor(x, y).green() - cor_rotulo.green())
-        + abs(imagem_chip.pixelColor(x, y).blue() - cor_rotulo.blue()) < 30
+        + abs(imagem_chip.pixelColor(x, y).blue() - cor_rotulo.blue()) < 45
     )
-    checar(na_cor > 5, f"e o rótulo é escrito na cor legível sobre a tinta ({na_cor} px)")
+    # Poucos pixels bastam: sem as fontes do sistema, a suíte desenha numa
+    # das fontes embutidas, de traço fino, e só o miolo das hastes chega à
+    # cor cheia. A cor apagada do chip desligado fica a ~200 desta — não
+    # entra na conta com folga nenhuma.
+    checar(na_cor > 2, f"e o rótulo é escrito na cor legível sobre a tinta ({na_cor} px)")
     chip_sel.setChecked(marcado_antes)
     janela.campo_jogo.setCurrentText("Genérico / Outro")
     aplicacao.processEvents()

@@ -128,6 +128,14 @@ class GameTheme:
     accent: str
     alert: str
     info: str
+    # A letra da INTERFACE do jogo, quando ele tem uma: é a dos controles
+    # (ver ``ui_font_candidates``). Vazia, a neutra de sempre.
+    interface: tuple[str, ...] = ()
+    # A letra dos TÍTULOS — a marca, a saudação, o anúncio —, quando o jogo
+    # titula numa letra que não serve para ler uma fala inteira: a romana de
+    # inscrição da Terra Intermédia, o tipo de madeira dos cartazes. Vazia,
+    # os títulos usam a fonte do tema.
+    titulos: tuple[str, ...] = ()
 
     # --- Cores derivadas -------------------------------------------------
     # Calculadas, nunca declaradas. Duas famílias:
@@ -143,13 +151,24 @@ class GameTheme:
 
     @property
     def ui_font_candidates(self) -> tuple[str, ...]:
-        """Fonte dos controles — neutra e igual em todos os temas.
+        """Fonte dos controles: a de interface do jogo, ou a neutra.
 
-        A fonte do tema assina a marca e a fala do assistente. Rótulo, botão e
-        campo usam esta: é assim que um produto com skins funciona, e é o que
-        separa "aplicativo com tema" de "aplicativo feito na fonte do tema".
+        A regra antiga era a neutra nos dez, para separar "aplicativo com
+        tema" de "aplicativo feito na fonte do tema" — e continua valendo para
+        a letra de TÍTULO: serifa de inscrição e tipo de madeira não servem
+        para rótulo de nove pontos. Mas alguns jogos têm uma letra de
+        INTERFACE, desenhada para exatamente isso — a Futura Condensed dos
+        menus do Skyrim, o DIN do Witcher, a Rajdhani da Night City, a
+        Roboto Condensed do Pip-Boy —, e ali a neutra era só a letra de outro
+        produto. Com a interface declarada, ela vem primeiro; a neutra fica de
+        reserva.
         """
-        return design.FONTES_UI
+        return self.interface + design.FONTES_UI
+
+    @property
+    def display_candidates(self) -> tuple[str, ...]:
+        """Fonte dos títulos: a declarada para eles, e depois a do tema."""
+        return self.titulos + self.font_candidates
 
     @property
     def surface(self) -> str:
@@ -276,7 +295,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         ),
         saudacao="Terminal pronto",
         convite="> digite uma pergunta_",
-        font_candidates=("Consolas", "Courier New"),
+        font_candidates=("Share Tech Mono", "Consolas", "Courier New"),
         shell="#161a15",
         screen="#0a1208",
         primary="#4dff7a",
@@ -285,6 +304,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         accent="#ffb000",
         alert="#ff5c5c",
         info="#7ad4ff",
+        interface=("Roboto Condensed",),
     ),
     GameTheme(
         name="Elden Ring",
@@ -322,6 +342,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         accent="#e0a24a",
         alert="#a33b2a",
         info="#9fb8c8",
+        titulos=("Cinzel",),
     ),
     GameTheme(
         name="Skyrim",
@@ -346,7 +367,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         ),
         saudacao="O norte está à escuta",
         convite="Perguntar ao guia…",
-        font_candidates=("Palatino Linotype", "Book Antiqua", "Sylfaen", "Times New Roman"),
+        font_candidates=("Jost", "Palatino Linotype", "Book Antiqua", "Sylfaen", "Times New Roman"),
         # Gelo, e não o cinza-azulado de escritório: a crônica nórdica media
         # 2,87 do tema deliberadamente NEUTRO — a menor distância da tabela
         # inteira (ferramentas/distancia_dos_temas.py). Os dois partiam do
@@ -360,6 +381,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         accent="#d8c48a",
         alert="#b0483c",
         info="#8fd0b0",
+        interface=("Jost",),
     ),
     GameTheme(
         name="The Witcher 3",
@@ -401,6 +423,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         accent="#c0392b",
         alert="#e05a3a",
         info="#7fa8c0",
+        interface=("D-DIN",),
     ),
     GameTheme(
         name="Red Dead",
@@ -437,6 +460,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         accent="#d8a13a",
         alert="#c0392b",
         info="#9ec4a0",
+        titulos=("Rye",),
     ),
     GameTheme(
         name="GTA",
@@ -495,7 +519,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         ),
         saudacao="Link neural estável",
         convite="// transmitir pergunta",
-        font_candidates=("Bahnschrift", "Consolas", "Segoe UI"),
+        font_candidates=("Rajdhani", "Bahnschrift", "Consolas", "Segoe UI"),
         shell="#08080a",
         screen="#101014",
         primary="#fcee0a",
@@ -504,6 +528,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         accent="#00f0ff",
         alert="#ff003c",
         info="#ff4fd8",
+        interface=("Rajdhani",),
     ),
     GameTheme(
         name="RPG / Aventura (geral)",
@@ -526,7 +551,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         ),
         saudacao="A aventura começa aqui",
         convite="Perguntar ao mestre…",
-        font_candidates=("Sitka Text", "Sylfaen", "Georgia", "Times New Roman"),
+        font_candidates=("IM FELL English", "Sitka Text", "Sylfaen", "Georgia", "Times New Roman"),
         # Beringela, e não índigo: o roxo deste grimório foi para o lado
         # QUENTE do violeta, e o da rádio pirata para o frio. Era o mesmo roxo
         # nos dois, e nenhum dos dois era escolhido por causa dele.
@@ -570,7 +595,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         # Gothic, uma grotesca americana de sinalização industrial que nenhum
         # outro tema usa — a Tahoma, que vinha em primeiro, é a irmã de escritório
         # da Segoe UI do tema neutro, e era parte do problema.
-        font_candidates=("Saira Condensed", "Franklin Gothic Medium", "Tahoma", "Segoe UI"),
+        font_candidates=("Barlow Condensed", "Saira Condensed", "Franklin Gothic Medium", "Tahoma", "Segoe UI"),
         # Grafite com fundo de oliva, e não o cinza-azulado de antes: medido
         # contra o tema deliberadamente NEUTRO, o visor tático estava a 3,97 de
         # distância perceptual dele (ferramentas/distancia_dos_temas.py) — era
@@ -587,6 +612,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         # no AA por uma casa decimal.
         alert="#d81f28",
         info="#79c7e8",
+        interface=("Barlow Condensed",),
     ),
     GameTheme(
         name="Genérico / Outro",

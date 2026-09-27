@@ -8,9 +8,9 @@ régua dupla de cartaz de procurado no velho oeste, o barramento de dados
 recortado do Cyberpunk. Quem jogou reconhece o traço antes de ler o título.
 
 Tudo aqui é desenho de ``QPainter`` sobre a paleta do tema, pela mesma regra do
-resto do programa: nenhuma textura, imagem, fonte ou logotipo de terceiros. O
-que se evoca é o ESTILO dos menus — o vocabulário de ornamentos —, e não a
-marca de ninguém.
+resto do programa: nenhuma textura, imagem ou logotipo de terceiros — as
+únicas peças de fora são fontes livres, e só em ``fontes.py``. O que se evoca é
+o ESTILO dos menus — o vocabulário de ornamentos —, e não a marca de ninguém.
 
 Cada estilo é uma função pura de (pintor, caixa, tema): não guarda estado, não
 conhece widget e não depende de nada que só exista depois da montagem. É o que

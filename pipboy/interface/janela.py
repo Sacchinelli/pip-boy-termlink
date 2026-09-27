@@ -89,6 +89,7 @@ from .componentes import (
 from .cursor import CampoMagnetico, RastreadorDeCursor, abraco_de, centro_de
 from .dialogo import avisar
 from .estilo import RAIO_PADRAO, RAIO_POR_FORMA, folha_da_janela
+from .fontes import ajuste_optico, registrar_fontes, tem_negrito
 from .moldura import (
     GripsRedimensionamento,
     aplicar_cantos_do_sistema,
@@ -220,6 +221,9 @@ class Janela(QWidget):
 
         self._tema: GameTheme = theme_for(self._prefs.jogo)
         self._atmosfera = atmosfera_de(self._tema.name)
+        # As fontes que acompanham o programa entram antes de a janela
+        # perguntar quais existem.
+        registrar_fontes()
         self._instaladas = set(QFontDatabase.families())
         self._mono = self._primeira_instalada(FONTES_MONO)
 
@@ -430,11 +434,19 @@ class Janela(QWidget):
         alternativa a manter em paralelo.
         """
         tipo = design.TIPO[papel]
-        familia = self._primeira_instalada(
-            self._tema.ui_font_candidates if ui else self._tema.font_candidates
-        )
-        fonte = QFont(familia, design.escalar(tipo.tamanho, self._escala_texto))
-        fonte.setBold(tipo.peso == "bold")
+        if ui:
+            candidatas = self._tema.ui_font_candidates
+        elif papel == "display":
+            # Os títulos na letra de título do jogo, quando ele tem uma.
+            candidatas = self._tema.display_candidates
+        else:
+            candidatas = self._tema.font_candidates
+        familia = self._primeira_instalada(candidatas)
+        # A letra de LER no corpo aparente da de referência (ver
+        # fontes.ajuste_optico); o título fica no corpo que o desenho dele pede.
+        ajuste = 1.0 if papel == "display" else ajuste_optico(familia)
+        fonte = QFont(familia, design.escalar(tipo.tamanho, self._escala_texto * ajuste))
+        fonte.setBold(tipo.peso == "bold" and tem_negrito(familia))
         fonte.setItalic(tipo.estilo == "italic")
         return fonte
 
