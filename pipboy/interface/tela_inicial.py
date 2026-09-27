@@ -27,6 +27,7 @@ from __future__ import annotations
 import html
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt
@@ -53,6 +54,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import design
+from ..dicas import dica_do_dia
 from .componentes import Holofote, RotuloDecifravel, acender_borda, caminho_forma
 from .movimento import animar_entrada
 from .ornamentos import estilo_de_selecao, pintar_selecao
@@ -728,6 +730,11 @@ class TelaInicial(QWidget):
         self._fileira_fichas.addStretch(1)
         pilha.addLayout(self._fileira_fichas)
 
+        # A dica do dia, no tom do jogo (ver pipboy/dicas.py): a linha da tela
+        # de carregamento, que ensina o que ninguém descobre sozinho.
+        self.dica = rotulo("inicialDica")
+        self.dica.setTextFormat(Qt.TextFormat.RichText)
+
         rodape = QWidget()
         base = QVBoxLayout(rodape)
         base.setContentsMargins(0, design.ESPACO_MD, 0, 0)
@@ -747,7 +754,8 @@ class TelaInicial(QWidget):
 
         # Os blocos, na ordem em que entram em cascata.
         self._blocos: list[QWidget] = [
-            self.glifo, self.titulo, self.corpo, self.sequencia, fileira, exemplos, rodape,
+            self.glifo, self.titulo, self.corpo, self.sequencia, fileira, exemplos, self.dica,
+            rodape,
         ]
         for bloco in self._blocos:
             coluna.addWidget(bloco)
@@ -777,7 +785,7 @@ class TelaInicial(QWidget):
             self.titulo.setText(t.saudacao)
         self.secao_exemplos.setFont(janela.fonte_de_secao())
         for item, papel in (
-            (self.corpo, "corpo"), (self.sequencia, "legenda"),
+            (self.corpo, "corpo"), (self.sequencia, "legenda"), (self.dica, "legenda"),
             (self.atalhos, "micro"), (self.diagnostico, "micro"),
         ):
             item.setFont(janela.fonte(papel, ui=papel != "vocab"))
@@ -844,6 +852,24 @@ class TelaInicial(QWidget):
         self.atalhos.setText("   ·   ".join(partes))
         self.diagnostico.setText(resumo.diagnostico)
 
+        # A dica: só com os atalhos globais que existem nesta máquina.
+        marcadores = {"iniciar/parar": "iniciar", "mudo": "mudo", "áudio do jogo": "audio"}
+        teclas = {
+            marcadores[acao]: tecla_legivel(combinacao)
+            for combinacao, acao in resumo.atalhos
+            if acao in marcadores
+        }
+        rotulo_dica, frase_dica = dica_do_dia(t.name, t.assistant_name, teclas, date.today())
+        self.dica.setVisible(bool(frase_dica))
+        cor_rotulo = design.garantir_contraste(t.accent_text, t.surface)
+        cor_frase = design.garantir_contraste(t.text_muted, t.surface)
+        familia_rotulo = janela.fonte_de_secao().family()
+        self.dica.setText(
+            f"<span style=\"color:{cor_rotulo}; font-family:'{html.escape(familia_rotulo)}';"
+            f" font-weight:600;\">{html.escape(rotulo_dica)}</span>"
+            f"&nbsp;&nbsp;<span style=\"color:{cor_frase};\">{html.escape(frase_dica)}</span>"
+        )
+
         self.setStyleSheet(f"""
             QLabel {{ background: transparent; }}
             #inicialGlifo {{ color: {t.accent_text}; }}
@@ -882,7 +908,7 @@ class TelaInicial(QWidget):
         )
         for rotulo in (
             self.glifo, self.titulo, self.corpo, self.sequencia, self.secao_exemplos,
-            self.atalhos, self.diagnostico,
+            self.dica, self.atalhos, self.diagnostico,
         ):
             rotulo.setAlignment(alinhamento)
         self._externa.setStretch(0, 0 if esquerda else 1)

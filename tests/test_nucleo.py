@@ -2712,6 +2712,64 @@ def design_fontes_ui() -> tuple[str, ...]:
     return design.FONTES_UI
 
 
+def teste_dicas() -> None:
+    """As dicas de tela de carregamento: uma voz por jogo, e nenhuma promessa falsa."""
+    print("dicas de carregamento")
+    from datetime import date, timedelta
+
+    from pipboy.dicas import (
+        DICAS,
+        MARCADORES,
+        TAMANHO_MAXIMO,
+        dica_do_dia,
+        dicas_do_jogo,
+        marcadores_de,
+    )
+    from pipboy.themes import TEMAS
+
+    checar(set(DICAS) == set(TEMAS), "todo jogo tem as suas dicas, e só os jogos que existem")
+    rotulos = [d.rotulo for nome, d in DICAS.items() if nome not in ("Skyrim", "Genérico / Outro")]
+    checar(
+        len(set(rotulos)) == len(rotulos),
+        f"cada jogo apresenta a dica com o rótulo dele ({rotulos})",
+    )
+    checar(all(len(d.frases) >= 4 for d in DICAS.values()), "com ao menos quatro frases cada")
+    teclas = {"iniciar": "Ctrl+Alt+P", "mudo": "Ctrl+Alt+M", "audio": "Ctrl+Alt+G"}
+    longas = [
+        f for nome, d in DICAS.items() for f in dicas_do_jogo(nome, TEMAS[nome].assistant_name, teclas)
+        if len(f) > TAMANHO_MAXIMO
+    ]
+    checar(not longas, f"e cada uma cabe numa linha de rodapé ({longas[:1]})")
+    desconhecidos = {
+        m for d in DICAS.values() for f in d.frases for m in marcadores_de(f)
+    } - MARCADORES - {"assistente"}
+    checar(not desconhecidos, f"só marcadores que existem ({desconhecidos})")
+
+    # Sem atalhos globais, nenhuma dica cita um: ela prometeria uma tecla
+    # que não faz nada nesta máquina.
+    sem_globais = [f for nome in DICAS for f in dicas_do_jogo(nome, "X", {})]
+    checar(
+        sem_globais and not any("Ctrl+Alt" in f or "{" in f for f in sem_globais),
+        "sem atalhos globais, nenhuma dica fala de um",
+    )
+    com_globais = dicas_do_jogo("FPS / Multiplayer", "COMANDO", teclas)
+    checar(
+        any("Ctrl+Alt+P" in f and "Ctrl+Alt+M" in f for f in com_globais),
+        "com eles, a dica traz a tecla que está configurada",
+    )
+    checar(
+        any("COMANDO" in f for f in com_globais) and not any("{assistente}" in f for f in com_globais),
+        "e chama o assistente pelo nome dele no tema",
+    )
+    hoje = date(2026, 9, 27)
+    do_dia = {dica_do_dia("Fallout", "PIP-BOY", teclas, hoje + timedelta(days=n))[1] for n in range(4)}
+    checar(
+        dica_do_dia("Fallout", "PIP-BOY", teclas, hoje) == dica_do_dia("Fallout", "PIP-BOY", teclas, hoje)
+        and len(do_dia) == 4,
+        "a mesma dica o dia inteiro, e outra a cada dia",
+    )
+
+
 def main() -> int:
     global _falhas
     for teste in (
@@ -2751,6 +2809,7 @@ def main() -> int:
         teste_teto_do_intervalo,
         teste_lancamento_sem_console,
         teste_fontes_embutidas,
+        teste_dicas,
     ):
         try:
             teste()

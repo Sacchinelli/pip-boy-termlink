@@ -969,6 +969,47 @@ def main() -> int:
     janela.campo_jogo.setCurrentText(jogo_letra)
     aplicacao.processEvents()
 
+    print("a tela inicial traz a dica do jogo")
+    from datetime import date as DiaDica
+
+    from pipboy.dicas import DICAS as DICAS_TELA
+    from pipboy.dicas import dica_do_dia as dica_do_dia_tela
+
+    tela_dica = janela.conversa.tela_inicial
+    jogo_dica = janela.campo_jogo.currentText()
+    janela.campo_jogo.setCurrentText("Elden Ring")
+    aplicacao.processEvents()
+    janela.conversa.atualizar_inicial()
+    resumo_dica = janela.resumo_inicial()
+    checar(
+        "MENSAGEM DEIXADA" in tela_dica.dica.text() and not tela_dica.dica.isHidden(),
+        "no Elden Ring, a dica chega como mensagem deixada no chão",
+    )
+    _, frase_esperada = dica_do_dia_tela(
+        "Elden Ring", janela.tema.assistant_name,
+        {
+            {"iniciar/parar": "iniciar", "mudo": "mudo", "áudio do jogo": "audio"}[acao]:
+            tecla_legivel(tecla)
+            for tecla, acao in resumo_dica.atalhos
+        },
+        DiaDica.today(),
+    )
+    import html as html_dica
+
+    checar(
+        html_dica.escape(frase_esperada) in tela_dica.dica.text(),
+        "e é a dica do dia, com as teclas desta máquina",
+    )
+    janela.campo_jogo.setCurrentText("Red Dead")
+    aplicacao.processEvents()
+    checar(
+        DICAS_TELA["Red Dead"].rotulo in tela_dica.dica.text()
+        and bool(tela_dica.dica.alignment() & Qt.AlignmentFlag.AlignLeft),
+        "trocar de jogo troca a voz, e a dica encosta à esquerda com a coluna de pausa",
+    )
+    janela.campo_jogo.setCurrentText(jogo_dica)
+    aplicacao.processEvents()
+
     print("a tela inicial é o menu do jogo")
     from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_MENU
 
