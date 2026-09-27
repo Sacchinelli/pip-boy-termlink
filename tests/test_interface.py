@@ -4129,6 +4129,51 @@ def main() -> int:
     janela.campo_jogo.setCurrentText("Fallout")
     aplicacao.processEvents()
 
+    print("o botão principal veste o jogo")
+    from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_PRINCIPAL
+    from pipboy.interface.ornamentos import SELECOES as MARCAS_PRINCIPAL
+    from pipboy.interface.ornamentos import estilo_do_principal
+
+    principais = {nome: r.botao_principal for nome, r in RECEITAS_PRINCIPAL.items()}
+    checar(
+        all(e == "" or e in MARCAS_PRINCIPAL for e in principais.values()),
+        "todo botão principal veste uma marca que existe, ou a placa de sempre",
+    )
+    checar(
+        principais["Red Dead"] == "pincelada"
+        and not principais["Fallout"] and not principais["Cyberpunk 2077"],
+        "no velho oeste ele é pincelada; no terminal e no Cyberpunk, a placa já é a cara do jogo",
+    )
+
+    acao = janela.botao_acao
+    janela._definir_controles(ativa=False)
+    janela.campo_jogo.setCurrentText("Red Dead")
+    aplicacao.processEvents()
+    checar(estilo_do_principal() == "pincelada", "no Red Dead, o principal passa a ser pincelado")
+    checar(
+        acao._cores()[0].alpha() == 0,
+        "e sem placa em volta: a tinta vai direto na tela, e não num adesivo",
+    )
+    imagem_acao = acao.grab().toImage()
+    meio_acao = imagem_acao.pixelColor(imagem_acao.width() // 3, imagem_acao.height() // 2)
+    checar(
+        meio_acao.red() > meio_acao.green() + 40,
+        f"o botão de partir aparece em tinta vermelha ({meio_acao.name()})",
+    )
+    janela._definir_controles(ativa=True)
+    aplicacao.processEvents()
+    checar(
+        acao.variante == "perigo" and acao._cores()[0].alpha() == 255,
+        "com a sessão no ar, o botão de parar volta a ser a placa de alerta",
+    )
+    janela._definir_controles(ativa=False)
+    janela.campo_jogo.setCurrentText("Fallout")
+    aplicacao.processEvents()
+    checar(
+        estilo_do_principal() == "" and acao._cores()[0].name() == janela.tema.primary,
+        "no terminal, a placa cheia no verde do fósforo continua",
+    )
+
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()
     # nunca voltaria e a suíte penduraria. O tiro agendado é esse alguém.

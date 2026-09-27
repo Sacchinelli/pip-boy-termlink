@@ -99,6 +99,10 @@ class Atmosfera:
     # Como o item escolhido se marca (ver ornamentos.SELECOES); vazio, o
     # realce de sempre.
     selecao: str = ""
+    # A marca que o botão principal veste (um estilo de ornamentos.SELECOES);
+    # vazio, a placa cheia de sempre — que no terminal, no Cyberpunk e no
+    # tático já é a cara do jogo.
+    botao_principal: str = ""
 
     semente: int = 7
     # Cor de acento das camadas vivas; vazio usa o acento do tema.
@@ -117,6 +121,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
      brilho_texto=0.6,),
     # Luz dourada baixa e partículas subindo, contra pergaminho.
     "Elden Ring": Atmosfera(
+        botao_principal="brilho_dourado",
         selecao="brilho_dourado",
         divisoria="fio_de_ouro", moldura="graca", espacamento_titulo=2.5,
         grao=0.07, vinheta=0.66, brilho=0.26, brilho_y=0.82, fibras=0.05,
@@ -127,6 +132,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # para ver, e o que faltava para esta crônica não ser o tema neutro com
     # neve. O halo do fundo desceu: com a aurora no alto, os dois brigavam.
     "Skyrim": Atmosfera(
+        botao_principal="losangos",
         selecao="losangos",
         divisoria="nordica", moldura="placa", espacamento_titulo=2.0,
         grao=0.06, vinheta=0.58, brilho=0.10, brilho_y=0.72, aurora=0.6,
@@ -134,6 +140,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     ),
     # Couro e vela: grão grosso, halo quente lateral, brasas lentas.
     "The Witcher 3": Atmosfera(
+        botao_principal="brasa",
         selecao="brasa",
         divisoria="medalhao", moldura="ferragens", espacamento_titulo=1.0,
         grao=0.08, vinheta=0.64, brilho=0.18, brilho_y=0.35, fibras=0.06,
@@ -144,6 +151,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # chão quente com Elden Ring e Witcher; o que só o velho oeste tem não é
     # a cor, é o SUPORTE.
     "Red Dead": Atmosfera(
+        botao_principal="pincelada",
         selecao="pincelada",
         divisoria="cartaz", moldura="cartaz", espacamento_titulo=1.5,
         grao=0.10, vinheta=0.70, brilho=0.14, brilho_y=0.55, fibras=0.10,
@@ -153,6 +161,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # o pôr do sol de neon no horizonte — a imagem inteira deste ambiente, e
     # o que ele não tinha. O halo saiu do alto: o brilho agora sobe da linha.
     "GTA": Atmosfera(
+        botao_principal="letreiro",
         selecao="letreiro",
         divisoria="neon", moldura="neon", espacamento_titulo=0.5,
         grao=0.05, varredura=0.16, passo_varredura=4, vinheta=0.55,
@@ -172,6 +181,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # ele este ambiente e a rádio pirata eram dois fundos escuros arroxeados,
     # a 4,57 um do outro.
     "RPG / Aventura (geral)": Atmosfera(
+        botao_principal="iluminura",
         selecao="iluminura",
         divisoria="iluminura", moldura="pagina", espacamento_titulo=1.5,
         grao=0.06, vinheta=0.60, brilho=0.24, brilho_y=0.50, selo=0.85,

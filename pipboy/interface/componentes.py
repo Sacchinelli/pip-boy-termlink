@@ -70,7 +70,13 @@ from PySide6.QtWidgets import (
 
 from .. import design
 from .movimento import Transicao
-from .ornamentos import estilo_de_selecao, pintar_selecao
+from .ornamentos import (
+    ESTILOS_QUE_ENCHEM,
+    ESTILOS_SEM_PLACA,
+    estilo_de_selecao,
+    estilo_do_principal,
+    pintar_selecao,
+)
 
 
 # ------------------------------------------------------------------- Geometria
@@ -464,7 +470,22 @@ class Botao(QAbstractButton):
             )
 
         ligado = self.isCheckable() and self.isChecked()
-        if self.variante == "primario":
+        principal = estilo_do_principal()
+        if self.variante == "primario" and principal:
+            # O botão principal vestido pelo jogo: uma placa escura, e a marca
+            # pintada por cima em paintEvent. Os estilos de faixa e fio ganham
+            # um contorno no acento, para a placa continuar lendo como botão.
+            fundo, frente = QColor(p["surface_alta"]), QColor(p["text_muted"])
+            if principal in ESTILOS_SEM_PLACA:
+                # A tinta direto na tela: uma placa em volta da pincelada a
+                # fazia parecer adesivo, e não pintura.
+                fundo = QColor(0, 0, 0, 0)
+            contorno = (
+                None if principal in ESTILOS_QUE_ENCHEM
+                else QColor(design.misturar(p["border"], p["accent"], 0.65))
+            )
+            halo = QColor(p["accent"])
+        elif self.variante == "primario":
             fundo, frente, contorno = QColor(p["primary"]), QColor(p["on_primary"]), None
             halo = QColor(p["primary"])
         elif self.variante == "perigo":
@@ -552,7 +573,10 @@ class Botao(QAbstractButton):
         ).translated(self.deslocamento_ima)
         caminho = caminho_forma(area, self.forma, design.RAIO)
 
-        if self.isEnabled():
+        # Sem placa (a pincelada), não há o que clarear nem o que encher: o
+        # clarão viraria um retângulo opaco em volta da tinta.
+        sem_placa = fundo.alpha() == 0
+        if self.isEnabled() and not sem_placa:
             fundo = QColor(design.misturar(fundo.name(), "#ffffff", 0.12 * self._hover))
             fundo = QColor(design.misturar(fundo.name(), "#000000", 0.16 * self._pressao))
             if self._hover > 0.0:
@@ -573,13 +597,14 @@ class Botao(QAbstractButton):
             pintor.setPen(caneta)
             pintor.setBrush(Qt.BrushStyle.NoBrush)
             pintor.drawPath(caminho)
-        if (
-            self.variante == "chip" and self.isCheckable() and self.isChecked()
-            and self.isEnabled()
-        ):
-            escrita = pintar_selecao(
-                pintor, area, caminho, estilo_de_selecao(), self._paleta()
-            )
+        marca = ""
+        if self.isEnabled():
+            if self.variante == "chip" and self.isCheckable() and self.isChecked():
+                marca = estilo_de_selecao()
+            elif self.variante == "primario":
+                marca = estilo_do_principal()
+        if marca:
+            escrita = pintar_selecao(pintor, area, caminho, marca, self._paleta())
             if escrita is not None:
                 frente = escrita
         if self.isEnabled():
@@ -588,7 +613,7 @@ class Botao(QAbstractButton):
         # Realce interno aditivo: um véu uniforme que dá volume e, por cima dele,
         # uma luz que acompanha o cursor DENTRO do botão — o ponto que ele toca
         # acende mais que o resto. Os dois somem junto com o cursor.
-        if self._hover > 0.01 and self.isEnabled():
+        if self._hover > 0.01 and self.isEnabled() and not sem_placa:
             pintor.save()
             pintor.setClipPath(caminho)
             pintor.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)

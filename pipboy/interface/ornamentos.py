@@ -475,6 +475,30 @@ def estilo_de_selecao() -> str:
     return _ESTILO_SELECAO[0]
 
 
+# O botão principal — INICIAR, INVOCAR, PARTIR — veste a mesma marca, quando o
+# jogo pede: é a coisa escolhida por excelência da tela, e uma placa cheia na
+# cor do tema era a única peça da barra de cima igual nos dez ambientes. Um
+# estilo por vez, como o de seleção; vazio, a placa de sempre.
+_ESTILO_PRINCIPAL: list[str] = [""]
+
+# Os estilos que ENCHEM o corpo do botão. Os outros são faixa, fio e ornamento
+# sobre uma placa escura, e essa placa ganha um contorno para continuar lendo
+# como botão — a ação principal não pode depender de alguém adivinhar onde
+# ela começa.
+ESTILOS_QUE_ENCHEM = frozenset({"invertida", "pincelada", "letreiro"})
+# E os que dispensam até a placa: a pincelada é tinta passada na tela, e uma
+# placa em volta dela a transformava em adesivo.
+ESTILOS_SEM_PLACA = frozenset({"pincelada"})
+
+
+def definir_estilo_do_principal(estilo: str) -> None:
+    _ESTILO_PRINCIPAL[0] = estilo
+
+
+def estilo_do_principal() -> str:
+    return _ESTILO_PRINCIPAL[0]
+
+
 class _Paleta:
     """O dicionário de papéis com acesso por atributo, como o tema."""
 
