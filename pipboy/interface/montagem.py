@@ -46,6 +46,7 @@ from PySide6.QtWidgets import (
 from ..constants import DEFAULT_GAME_AUDIO_GAIN
 from ..profiles import MODOS, NIVEIS, VOZES, personas_for
 from ..themes import TEMAS
+from .avisos import AvisoDePalavra
 from .componentes import (
     Botao,
     CampoSelecao,
@@ -260,6 +261,7 @@ class Palco:
     botao_acao: Botao
     conversa: Conversa
     moldura_painel: MolduraDoPainel
+    aviso_de_palavra: AvisoDePalavra
     entrada_texto: QLineEdit
     botao_enviar: Botao
 
@@ -750,6 +752,8 @@ def _palco(janela: Janela, alvo: QWidget) -> Palco:
     # A moldura do jogo em volta da conversa: por cima do painel, rente à
     # borda dele, transparente ao mouse. Ver ornamentos.MolduraDoPainel.
     moldura_painel = MolduraDoPainel(janela, conversa)
+    # E o anúncio da palavra nova, na mesma camada de cima. Ver avisos.
+    aviso_de_palavra = AvisoDePalavra(janela, conversa)
 
     linha = QHBoxLayout()
     linha.setSpacing(8)
@@ -772,6 +776,6 @@ def _palco(janela: Janela, alvo: QWidget) -> Palco:
     return Palco(
         pilula=pilula, medidor=medidor, rotulo_meta=rotulo_meta,
         botao_mudo=botao_mudo, botao_acao=botao_acao, conversa=conversa,
-        moldura_painel=moldura_painel,
+        moldura_painel=moldura_painel, aviso_de_palavra=aviso_de_palavra,
         entrada_texto=entrada_texto, botao_enviar=botao_enviar,
     )

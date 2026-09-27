@@ -73,6 +73,7 @@ from ..vocabulary import FILTRO_REVISAR, VocabularyStore
 from . import montagem
 from .atalhos import Atalhos, globais_disponiveis
 from .atmosfera import Cenario, atmosfera_de
+from .avisos import Recado
 from .caderno import JanelaCaderno
 from .componentes import (
     Botao,
@@ -561,6 +562,7 @@ class Janela(QWidget):
         self.botao_acao = palco.botao_acao
         self.conversa = palco.conversa
         self.moldura_painel = palco.moldura_painel
+        self.aviso_de_palavra = palco.aviso_de_palavra
         self.entrada_texto = palco.entrada_texto
         self.botao_enviar = palco.botao_enviar
 
@@ -652,6 +654,7 @@ class Janela(QWidget):
         self._atualizar_pilula()
         # A moldura do painel troca de traço — ou some — com o jogo.
         self.moldura_painel.acompanhar()
+        self.aviso_de_palavra.recolher()
         self._campainha.aplicar_tema()
         if self._capsula is not None:
             self._capsula.aplicar_tema()
@@ -1809,16 +1812,27 @@ class Janela(QWidget):
             )
 
     def _anunciar_palavras(self, novas: int) -> None:
-        """Um "+1" sobe do contador do caderno, na lateral.
+        """A palavra nova, anunciada sobre a conversa e no contador da lateral.
 
-        A lateral é o único lugar da janela principal que mostra o tamanho do
-        caderno, e a mudança de "3 termos" para "4 termos" acontecia num quadro,
+        Sobre a conversa, do jeito do jogo (ver avisos): é onde o olho está,
+        e o instante em que os jogos mais capricham. Na lateral, um "+1" sobe
+        do contador do caderno — o único lugar da janela que mostra o tamanho
+        dele, e a mudança de "3 termos" para "4 termos" acontecia num quadro,
         num texto miúdo, no canto oposto ao da conversa. O som da campainha já
         dizia que algo foi salvo; o sinal diz ONDE aquilo foi parar.
+
+        Com a atmosfera desligada, nenhum dos dois: a anotação na conversa já
+        diz o que entrou, e quem desligou pediu uma janela quieta.
         """
+        if self._intensidade_atmosfera <= 0.0:
+            return
+        recentes = self._store.listar(limite=1)
+        if recentes and self.conversa.isVisible():
+            palavra = recentes[0]
+            self.aviso_de_palavra.anunciar(Recado(palavra.termo, palavra.traducao, novas))
         rotulo = self.rotulo_caderno
         pai = rotulo.parentWidget()
-        if self._intensidade_atmosfera <= 0.0 or pai is None or not rotulo.isVisible():
+        if pai is None or not rotulo.isVisible():
             return
         primeira_linha = rotulo.text().split("\n", 1)[0]
         fonte = self.fonte("legenda")

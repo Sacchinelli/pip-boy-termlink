@@ -524,7 +524,7 @@ def _invertida(pintor: QPainter, caixa: QRectF, caminho: QPainterPath, p: _Palet
     return _legivel(p.on_primary, fundo)
 
 
-def _contorno_de_pincel(caixa: QRectF) -> QPainterPath:
+def contorno_de_pincel(caixa: QRectF) -> QPainterPath:
     """O contorno de uma pincelada: bordas que tremem e pontas esfiapadas.
 
     Sorteado com semente tirada do TAMANHO, e não do relógio: o mesmo botão
@@ -564,7 +564,7 @@ def _pincelada(pintor: QPainter, caixa: QRectF, _caminho: QPainterPath, p: _Pale
     e as cerdas deixando riscos mais escuros no meio da faixa.
     """
     tinta = QColor(design.misturar(p.alert, "#000000", 0.22))
-    contorno = _contorno_de_pincel(caixa)
+    contorno = contorno_de_pincel(caixa)
     pintor.fillPath(contorno, tinta)
     # As cerdas: riscos finos e mais escuros, presos dentro da tinta.
     pintor.save()

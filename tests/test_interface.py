@@ -4174,6 +4174,203 @@ def main() -> int:
         "no terminal, a placa cheia no verde do fósforo continua",
     )
 
+    print("cada jogo anuncia a palavra nova do seu jeito")
+    from PySide6.QtCore import QRectF as CaixaAviso
+
+    from pipboy import design as design_aviso
+    from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_AVISO
+    from pipboy.interface.avisos import (
+        AVISOS,
+        MANCHETES,
+        AvisoDePalavra,
+        Contexto,
+        Recado,
+        pintar_aviso,
+    )
+    from pipboy.interface.ornamentos import FAIXA_MOLDURA as FAIXA_AVISO
+    from pipboy.themes import TEMAS as TEMAS_AVISO
+
+    anuncios = {nome: r.aviso for nome, r in RECEITAS_AVISO.items()}
+    checar(all(e in AVISOS for e in anuncios.values()), "todo jogo pede um anúncio que existe")
+    proprios_av = [e for e in anuncios.values() if e]
+    checar(
+        len(proprios_av) == len(set(proprios_av)) == 9,
+        f"nove jogos anunciam a palavra do seu jeito, e nenhum copia outro ({len(set(proprios_av))})",
+    )
+    checar(anuncios["Genérico / Outro"] == "", "e o neutro fica com o cartão discreto")
+    checar(
+        set(MANCHETES) == set(AVISOS) and len(set(MANCHETES.values())) == len(MANCHETES),
+        "cada anúncio tem o próprio título",
+    )
+
+    LARG_AV, ALT_AV = 760, 460
+
+    def retrato_do_aviso(
+        estilo: str, jogo: str, *, letras: bool = True, papel: str = "screen",
+        recado: Recado | None = None, entrada: float = 1.0,
+    ):
+        """O anúncio sobre um painel liso de ``papel``: imagem, área declarada, contexto."""
+        tema_av = TEMAS_AVISO[jogo]
+        imagem_av = QImage(LARG_AV, ALT_AV, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem_av.fill(QColor(getattr(tema_av, papel)))
+        contexto_av = Contexto(
+            tema_av, tema_av.font_candidates[0], "Segoe UI", letras=letras, entrada=entrada
+        )
+        pintor_av = QPainter(imagem_av)
+        area_av = pintar_aviso(
+            pintor_av, CaixaAviso(0, 0, LARG_AV, ALT_AV), estilo,
+            recado or Recado("ammo", "munição"), contexto_av,
+        )
+        pintor_av.end()
+        return imagem_av, area_av, contexto_av
+
+    def tinta_do_aviso(imagem_av, jogo: str, papel: str = "screen"):
+        """A caixa dos pixels que o anúncio mudou, e quantos caem fora do permitido."""
+        base = QColor(getattr(TEMAS_AVISO[jogo], papel)).rgb()
+        xs, ys, na_borda, no_pe = [], [], 0, 0
+        for y in range(0, ALT_AV, 2):
+            for x in range(0, LARG_AV, 2):
+                if imagem_av.pixel(x, y) == base:
+                    continue
+                xs.append(x)
+                ys.append(y)
+                if x < FAIXA_AVISO or x >= LARG_AV - FAIXA_AVISO or y < FAIXA_AVISO:
+                    na_borda += 1
+                if y > ALT_AV * 0.62:
+                    no_pe += 1
+        if not xs:
+            return None, na_borda, no_pe
+        return CaixaAviso(min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)), na_borda, no_pe
+
+    fora_da_area, na_moldura, no_pe_av, vazios = [], [], [], []
+    for jogo_av, estilo_av in anuncios.items():
+        # O quadro zero da chegada é o pior: o título do GTA chega 45% maior,
+        # a medalha do visor carimba grande, o tranco do Cyberpunk desloca.
+        for entrada_av in (0.0, 0.3, 1.0):
+            imagem_av, area_av, _ = retrato_do_aviso(estilo_av, jogo_av, entrada=entrada_av)
+            tinta_av, borda_av, pe_av = tinta_do_aviso(imagem_av, jogo_av)
+            if tinta_av is None:
+                vazios.append(jogo_av)
+                continue
+            if not area_av.adjusted(-3, -3, 3, 3).contains(tinta_av):
+                fora_da_area.append(f"{jogo_av}@{entrada_av}")
+            if entrada_av == 1.0 and borda_av:
+                na_moldura.append(f"{jogo_av}: {borda_av}")
+            if pe_av:
+                no_pe_av.append(f"{jogo_av}@{entrada_av}: {pe_av}")
+    checar(not vazios, f"todo anúncio desenha alguma coisa ({vazios})")
+    checar(
+        not fora_da_area,
+        f"a área que o anúncio declara cobre a tinta, também no meio da chegada ({fora_da_area})",
+    )
+    checar(not na_moldura, f"e fica dentro da moldura do painel ({na_moldura})")
+    checar(
+        not no_pe_av,
+        f"e longe do pé, onde mora a fala nova e a anotação da palavra ({no_pe_av})",
+    )
+
+    retratos_av = {e: retrato_do_aviso(e, "Genérico / Outro")[0] for e in AVISOS}
+    iguais_av = sorted(
+        (a, b) for a in retratos_av for b in retratos_av if a < b and retratos_av[a] == retratos_av[b]
+    )
+    checar(not iguais_av, f"no mesmo tema, cada anúncio desenha diferente dos outros ({iguais_av})")
+
+    # A letra lê sobre o que o anúncio pintou embaixo dela — medido nos PIXELS
+    # do véu, com as letras desligadas, sobre a tela vazia e sobre o pior
+    # fundo possível: uma fala clara passando por baixo.
+    ilegiveis_av = []
+    for jogo_av, estilo_av in anuncios.items():
+        for papel_av in ("screen", "primary"):
+            imagem_av, _, contexto_av = retrato_do_aviso(
+                estilo_av, jogo_av, letras=False, papel=papel_av
+            )
+            for caixa_av, cor_av, texto_av in contexto_av.escritos:
+                y_av = min(ALT_AV - 1, max(0, round(caixa_av.center().y())))
+                pior_av = 21.0
+                x_av = caixa_av.left() + 1
+                while x_av < caixa_av.right() - 1:
+                    fundo_av = imagem_av.pixelColor(min(LARG_AV - 1, max(0, round(x_av))), y_av)
+                    pior_av = min(pior_av, design_aviso.contraste(cor_av.name(), fundo_av.name()))
+                    x_av += 3
+                if pior_av < 4.5:
+                    ilegiveis_av.append(f"{jogo_av}/{papel_av} '{texto_av}': {pior_av:.2f}")
+    checar(
+        not ilegiveis_av,
+        f"toda letra de anúncio é legível (AA), até sobre uma fala clara ({ilegiveis_av[:4]})",
+    )
+
+    _, _, contexto_longo = retrato_do_aviso(
+        "graca", "Elden Ring",
+        recado=Recado("a phrase so long it would never fit a banner across this panel", "x" * 90),
+    )
+    checar(
+        all(c.left() >= FAIXA_AVISO and c.right() <= LARG_AV - FAIXA_AVISO
+            for c, _, _ in contexto_longo.escritos),
+        "a palavra longa é encurtada, e não estoura a faixa",
+    )
+
+    escrito_meio = [t for _, _, t in retrato_do_aviso("terminal", "Fallout", entrada=0.3)[2].escritos
+                    if t.startswith(">")]
+    escrito_fim = [t for _, _, t in retrato_do_aviso("terminal", "Fallout", entrada=1.0)[2].escritos
+                   if t.startswith(">")]
+    checar(
+        escrito_meio and escrito_fim == ["> ammo"] and len(escrito_meio[0]) < len("> ammo"),
+        f"o terminal datilografa o termo durante a chegada ({escrito_meio} → {escrito_fim})",
+    )
+
+    # Na janela: o evento que a sessão publica acende o anúncio do jogo em vigor.
+    atmosfera_aviso = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    janela.campo_jogo.setCurrentText("Red Dead")
+    aplicacao.processEvents()
+    aviso = janela.aviso_de_palavra
+    checar(isinstance(aviso, AvisoDePalavra) and not aviso.isVisible(), "em repouso, não há anúncio")
+    store.registrar("dynamite", "dinamite", "", "Red Dead")
+    janela._tratar_evento(EventoUi(TipoEvento.VOCAB_ADDED, payload=store.total()))
+    checar(
+        aviso.isVisible() and aviso.recado is not None and aviso.recado.termo == "dynamite"
+        and aviso.recado.traducao == "dinamite" and aviso.estilo == "cartaz",
+        "a palavra salva é anunciada sobre a conversa, no cartaz do velho oeste",
+    )
+    checar(
+        aviso.geometry() == janela.conversa.geometry()
+        and aviso.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents),
+        "por cima do painel inteiro, e transparente ao mouse",
+    )
+    checar(aguardar(lambda: not aviso.isVisible(), 6000), "e some sozinho")
+
+    janela._tratar_evento(EventoUi(TipoEvento.VOCAB_ADDED, payload=store.total()))
+    checar(not aviso.isVisible(), "reencontro e quiz, que não mudam o total, não anunciam nada")
+
+    recolhida_antes = janela.lateral_recolhida
+    if not recolhida_antes:
+        janela.alternar_lateral()
+    aplicacao.processEvents()
+    store.registrar("lasso", "laço", "", "Red Dead")
+    janela._tratar_evento(EventoUi(TipoEvento.VOCAB_ADDED, payload=store.total()))
+    checar(
+        aviso.isVisible() and aviso.recado is not None and aviso.recado.termo == "lasso",
+        "com a coluna recolhida, sem o contador à vista, o anúncio continua",
+    )
+    if not recolhida_antes:
+        janela.alternar_lateral()
+    janela.campo_jogo.setCurrentText("GTA")
+    aplicacao.processEvents()
+    checar(not aviso.isVisible(), "trocar de jogo recolhe o anúncio do jogo anterior")
+
+    janela.campo_atmosfera.setCurrentText("Desligada")
+    aplicacao.processEvents()
+    store.registrar("bounty", "recompensa", "", "Red Dead")
+    janela._tratar_evento(EventoUi(TipoEvento.VOCAB_ADDED, payload=store.total()))
+    checar(not aviso.isVisible(), "com a atmosfera desligada, a palavra entra sem anúncio")
+
+    for termo_av in ("dynamite", "lasso", "bounty"):
+        store.remover(termo_av)
+    janela.caderno_mudou()
+    janela.campo_atmosfera.setCurrentText(atmosfera_aviso)
+    janela.campo_jogo.setCurrentText("Fallout")
+    aplicacao.processEvents()
+
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()
     # nunca voltaria e a suíte penduraria. O tiro agendado é esse alguém.
