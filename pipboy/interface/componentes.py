@@ -26,7 +26,8 @@ import re
 import time
 from collections.abc import Callable
 from itertools import pairwise
-from typing import Any, NamedTuple
+from types import MappingProxyType
+from typing import Any, Final, NamedTuple
 
 from PySide6.QtCore import (
     Property,
@@ -52,6 +53,7 @@ from PySide6.QtGui import (
     QLinearGradient,
     QPainter,
     QPainterPath,
+    QPalette,
     QPen,
     QRadialGradient,
 )
@@ -69,7 +71,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import design
-from .movimento import Transicao
+from .movimento import Transicao, curva_do_ritmo, em_degraus, no_ritmo
 from .ornamentos import (
     ESTILOS_QUE_ENCHEM,
     ESTILOS_SEM_PLACA,
@@ -375,7 +377,9 @@ class Botao(QAbstractButton):
         return self._hover
 
     def _set_hover(self, valor: float) -> None:
-        self._hover = valor
+        # Aos saltos no ritmo do terminal: a luz do botão acende como um
+        # fósforo redesenhado em varreduras, e não num degradê contínuo.
+        self._hover = em_degraus(valor)
         self._atualizar_halo()
         self.update()
 
@@ -391,6 +395,11 @@ class Botao(QAbstractButton):
 
     def _animar(self, animacao: QPropertyAnimation, destino: float) -> None:
         animacao.stop()
+        # No ritmo do jogo em vigor, lido agora: a luz do botão da Terra
+        # Intermédia acende devagar, a do visor, de estalo.
+        base = self.DURACAO_HOVER if animacao is self._anim_hover else self.DURACAO_PRESSAO
+        animacao.setDuration(no_ritmo(base))
+        animacao.setEasingCurve(curva_do_ritmo(sem_passar=True))
         nome = bytes(animacao.propertyName()).decode()
         animacao.setStartValue(animacao.targetObject().property(nome))
         animacao.setEndValue(destino)
@@ -1333,6 +1342,46 @@ class RotuloElidido(QLabel):
         self._aplicar()
 
 
+# Como as letras de um título chegam, em cada jogo. O embaralho que se
+# resolve letra a letra é o de um terminal que liga — certo no Cyberpunk e no
+# tema neutro, e estava nos dez: o nome da Terra Intermédia chegava como uma
+# senha sendo quebrada. Agora a janela declara a chegada do jogo em vigor:
+#
+# * "decifrar", o embaralho de sempre (a Night City, o neutro);
+# * "datilografar", letra a letra atrás de um cursor em bloco (o terminal);
+# * "escrever", letra a letra com a tinta ainda assentando (o diário do velho
+#   oeste e o manuscrito);
+# * "revelar", uma onda de luz que acende as letras da esquerda para a direita
+#   (a alta fantasia, que não tem pressa);
+# * "acender", o tubo de neon que falha duas vezes antes de firmar (o GTA) —
+#   entre 25% e 100% de luz, nunca apagando de todo: piscar forte é agressão;
+# * "varrer", a varredura do visor, com a borda da leitura no laranja (o FPS).
+CHEGADAS_DAS_LETRAS = ("decifrar", "datilografar", "escrever", "revelar", "acender", "varrer")
+# As que se repetem sob o cursor. As lentas, não: fazer o nome sumir e voltar
+# devagar debaixo do mouse é tirar dele o que ele veio ler.
+CHEGADAS_SOB_O_CURSOR = frozenset({"decifrar", "datilografar", "acender", "varrer"})
+_CHEGADA: list[str] = ["decifrar", "#ffffff"]
+
+
+def definir_chegada_das_letras(estilo: str, destaque: str = "#ffffff") -> None:
+    """O jeito de chegar em vigor, e a cor da borda da varredura."""
+    _CHEGADA[0] = estilo if estilo in CHEGADAS_DAS_LETRAS else "decifrar"
+    _CHEGADA[1] = destaque
+
+
+def chegada_das_letras() -> str:
+    return _CHEGADA[0]
+
+
+# As falhas do neon: até que fração da chegada vale cada intensidade.
+_PISCADAS = ((0.10, 0.25), (0.18, 1.0), (0.28, 0.35), (0.40, 1.0), (0.48, 0.55))
+
+
+def _rgba(cor: QColor, alfa: float) -> str:
+    alfa = max(0.0, min(1.0, alfa)) * cor.alphaF()
+    return f"rgba({cor.red()},{cor.green()},{cor.blue()},{alfa:.3f})"
+
+
 class RotuloDecifravel(QLabel):
     """Um rótulo que se decifra: as letras embaralham e se resolvem uma a uma.
 
@@ -1342,6 +1391,12 @@ class RotuloDecifravel(QLabel):
     direita em meio segundo; trocar de jogo decifra o nome novo no lugar do
     antigo.
 
+    E chega do jeito do jogo em vigor (ver ``CHEGADAS_DAS_LETRAS``): o
+    embaralho é só um deles. Os outros se desenham em texto rico, letra a letra,
+    com a cor de cada uma — e sempre com TODAS as letras no lugar, as que ainda
+    não chegaram em transparente: o título centrado não anda enquanto se
+    escreve, e a quebra de linha é a do texto inteiro desde o primeiro quadro.
+
     O texto do rótulo é sempre o de verdade. ``text()`` o devolve mesmo no meio
     do embaralho, e o nome acessível também: um leitor de tela não lê "K#V7".
     Só o que se DESENHA passa pelo embaralho, e o tamanho fica preso ao do
@@ -1350,6 +1405,16 @@ class RotuloDecifravel(QLabel):
     """
 
     DURACAO = 480
+    # As chegadas que não dependem do tamanho do texto; datilografar e
+    # escrever andam por letra (ver ``_duracao``).
+    DURACOES: Final = MappingProxyType(
+        {"decifrar": DURACAO, "revelar": 900, "acender": 620, "varrer": 420}
+    )
+    POR_LETRA: Final = MappingProxyType(
+        {"datilografar": (28, 280, 900), "escrever": (42, 380, 1100)}
+    )
+    # Quantas letras a onda do "revelar" acende ao mesmo tempo.
+    ONDA = 5
     # Parte do tempo em que todas as letras ficam embaralhadas antes de a
     # primeira se resolver: sem ela, a primeira letra nem chegava a mudar.
     ESPERA = 0.18
@@ -1369,13 +1434,15 @@ class RotuloDecifravel(QLabel):
         self._texto = texto
         self.setAccessibleName(texto)
         self._limites: tuple[QSize, QSize] | None = None
+        self._estilo = "decifrar"
         self._animacao = QVariantAnimation(self)
         self._animacao.setStartValue(0.0)
         self._animacao.setEndValue(1.0)
         self._animacao.setDuration(self.DURACAO)
         self._animacao.valueChanged.connect(self._quadro)
-        # O último quadro já desenha o texto inteiro: no fim, só falta soltar.
-        self._animacao.finished.connect(self._soltar)
+        # No fim, o texto inteiro e simples — nenhuma chegada termina em
+        # texto rico — e o tamanho solto.
+        self._animacao.finished.connect(self._terminar)
 
     def text(self) -> str:
         return self._texto
@@ -1401,17 +1468,31 @@ class RotuloDecifravel(QLabel):
         """O que está desenhado agora, embaralhado ou não."""
         return QLabel.text(self)
 
+    @property
+    def estilo(self) -> str:
+        """O jeito da chegada em curso, ou da última."""
+        return self._estilo
+
     def decifrar(self) -> None:
-        """Embaralha o texto e o resolve letra a letra. Nada, com movimento reduzido."""
+        """Faz as letras chegarem do jeito do jogo. Nada, com movimento reduzido."""
         if movimento_reduzido() or not self.isVisible() or not self._texto.strip():
             return
         if self.decifrando:
             return
+        self._estilo = chegada_das_letras()
+        self._animacao.setDuration(self._duracao())
         self._prender()
         self._animacao.start()
 
+    def _duracao(self) -> int:
+        if self._estilo in self.POR_LETRA:
+            por_letra, minimo, maximo = self.POR_LETRA[self._estilo]
+            return max(minimo, min(maximo, por_letra * len(self._texto)))
+        return self.DURACOES.get(self._estilo, self.DURACAO)
+
     def enterEvent(self, evento: Any) -> None:
-        self.decifrar()
+        if chegada_das_letras() in CHEGADAS_SOB_O_CURSOR:
+            self.decifrar()
         super().enterEvent(evento)
 
     def _prender(self) -> None:
@@ -1419,6 +1500,10 @@ class RotuloDecifravel(QLabel):
         self._limites = (self.minimumSize(), self.maximumSize())
         dica = self.sizeHint()
         self.setFixedSize(max(self.width(), dica.width()), max(self.height(), dica.height()))
+
+    def _terminar(self) -> None:
+        QLabel.setText(self, self._texto)
+        self._soltar()
 
     def _soltar(self) -> None:
         if self._limites is not None:
@@ -1429,6 +1514,11 @@ class RotuloDecifravel(QLabel):
 
     def _quadro(self, valor: Any) -> None:
         progresso = float(valor)
+        if self._estilo != "decifrar":
+            QLabel.setText(
+                self, self._texto if progresso >= 1.0 else self._quadro_rico(progresso)
+            )
+            return
         balde = int(progresso * self.DURACAO / self.TROCA_MS)
         # A mesma semente dentro de um balde: as letras sorteadas ficam paradas
         # entre uma troca e outra, e o que avança nesse meio-tempo é só quem se
@@ -1442,6 +1532,58 @@ class RotuloDecifravel(QLabel):
             for i, letra in enumerate(self._texto)
         ]
         QLabel.setText(self, "".join(letras))
+
+    def _quadro_rico(self, progresso: float) -> str:
+        """Um quadro de chegada em texto rico: cada letra na cor e na luz dela."""
+        cor = self.palette().color(QPalette.ColorRole.WindowText)
+        texto = self._texto
+        total = max(1, len(texto))
+        estilos: list[str] = []
+        if self._estilo == "datilografar":
+            # O cursor em bloco é a PRÓPRIA próxima letra, invertida: um
+            # caractere a mais empurraria o título centrado a cada tecla.
+            proxima = int(progresso * total)
+            invertida = QColor(design.legivel_sobre(cor.name()))
+            for indice in range(len(texto)):
+                if indice < proxima:
+                    estilos.append(f"color:{_rgba(cor, 1.0)}")
+                elif indice == proxima:
+                    estilos.append(
+                        f"color:{_rgba(invertida, 1.0)};background-color:{_rgba(cor, 1.0)}"
+                    )
+                else:
+                    estilos.append(f"color:{_rgba(cor, 0.0)}")
+        elif self._estilo == "escrever":
+            pena = progresso * total
+            estilos = [f"color:{_rgba(cor, pena - indice)}" for indice in range(len(texto))]
+        elif self._estilo == "revelar":
+            frente = progresso * (total + self.ONDA)
+            estilos = [
+                f"color:{_rgba(cor, (frente - indice) / self.ONDA)}" for indice in range(len(texto))
+            ]
+        elif self._estilo == "acender":
+            luz = next((alfa for limite, alfa in _PISCADAS if progresso < limite), 1.0)
+            estilos = [f"color:{_rgba(cor, luz)}"] * len(texto)
+        else:  # varrer
+            leitura = math.ceil(progresso * total)
+            borda = QColor(_CHEGADA[1])
+            for indice in range(len(texto)):
+                if indice < leitura - 2:
+                    estilos.append(f"color:{_rgba(cor, 1.0)}")
+                elif indice < leitura:
+                    estilos.append(f"color:{_rgba(borda, 1.0)}")
+                else:
+                    estilos.append(f"color:{_rgba(cor, 0.0)}")
+        # Letras vizinhas de mesmo estilo num só trecho.
+        trechos: list[str] = []
+        inicio = 0
+        for indice in range(1, len(texto) + 1):
+            if indice == len(texto) or estilos[indice] != estilos[inicio]:
+                trechos.append(
+                    f'<span style="{estilos[inicio]}">{html.escape(texto[inicio:indice])}</span>'
+                )
+                inicio = indice
+        return '<span style="white-space:pre-wrap">' + "".join(trechos) + "</span>"
 
 
 class Desvanecer(QWidget):

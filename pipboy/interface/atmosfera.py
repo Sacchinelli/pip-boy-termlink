@@ -113,6 +113,14 @@ class Atmosfera:
     # Night City; "abas", a fileira de abas do Pip-Boy, do celular do GTA e
     # do lobby do visor. Ver tela_inicial.CartaoAcao.
     menu: str = ""
+    # O ritmo do jogo (ver movimento.definir_ritmo): um fator sobre as
+    # durações de ``design`` e o nome de uma curva — a alta fantasia anda
+    # devagar e solene, o visor seco e depressa, o GTA passa do ponto, o
+    # terminal anda aos saltos. E como as letras de um título chegam (ver
+    # componentes.CHEGADAS_DAS_LETRAS): o embaralho de terminal era de todos.
+    tempo: float = 1.0
+    curva: str = "suave"
+    letras: str = "decifrar"
 
     semente: int = 7
     # Cor de acento das camadas vivas; vazio usa o acento do tema.
@@ -124,6 +132,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # Terminal de fósforo: varredura densa, brilho sangrando do centro, tubo
     # abaulado e a tremulação característica de um CRT malcuidado.
     "Fallout": Atmosfera(
+        tempo=0.85, curva="degraus", letras="datilografar",
         menu="abas",
         aviso="terminal",
         selecao="invertida",
@@ -133,6 +142,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
      brilho_texto=0.6,),
     # Luz dourada baixa e partículas subindo, contra pergaminho.
     "Elden Ring": Atmosfera(
+        tempo=1.7, curva="solene", letras="revelar",
         menu="lista_centrada",
         aviso="graca",
         botao_principal="brilho_dourado",
@@ -146,6 +156,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # para ver, e o que faltava para esta crônica não ser o tema neutro com
     # neve. O halo do fundo desceu: com a aurora no alto, os dois brigavam.
     "Skyrim": Atmosfera(
+        tempo=1.4, curva="solene", letras="revelar",
         menu="lista_centrada",
         aviso="descoberta",
         botao_principal="losangos",
@@ -156,6 +167,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     ),
     # Couro e vela: grão grosso, halo quente lateral, brasas lentas.
     "The Witcher 3": Atmosfera(
+        tempo=1.15, curva="suave", letras="revelar",
         menu="lista_a_esquerda",
         aviso="diario",
         botao_principal="brasa",
@@ -169,6 +181,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # chão quente com Elden Ring e Witcher; o que só o velho oeste tem não é
     # a cor, é o SUPORTE.
     "Red Dead": Atmosfera(
+        tempo=1.25, curva="suave", letras="escrever",
         menu="lista_a_esquerda",
         aviso="cartaz",
         botao_principal="pincelada",
@@ -181,6 +194,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # o pôr do sol de neon no horizonte — a imagem inteira deste ambiente, e
     # o que ele não tinha. O halo saiu do alto: o brilho agora sobe da linha.
     "GTA": Atmosfera(
+        tempo=0.8, curva="mola", letras="acender",
         menu="abas",
         aviso="missao",
         botao_principal="letreiro",
@@ -192,6 +206,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
      brilho_texto=0.32,),
     # Interferência digital, varredura fina e chuva de dados descendo.
     "Cyberpunk 2077": Atmosfera(
+        tempo=0.7, curva="seco", letras="decifrar",
         menu="lista_a_esquerda",
         aviso="fragmento",
         selecao="aba",
@@ -205,6 +220,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # ele este ambiente e a rádio pirata eram dois fundos escuros arroxeados,
     # a 4,57 um do outro.
     "RPG / Aventura (geral)": Atmosfera(
+        tempo=1.3, curva="solene", letras="escrever",
         menu="lista_centrada",
         aviso="pergaminho",
         botao_principal="iluminura",
@@ -220,6 +236,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # grade volta ao papel de retícula de fundo. O pó é cinza de cinza, e não
     # laranja: partícula na cor do acento vira vaga-lume, e aqui é escombro.
     "FPS / Multiplayer": Atmosfera(
+        tempo=0.6, curva="seco", letras="varrer",
         menu="abas",
         aviso="abate",
         selecao="mira",

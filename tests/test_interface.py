@@ -2292,6 +2292,10 @@ def main() -> int:
 
     atmosfera_decifra = janela.campo_atmosfera.currentText()
     janela.campo_atmosfera.setCurrentText("Completa")
+    # O embaralho é a chegada das letras da Night City (ver "cada jogo tem o
+    # seu ritmo"); é nela que ele se confere.
+    jogo_decifra = janela.campo_jogo.currentText()
+    janela.campo_jogo.setCurrentText("Cyberpunk 2077")
     aplicacao.processEvents()
 
     suporte = QWidget()
@@ -2401,8 +2405,172 @@ def main() -> int:
     checar(tela_decifra.titulo.decifrando, "e chega com o título se decifrando")
     aguardar(lambda: not tela_decifra.titulo.decifrando)
 
+    janela.campo_jogo.setCurrentText(jogo_decifra)
     janela.campo_atmosfera.setCurrentText(atmosfera_decifra)
     aplicacao.processEvents()
+
+    print("cada jogo tem o seu ritmo")
+    import re as re_ritmo
+
+    from PySide6.QtCore import QEasingCurve as CurvaRitmo
+
+    from pipboy.interface import componentes as componentes_ritmo
+    from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_RITMO
+    from pipboy.interface.componentes import (
+        CHEGADAS_DAS_LETRAS,
+        chegada_das_letras,
+        definir_chegada_das_letras,
+    )
+    from pipboy.interface.movimento import (
+        CURVAS_DO_RITMO,
+        Transicao,
+        curva_do_ritmo,
+        em_degraus,
+        no_ritmo,
+        tempo_do_ritmo,
+    )
+
+    receitas_ritmo = {n: (r.tempo, r.curva, r.letras) for n, r in RECEITAS_RITMO.items()}
+    checar(
+        all(c in CURVAS_DO_RITMO and le in CHEGADAS_DAS_LETRAS for _, c, le in receitas_ritmo.values()),
+        "todo jogo pede uma curva e uma chegada de letras que existem",
+    )
+    checar(
+        len(set(receitas_ritmo.values())) == len(receitas_ritmo),
+        "nenhum jogo repete o ritmo de outro — tempo, curva e chegada juntos",
+    )
+    checar(
+        receitas_ritmo["Elden Ring"][0] > 1.4 > 0.8 > receitas_ritmo["FPS / Multiplayer"][0]
+        and receitas_ritmo["Genérico / Outro"] == (1.0, "suave", "decifrar"),
+        "a alta fantasia anda devagar, o visor depressa, e o neutro no tempo de sempre",
+    )
+    checar(
+        sum(1 for _, _, le in receitas_ritmo.values() if le == "decifrar") == 2,
+        "o embaralho de terminal fica com a Night City e o neutro, e não com os dez",
+    )
+
+    atmosfera_ritmo = janela.campo_atmosfera.currentText()
+    jogo_ritmo = janela.campo_jogo.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    janela.campo_jogo.setCurrentText("Elden Ring")
+    aplicacao.processEvents()
+    checar(
+        tempo_do_ritmo() == 1.7 and curva_do_ritmo() == CurvaRitmo.Type.InOutSine
+        and chegada_das_letras() == "revelar",
+        "no Elden Ring, o ritmo é solene e as letras se revelam",
+    )
+    transicao_ritmo = Transicao(janela, 200, lambda _v: None, reduzir=lambda: False)
+    transicao_ritmo.ir(1.0)
+    checar(
+        transicao_ritmo._animacao.duration() == 340
+        and transicao_ritmo._animacao.easingCurve().type() == CurvaRitmo.Type.InOutSine,
+        f"uma transição de 200 ms leva 340 e anda solene ({transicao_ritmo._animacao.duration()})",
+    )
+    transicao_ritmo.saltar(0.0)
+    janela.campo_jogo.setCurrentText("GTA")
+    aplicacao.processEvents()
+    transicao_ritmo.ir(1.0)
+    checar(
+        curva_do_ritmo() == CurvaRitmo.Type.OutBack
+        and transicao_ritmo._animacao.easingCurve().type() == CurvaRitmo.Type.OutQuint
+        and transicao_ritmo._animacao.duration() == 160,
+        "no GTA, passa do ponto — menos numa intensidade, onde passar de 100% é defeito",
+    )
+    transicao_ritmo.saltar(0.0)
+    botao_ritmo = janela.botao_enviar
+    entrar(botao_ritmo, 10, 10)
+    checar(
+        botao_ritmo._anim_hover.duration() == no_ritmo(botao_ritmo.DURACAO_HOVER) == 128,
+        f"e a luz do botão acende no tempo do jogo ({botao_ritmo._anim_hover.duration()} ms)",
+    )
+    sair(botao_ritmo)
+    janela.campo_jogo.setCurrentText("Fallout")
+    aplicacao.processEvents()
+    botao_ritmo._set_hover(0.37)
+    checar(
+        em_degraus(0.37) == 0.4 and em_degraus(1.0) == 1.0 and em_degraus(0.0) == 0.0
+        and botao_ritmo._hover == 0.4,
+        "no terminal, a luz anda aos saltos, como um fósforo redesenhado",
+    )
+    janela.campo_jogo.setCurrentText("Skyrim")
+    aplicacao.processEvents()
+    botao_ritmo._set_hover(0.37)
+    checar(botao_ritmo._hover == 0.37, "e nos outros jogos, contínua")
+    botao_ritmo._set_hover(0.0)
+
+    # As letras: cada chegada desenha diferente, sempre com TODAS no lugar.
+    suporte_ritmo = QWidget()
+    rotulo_ritmo = componentes_ritmo.RotuloDecifravel("Que a graça ilumine", suporte_ritmo)
+    rotulo_ritmo.setStyleSheet("color: #e0c080;")
+    suporte_ritmo.resize(420, 40)
+    suporte_ritmo.show()
+    aplicacao.processEvents()
+    texto_ritmo = "Que a graça ilumine"
+
+    def quadro_de(estilo: str, fracao: float) -> str:
+        definir_chegada_das_letras(estilo, "#ff6a00")
+        rotulo_ritmo.decifrar()
+        rotulo_ritmo._animacao.pause()
+        rotulo_ritmo._animacao.setCurrentTime(int(rotulo_ritmo._animacao.duration() * fracao))
+        return rotulo_ritmo.desenhado
+
+    def so_letras(marcacao: str) -> str:
+        import html as html_ritmo
+
+        return html_ritmo.unescape(re_ritmo.sub("<[^>]+>", "", marcacao))
+
+    sinais_ritmo = {
+        "datilografar": "background-color",
+        "escrever": "rgba(224,192,128,0.000)",
+        "revelar": "rgba(224,192,128,0.",
+        "acender": "rgba(224,192,128,0.250)",
+        "varrer": "rgba(255,106,0,1.000)",
+    }
+    faltas_ritmo = []
+    for estilo_ritmo, sinal_ritmo in sinais_ritmo.items():
+        fracao_ritmo = 0.05 if estilo_ritmo == "acender" else 0.35
+        quadro = quadro_de(estilo_ritmo, fracao_ritmo)
+        if not (
+            rotulo_ritmo.estilo == estilo_ritmo and sinal_ritmo in quadro
+            and so_letras(quadro) == texto_ritmo and rotulo_ritmo.text() == texto_ritmo
+            and rotulo_ritmo.accessibleName() == texto_ritmo
+        ):
+            faltas_ritmo.append(f"{estilo_ritmo}: {quadro[:90]!r}")
+        rotulo_ritmo._animacao.resume()
+        if not (aguardar(lambda: not rotulo_ritmo.decifrando) and rotulo_ritmo.desenhado == texto_ritmo):
+            faltas_ritmo.append(f"{estilo_ritmo}: não terminou no texto simples")
+    checar(
+        not faltas_ritmo,
+        f"cada chegada desenha do seu jeito, com todas as letras no lugar e o texto real intacto ({faltas_ritmo})",
+    )
+    alfas_revelar = [
+        float(a) for a in re_ritmo.findall(r"rgba\(224,192,128,([0-9.]+)\)", quadro_de("revelar", 0.35))
+    ]
+    rotulo_ritmo._animacao.stop()
+    rotulo_ritmo._terminar()
+    checar(
+        any(0.0 < a < 1.0 for a in alfas_revelar) and 0.0 in alfas_revelar and 1.0 in alfas_revelar,
+        f"o revelar é uma onda: letras acesas, meio acesas e ainda apagadas ({sorted(set(alfas_revelar))})",
+    )
+    checar(
+        min(alfa for _, alfa in componentes_ritmo._PISCADAS) >= 0.25,
+        "o neon falha, mas nunca apaga de todo: piscar forte é agressão",
+    )
+    definir_chegada_das_letras("revelar")
+    entrar(rotulo_ritmo, 5, 5)
+    checar(not rotulo_ritmo.decifrando, "a chegada lenta não se repete sob o cursor: some o que se veio ler")
+    sair(rotulo_ritmo)
+    definir_chegada_das_letras("datilografar")
+    entrar(rotulo_ritmo, 5, 5)
+    checar(rotulo_ritmo.decifrando, "a rápida, sim: o terminal redatilografa o nome sob o cursor")
+    sair(rotulo_ritmo)
+    aguardar(lambda: not rotulo_ritmo.decifrando)
+    suporte_ritmo.deleteLater()
+
+    janela.campo_jogo.setCurrentText(jogo_ritmo)
+    janela.campo_atmosfera.setCurrentText(atmosfera_ritmo)
+    aplicacao.processEvents()
+
 
     print("o caderno responde ao cursor")
     from dataclasses import replace as substituir

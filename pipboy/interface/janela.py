@@ -82,6 +82,7 @@ from .componentes import (
     LuzDoCursor,
     TransicaoDeTema,
     acender_borda,
+    definir_chegada_das_letras,
     definir_fonte_da_luz,
     definir_movimento_reduzido,
 )
@@ -104,7 +105,7 @@ from .montagem import (
     NIVEIS_ATMOSFERA,
     NIVEIS_GANHO_JOGO,
 )
-from .movimento import SinalFlutuante
+from .movimento import SinalFlutuante, definir_ritmo
 from .ornamentos import definir_estilo_de_selecao, definir_estilo_do_principal
 from .paleta import PALAVRAS_DO_CADERNO, Comando, Paleta
 from .preferencias import Escolha, Marca, VinculoDePreferencias
@@ -630,6 +631,10 @@ class Janela(QWidget):
         # inteiro — chaves, filtros do caderno, lista do histórico, paleta.
         definir_estilo_de_selecao(self._atmosfera.selecao)
         definir_estilo_do_principal(self._atmosfera.botao_principal)
+        # E o ritmo dele, e o jeito de as letras de um título chegarem —
+        # antes de qualquer título se decifrar com o nome do jogo novo.
+        definir_ritmo(self._atmosfera.tempo, self._atmosfera.curva)
+        definir_chegada_das_letras(self._atmosfera.letras, t.accent_text)
         for botao in (
             self.botao_acao, self.botao_mudo, self.botao_caderno,
             self.botao_historico, self.botao_enviar,
