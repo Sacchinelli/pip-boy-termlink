@@ -2770,6 +2770,154 @@ def teste_dicas() -> None:
     )
 
 
+def teste_vozes() -> None:
+    """Cada jogo com a sua voz nos quatro eventos — conferida no próprio sinal.
+
+    O que se mede é o CARÁTER de cada voz, e não a igualdade a um arquivo: o
+    tom de ocupado tem de ter as duas frequências do telefone, o sino da
+    graça tem de ter cauda, o violão tem de soar nas notas do arpejo, o
+    medalhão tem de tremer, o marcador de acerto tem de ser dois estalos.
+    """
+    print("vozes dos jogos")
+    import numpy as np
+
+    from pipboy.sons import AMPLITUDE, DURACAO_MAXIMA, EVENTOS, RECEITAS, TAXA, VOZES, sintetizar
+    from pipboy.themes import TEMAS
+
+    vozes = {nome: r.voz for nome, r in RECEITAS.items()}
+    checar(
+        set(vozes) == set(TEMAS) - {"Genérico / Outro"} and set(vozes.values()) == set(VOZES)
+        and len(set(vozes.values())) == len(vozes),
+        "todo jogo tem a sua voz, nenhuma repetida, e o neutro fica com o blip",
+    )
+    fora = []
+    for nome, receita in RECEITAS.items():
+        for evento in EVENTOS:
+            som = sintetizar(evento, receita)
+            if not (
+                np.isfinite(som).all() and 0 < som.size <= TAXA * DURACAO_MAXIMA
+                and float(np.abs(som).max()) <= AMPLITUDE + 1e-6
+                and abs(float(som[0])) < 0.01 and abs(float(som[-1])) < 0.01
+                and bool((som == sintetizar(evento, receita)).all())
+            ):
+                fora.append(f"{nome}/{evento}")
+    checar(
+        not fora,
+        f"toda voz é curta, contida, sem estalo nas pontas e sempre igual a si mesma ({fora})",
+    )
+    # Audível de verdade: pelo menos 10 ms acima de um quinto do pico. Um
+    # estalo que decai em 2% dos seus 14 ms passa em tudo o que está acima —
+    # e é mudo.
+    mudos = []
+    for nome, receita in RECEITAS.items():
+        for evento in EVENTOS:
+            som = np.abs(sintetizar(evento, receita).astype(np.float64))
+            largura = int(TAXA * 0.003)
+            suave = np.convolve(som, np.ones(largura) / largura, mode="same")
+            if (suave > 0.2 * suave.max()).sum() / TAXA < 0.01:
+                mudos.append(f"{nome}/{evento}")
+    checar(not mudos, f"e nenhuma é um estalo mudo ({mudos})")
+
+    # Mudar a voz de um tema gera arquivos novos: senão quem já abriu o
+    # programa ouviria, para sempre, a voz antiga do cache.
+    from dataclasses import replace as trocar_voz
+
+    import pipboy.sons as modulo_sons
+
+    pasta_voz = Path(tempfile.mkdtemp()) / "sons"
+    antes_voz = modulo_sons.gerar_cache(pasta_voz, "Fallout")["iniciar"]
+    original_voz = modulo_sons.RECEITAS["Fallout"]
+    try:
+        modulo_sons.RECEITAS["Fallout"] = trocar_voz(original_voz, voz="radio")
+        depois_voz = modulo_sons.gerar_cache(pasta_voz, "Fallout")["iniciar"]
+    finally:
+        modulo_sons.RECEITAS["Fallout"] = original_voz
+    checar(
+        depois_voz != antes_voz and not antes_voz.exists(),
+        "trocar a voz de um jogo troca os arquivos do cache, e apaga os velhos",
+    )
+
+    def picos(som: np.ndarray, quantos: int) -> list[float]:
+        espectro = np.abs(np.fft.rfft(som * np.hanning(som.size), n=TAXA))
+        frequencias = np.fft.rfftfreq(TAXA, 1 / TAXA)
+        achados: list[float] = []
+        for indice in np.argsort(espectro)[::-1]:
+            f = float(frequencias[indice])
+            if all(abs(f - g) > 20 for g in achados):
+                achados.append(f)
+            if len(achados) == quantos:
+                break
+        return achados
+
+    ocupado = sintetizar("erro", RECEITAS["GTA"])
+    checar(
+        sorted(round(f) for f in picos(ocupado, 2)) == [480, 620],
+        f"o erro do GTA é o tom de ocupado do telefone, 480 e 620 Hz ({picos(ocupado, 2)})",
+    )
+    def envoltoria(som: np.ndarray, ms: float) -> np.ndarray:
+        largura = max(1, int(TAXA * ms / 1000))
+        return np.convolve(np.abs(som.astype(np.float64)), np.ones(largura) / largura, mode="same")
+
+    # O violão: as três notas do arpejo aparecem no espectro, bem acima do
+    # chão — uma corda de Karplus-Strong tem harmônicos fortes, e o que se
+    # confere é que as FUNDAMENTAIS estão lá.
+    violao = sintetizar("iniciar", RECEITAS["Red Dead"]).astype(np.float64)
+    violao -= violao.mean()
+    espectro_v = np.abs(np.fft.rfft(violao * np.hanning(violao.size), n=TAXA))
+    chao = float(np.median(espectro_v[60:2000]))
+    alturas = [float(espectro_v[int(alvo) - 4: int(alvo) + 5].max()) / chao for alvo in (164.8, 246.9, 329.6)]
+    checar(
+        min(alturas) > 8,
+        f"o violão do oeste dedilha o arpejo de mi (164, 247 e 330 Hz) ({[round(a) for a in alturas]}x o chão)",
+    )
+
+    def sustentacao(som: np.ndarray) -> float:
+        """Quanto tempo o som leva, depois do pico, para cair a 10% dele."""
+        e = envoltoria(som, 5)
+        pico = int(np.argmax(e))
+        abaixo = np.nonzero(e[pico:] < 0.1 * e[pico])[0]
+        return float((abaixo[0] if abaixo.size else e.size - pico) / TAXA)
+
+    sino = sintetizar("vocab", RECEITAS["Elden Ring"])
+    bip = sintetizar("vocab", RECEITAS["Fallout"])
+    checar(
+        sustentacao(sino) > 0.3 > 0.12 > sustentacao(bip),
+        f"o sino da graça sustenta; o bip do terminal, não ({sustentacao(sino):.2f} s x {sustentacao(bip):.2f} s)",
+    )
+    # O tremor do medalhão, tirado o decaimento lento: a envoltória rápida
+    # dividida pela lenta deixa só a vibração.
+    zumbido = sintetizar("erro", RECEITAS["The Witcher 3"])
+    rapida, lenta = envoltoria(zumbido, 5), envoltoria(envoltoria(zumbido, 5), 80) + 1e-9
+    vibracao = rapida / lenta - 1.0
+    espectro_z = np.abs(np.fft.rfft(vibracao * np.hanning(vibracao.size), n=TAXA))
+    frequencias_z = np.fft.rfftfreq(TAXA, 1 / TAXA)
+    faixa_z = (frequencias_z >= 4) & (frequencias_z <= 20)
+    tremor = float(frequencias_z[faixa_z][np.argmax(espectro_z[faixa_z])])
+    checar(6.0 <= tremor <= 10.0, f"o medalhão treme, e o erro treme a 8 vezes por segundo ({tremor:.1f} Hz)")
+    acerto = sintetizar("vocab", RECEITAS["FPS / Multiplayer"])
+    envoltoria_a = envoltoria(acerto, 3)
+    alto = envoltoria_a > 0.3 * float(envoltoria_a.max())
+    trechos = int(np.sum(np.diff(alto.astype(int)) == 1)) + int(alto[0])
+    checar(
+        trechos == 2 and acerto.size < TAXA * 0.1,
+        f"o marcador de acerto do visor é dois estalos secos ({trechos} em {acerto.size / TAXA:.2f} s)",
+    )
+    degraus = sintetizar("iniciar", RECEITAS["Fallout"])
+    inicio = int(TAXA * 0.028)
+    passo = int(TAXA * 0.06)
+    subida = [picos(degraus[inicio + k * passo: inicio + (k + 1) * passo], 1)[0] for k in range(3)]
+    checar(
+        subida[0] < subida[1] < subida[2],
+        f"o Pip-Boy liga em três degraus que sobem ({[round(f) for f in subida]} Hz)",
+    )
+    dados = sintetizar("vocab", RECEITAS["Cyberpunk 2077"])
+    miolo = dados[int(dados.size * 0.2): int(dados.size * 0.8)]
+    checar(
+        len(np.unique(np.round(miolo, 5))) <= 20,
+        f"a Night City fala em poucos níveis, quebrada em bits ({len(np.unique(np.round(miolo, 5)))})",
+    )
+
+
 def main() -> int:
     global _falhas
     for teste in (
@@ -2795,6 +2943,7 @@ def main() -> int:
         teste_backup,
         teste_regressoes,
         teste_sons,
+        teste_vozes,
         teste_banco,
         teste_historico,
         teste_poda_pelo_mesmo_carimbo,
