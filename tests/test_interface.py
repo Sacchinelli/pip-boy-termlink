@@ -818,8 +818,15 @@ def main() -> int:
     from pipboy.design import ESPACO_MD
 
     def fileira_coerente() -> bool:
+        # A lista de menu de um jogo está sempre empilhada; abas e cartões
+        # seguem a conta, com o espaço que a gramática põe entre eles.
+        if tela.gramatica.startswith("lista"):
+            return tela.empilhada
         cartoes = (tela.cartao_revisar, tela.cartao_caderno, tela.cartao_historico)
-        necessaria = 3 * max(c.largura_ideal() for c in cartoes) + 2 * ESPACO_MD
+        ideais = [c.largura_ideal() for c in cartoes]
+        # Abas cabem pela soma; cartões, pelo mais largo vezes três.
+        ocupada = sum(ideais) if tela.gramatica == "abas" else 3 * max(ideais)
+        necessaria = ocupada + 2 * tela._fileira.spacing()
         return tela.empilhada == (necessaria > min(tela.width(), tela.LARGURA_MAX))
 
     tamanho_antes = janela.size()
@@ -847,6 +854,161 @@ def main() -> int:
     janela.campo_tamanho_texto.setCurrentText(escala_antes)
     janela.resize(tamanho_antes)
     aplicacao.processEvents()
+
+    print("a tela inicial é o menu do jogo")
+    from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_MENU
+
+    menus = {nome: r.menu for nome, r in RECEITAS_MENU.items()}
+    checar(
+        set(menus.values()) <= {"", "lista_centrada", "lista_a_esquerda", "abas"},
+        "todo jogo arruma o menu numa gramática que existe",
+    )
+    checar(
+        menus["Fallout"] == "abas" and menus["Elden Ring"] == "lista_centrada"
+        and menus["Red Dead"] == "lista_a_esquerda" and menus["Genérico / Outro"] == "",
+        "abas no Pip-Boy, lista no meio no Elden Ring, coluna de pausa no velho oeste, cartões no neutro",
+    )
+    checar(
+        sum(1 for g in menus.values() if g) == len(menus) - 1,
+        "e só o tema neutro fica com a gramática de aplicativo",
+    )
+
+    tela_menu = janela.conversa.tela_inicial
+    jogo_menu = janela.campo_jogo.currentText()
+    janela.conversa.limpar()
+
+    inclinacoes_menu: list[tuple[float, float]] = []
+
+    def sob_o_cursor(item, x_rel: float = 0.45):
+        ponto_menu = QPointF(item.width() * x_rel, item.height() / 2)
+        QApplication.sendEvent(item, QEnterEvent(ponto_menu, ponto_menu, QPointF(item.mapToGlobal(ponto_menu))))
+        aguardar(lambda: item._holofote.valor == 1.0)
+        imagem_menu = item.grab().toImage()
+        inclinacoes_menu.append(item.inclinacao())
+        QApplication.sendEvent(item, QEvent(QEvent.Type.Leave))
+        aguardar(lambda: item._holofote.valor == 0.0)
+        return imagem_menu
+
+    # O velho oeste: a tela inteira encosta à esquerda, os itens viram coluna.
+    janela.campo_jogo.setCurrentText("Red Dead")
+    aplicacao.processEvents()
+    checar(
+        tela_menu.gramatica == "lista_a_esquerda"
+        and bool(tela_menu.titulo.alignment() & Qt.AlignmentFlag.AlignLeft)
+        and bool(tela_menu.corpo.alignment() & Qt.AlignmentFlag.AlignLeft),
+        "no Red Dead, título e texto encostam à esquerda, com o menu",
+    )
+    checar(
+        tela_menu.empilhada and tela_menu._fileira.spacing() == 0
+        and tela_menu._fileira_widget.maximumWidth() == tela_menu.LARGURA_COLUNA,
+        "e os itens são uma coluna de pausa: um sobre o outro, colados, na largura do menu",
+    )
+    tela_menu.LARGURA_MAX = 100_000
+    tela_menu.resize(100_000, tela_menu.height())
+    checar(tela_menu.empilhada, "a coluna não vira fileira nem com espaço de sobra")
+    del tela_menu.LARGURA_MAX
+    janela.conversa.atualizar_inicial()
+    aplicacao.processEvents()
+    item_rdr = tela_menu.cartao_caderno
+    checar(
+        item_rdr.accessibleName() == "Caderno" and item_rdr.text() == "Caderno",
+        "o leitor de tela continua ouvindo 'Caderno', e não o título em maiúsculas",
+    )
+    repouso_rdr = item_rdr.grab().toImage()
+    aceso_rdr = sob_o_cursor(item_rdr, 0.9)
+    y_meio = aceso_rdr.height() // 2
+    vermelhos = sum(
+        1 for x in range(0, aceso_rdr.width(), 2)
+        if (c := aceso_rdr.pixelColor(x, y_meio)).red() > c.green() + 50 and c.red() > c.blue() + 50
+    )
+    vermelhos_repouso = sum(
+        1 for x in range(0, repouso_rdr.width(), 2)
+        if (c := repouso_rdr.pixelColor(x, y_meio)).red() > c.green() + 50 and c.red() > c.blue() + 50
+    )
+    checar(
+        vermelhos > aceso_rdr.width() // 4 and vermelhos_repouso == 0,
+        f"sob o cursor, a linha ganha a pincelada vermelha, que em repouso não há ({vermelhos} px)",
+    )
+    checar(
+        inclinacoes_menu[-1] == (0.0, 0.0),
+        f"e item de menu, aceso sob o cursor, não inclina como cartão ({inclinacoes_menu[-1]})",
+    )
+
+    # O Pip-Boy: abas sobre um fio, a escolhida acesa inteira no fósforo.
+    janela.campo_jogo.setCurrentText("Fallout")
+    aplicacao.processEvents()
+    # Com o teto de largura fora do caminho: "cabe" não pode depender da
+    # métrica de fonte da máquina que roda a suíte (ver a fileira, acima).
+    tela_menu.LARGURA_MAX = 100_000
+    tela_menu.resize(100_000, tela_menu.height())
+    checar(
+        tela_menu.gramatica == "abas" and not tela_menu.empilhada
+        and tela_menu._fileira.spacing() == 0
+        and bool(tela_menu.titulo.alignment() & Qt.AlignmentFlag.AlignHCenter),
+        "no Fallout, as três são abas lado a lado, encostadas, com a tela no meio",
+    )
+    # Uma largura em que as três cabem pela soma, mas não pela regra dos
+    # cartões (a mais larga vezes três): é aí que as duas regras se separam.
+    ideais_abas = [
+        c.largura_ideal()
+        for c in (tela_menu.cartao_revisar, tela_menu.cartao_caderno, tela_menu.cartao_historico)
+    ]
+    if 3 * max(ideais_abas) > sum(ideais_abas) + 8:
+        tela_menu.resize((3 * max(ideais_abas) + sum(ideais_abas)) // 2, tela_menu.height())
+        checar(
+            not tela_menu.empilhada,
+            f"cabendo pela soma, as abas ficam lado a lado mesmo com uma bem mais larga ({ideais_abas})",
+        )
+    checar(
+        tela_menu._fileira.stretch(0) == tela_menu.cartao_revisar.largura_ideal()
+        and tela_menu._fileira.stretch(2) == tela_menu.cartao_historico.largura_ideal(),
+        "e cada aba estica na proporção do que tem escrito, como as do Pip-Boy",
+    )
+    del tela_menu.LARGURA_MAX
+    aceso_fo = sob_o_cursor(tela_menu.cartao_caderno)
+    meio_fo = aceso_fo.pixelColor(aceso_fo.width() // 5, aceso_fo.height() // 3)
+    checar(
+        meio_fo.green() > 180 and meio_fo.red() < 150,
+        f"e a aba sob o cursor acende no verde do fósforo ({meio_fo.name()})",
+    )
+
+    # Elden Ring: a faixa de luz fica em volta do item, e não do painel inteiro.
+    janela.campo_jogo.setCurrentText("Elden Ring")
+    aplicacao.processEvents()
+    tela_menu.resize(900, tela_menu.height())
+    aplicacao.processEvents()
+    item_er = tela_menu.cartao_caderno
+    repouso_er = item_er.grab().toImage()
+    aceso_er = sob_o_cursor(item_er)
+
+    def mudou(x: int) -> bool:
+        y = aceso_er.height() // 2
+        return aceso_er.pixelColor(x, y) != repouso_er.pixelColor(x, y)
+
+    checar(
+        tela_menu.empilhada and mudou(aceso_er.width() // 2 - 60) and not mudou(4)
+        and not mudou(aceso_er.width() - 5),
+        "no Elden Ring, a faixa dourada acende em volta do item, e não de ponta a ponta",
+    )
+    checar(
+        item_er.fonte_do_item().pointSizeF() > janela.fonte("titulo", ui=False).pointSizeF()
+        and not item_er.fonte_do_item().bold(),
+        "e em letra de tela de título: maior e sem negrito",
+    )
+
+    janela.campo_jogo.setCurrentText("Genérico / Outro")
+    aplicacao.processEvents()
+    checar(
+        tela_menu.gramatica == "" and tela_menu._fileira.spacing() == ESPACO_MD
+        and tela_menu._fileira_widget.maximumWidth() > 10_000,
+        "no tema neutro, os cartões lado a lado de sempre",
+    )
+    tela_menu.adjustSize()
+    janela.campo_jogo.setCurrentText(jogo_menu)
+    aplicacao.processEvents()
+    janela.resize(janela.size())
+    aplicacao.processEvents()
+
 
     print("revisão com retorno")
     # Um caderno SÓ desta seção: responder cartões reagenda as palavras, e as
@@ -1437,7 +1599,11 @@ def main() -> int:
     )
     janela._cursor_mudou(None)
 
-    # -- O cartão da tela inicial inclina em direção ao cursor.
+    # -- O cartão da tela inicial inclina em direção ao cursor. Cartão é a
+    # gramática do tema neutro; nos jogos, a tela é o menu deles.
+    jogo_3d = janela.campo_jogo.currentText()
+    janela.campo_jogo.setCurrentText("Genérico / Outro")
+    aplicacao.processEvents()
     cartao_3d = janela.conversa.tela_inicial.cartao_caderno
     borda_direita = QPointF(cartao_3d.width() - 2.0, cartao_3d.height() / 2)
     QApplication.sendEvent(
@@ -1467,6 +1633,8 @@ def main() -> int:
     QApplication.sendEvent(
         cartao_3d, QFocusEvent(QEvent.Type.FocusOut, Qt.FocusReason.TabFocusReason)
     )
+    janela.campo_jogo.setCurrentText(jogo_3d)
+    aplicacao.processEvents()
 
     # -- Atmosfera desligada: nada disso existe.
     janela.campo_atmosfera.setCurrentText("Desligada")

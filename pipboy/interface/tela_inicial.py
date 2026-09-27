@@ -38,6 +38,7 @@ from PySide6.QtGui import (
     QFontMetrics,
     QHoverEvent,
     QPainter,
+    QPainterPath,
     QPen,
     QTransform,
 )
@@ -54,6 +55,7 @@ from PySide6.QtWidgets import (
 from .. import design
 from .componentes import Holofote, RotuloDecifravel, acender_borda, caminho_forma
 from .movimento import animar_entrada
+from .ornamentos import estilo_de_selecao, pintar_selecao
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,9 +112,23 @@ class CartaoAcao(QAbstractButton):
 
     Pintado por inteiro, sem rótulos filhos: um widget só não tem movimento de
     mouse que se perca num filho, nem efeito gráfico de filho para aninhar.
+
+    E pintado no IDIOMA do menu do jogo (ver ``Atmosfera.menu``). Três cartões
+    lado a lado são a gramática de um aplicativo; nenhum dos jogos arruma o
+    menu assim. A tela de título da alta fantasia empilha os itens no meio, em
+    letra grande, e o escolhido acende sob uma faixa de luz; o menu de pausa do
+    velho oeste, do bruxo e da Night City é uma coluna encostada à esquerda,
+    com o valor de cada linha na ponta direita; o Pip-Boy, o celular do GTA e
+    o lobby do visor são uma fileira de abas sobre um fio. O que muda é a
+    gramática — o título, o detalhe e a tecla de cada item continuam todos lá.
     """
 
     RESPIRO = 14
+    # A folga de cima e de baixo de um item de menu: menos que a do cartão —
+    # um menu de jogo é uma pilha de linhas, e não uma estante de caixas.
+    RESPIRO_MENU = 9
+    # Da borda até o título, na coluna à esquerda.
+    RECUO_MENU = 16
     # O cartão inclina em direção ao cursor, até este ângulo em cada eixo, com
     # uma perspectiva curta o bastante para a inclinação se VER num cartão
     # pequeno. A folga em volta do corpo é o espaço que a inclinação ocupa.
@@ -144,6 +160,27 @@ class CartaoAcao(QAbstractButton):
         return self._detalhe
 
     @property
+    def gramatica(self) -> str:
+        """Como o jogo arruma o menu (ver ``Atmosfera.menu``); vazio, cartões."""
+        return str(getattr(self._janela.atmosfera, "menu", ""))
+
+    def fonte_do_item(self) -> QFont:
+        """O título do item na fonte do jogo, com o espaçamento dos menus dele.
+
+        A lista do meio da tela é a das telas de título — letra maior e sem
+        negrito; a coluna e as abas são as do menu de pausa — menores e firmes.
+        """
+        janela = self._janela
+        fonte = janela.fonte("titulo", ui=False)
+        if self.gramatica == "lista_centrada":
+            fonte.setPointSizeF(fonte.pointSizeF() * 1.25)
+            fonte.setBold(False)
+        fonte.setLetterSpacing(
+            QFont.SpacingType.AbsoluteSpacing, 1.0 + janela.atmosfera.espacamento_titulo
+        )
+        return fonte
+
+    @property
     def destaque(self) -> bool:
         return self._destaque
 
@@ -159,8 +196,14 @@ class CartaoAcao(QAbstractButton):
     def sizeHint(self) -> QSize:
         # Das fontes da janela, e não da própria: é o que faz o cartão crescer
         # junto quando o tamanho do texto muda.
-        titulo = QFontMetrics(self._janela.fonte("corpo_forte")).height()
         detalhe = QFontMetrics(self._janela.fonte("micro")).height()
+        gramatica = self.gramatica
+        if gramatica:
+            titulo = QFontMetrics(self.fonte_do_item()).height()
+            # Na coluna, o detalhe vai na mesma linha, na ponta direita.
+            linhas = titulo if gramatica == "lista_a_esquerda" else titulo + 3 + detalhe
+            return QSize(190, linhas + 2 * self.RESPIRO_MENU)
+        titulo = QFontMetrics(self._janela.fonte("corpo_forte")).height()
         return QSize(190, self.RESPIRO * 2 + titulo + 4 + detalhe + 2 * self.FOLGA_3D)
 
     def minimumSizeHint(self) -> QSize:
@@ -171,6 +214,13 @@ class CartaoAcao(QAbstractButton):
         janela = self._janela
         m_titulo = QFontMetrics(janela.fonte("corpo_forte"))
         m_micro = QFontMetrics(janela.fonte("micro"))
+        if self.gramatica:
+            tecla_menu = m_micro.horizontalAdvance(self._tecla) + 12
+            detalhe_menu = m_micro.horizontalAdvance(self._detalhe) + 8 + tecla_menu
+            titulo_menu = QFontMetrics(self.fonte_do_item()).horizontalAdvance(self.text().upper())
+            if self.gramatica == "lista_a_esquerda":
+                return titulo_menu + 24 + detalhe_menu + 2 * self.RECUO_MENU
+            return max(titulo_menu, detalhe_menu) + 2 * 22
         glifo = QFontMetrics(janela.fonte("titulo")).horizontalAdvance(self._glifo) + 10
         tecla = m_micro.horizontalAdvance(self._tecla) + 12
         conteudo = max(
@@ -189,7 +239,8 @@ class CartaoAcao(QAbstractButton):
         """
         luz = self._holofote.valor
         cursor = self._holofote.cursor
-        if luz <= 0.01 or cursor is None or self._reduzir():
+        # Item de menu não inclina: o que acende nele é a marca do jogo.
+        if self.gramatica or luz <= 0.01 or cursor is None or self._reduzir():
             return 0.0, 0.0
         if self._focado and not self._sob_cursor:
             return 0.0, 0.0
@@ -244,6 +295,9 @@ class CartaoAcao(QAbstractButton):
 
     # -- desenho
     def paintEvent(self, _evento: Any) -> None:
+        if self.gramatica:
+            self._pintar_item()
+            return
         janela = self._janela
         t = janela.tema
         forma = janela.atmosfera.forma
@@ -331,6 +385,138 @@ class CartaoAcao(QAbstractButton):
             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
             m_micro.elidedText(self._detalhe, Qt.TextElideMode.ElideRight, int(largura_detalhe)),
         )
+        pintor.end()
+
+
+    def _pintar_item(self) -> None:
+        """O item no idioma do menu do jogo.
+
+        A marca de escolhido do jogo (ver ``ornamentos.SELECOES``) acende sob o
+        cursor ou o foco — é ela o anel de foco de quem navega por Tab — e o
+        título passa a ser escrito na cor que ela devolve, legível sobre ela.
+        A pincelada não esmaece: entra passada, da esquerda para a direita.
+        """
+        janela = self._janela
+        t = janela.tema
+        gramatica = self.gramatica
+        pintor = QPainter(self)
+        pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+        recuo = 1.0 if self.isDown() else 0.0
+        area = QRectF(self.rect()).adjusted(0.5, 0.5 + recuo, -0.5, -0.5 + recuo)
+        fonte_item, fonte_micro = self.fonte_do_item(), janela.fonte("micro")
+        m_item, m_micro = QFontMetrics(fonte_item), QFontMetrics(fonte_micro)
+        titulo = self.text().upper()
+        fundo = t.surface
+        cor_titulo = QColor(design.garantir_contraste(t.primary, fundo))
+        cor_detalhe = QColor(
+            design.garantir_contraste(t.accent_text if self._destaque else t.text_muted, fundo)
+        )
+        cor_tecla = QColor(design.garantir_contraste(t.text_muted, fundo))
+        largura_tecla = m_micro.horizontalAdvance(self._tecla) + 12.0
+        altura_tecla = m_micro.height() + 4.0
+        largura_titulo = float(m_item.horizontalAdvance(titulo))
+        largura_detalhe = float(m_micro.horizontalAdvance(self._detalhe))
+
+        # Onde a marca cai: a linha inteira, na coluna e na aba; no meio da
+        # tela, só em volta do que está escrito — uma faixa da largura do
+        # painel sob um item de sete letras deixa de dizer QUAL está escolhido.
+        if gramatica == "lista_centrada":
+            largura_marca = max(largura_titulo, largura_detalhe + 8 + largura_tecla) + 96.0
+            marca = QRectF(
+                area.center().x() - largura_marca / 2, area.top(), largura_marca, area.height()
+            ).intersected(area)
+        elif gramatica == "abas":
+            marca = area.adjusted(1, 1, -1, -3)
+        else:
+            marca = area.adjusted(0, 1, 0, -1)
+
+        if gramatica == "abas":
+            # O fio sobre o qual as abas assentam, de ponta a ponta da fileira.
+            pintor.setPen(QPen(QColor(t.border_forte), 1.0))
+            pintor.drawLine(
+                QPointF(area.left() - 0.5, area.bottom()),
+                QPointF(area.right() + 0.5, area.bottom()),
+            )
+
+        luz = self._holofote.valor
+        if luz > 0.01:
+            estilo = estilo_de_selecao()
+            caminho = QPainterPath()
+            caminho.addRect(marca)
+            pintor.save()
+            if estilo == "pincelada" and luz < 1.0:
+                pintor.setClipRect(
+                    QRectF(marca.left(), marca.top() - 2, marca.width() * luz, marca.height() + 4)
+                )
+            else:
+                pintor.setOpacity(luz)
+            escrita = pintar_selecao(pintor, marca, caminho, estilo, janela.paleta())
+            if escrita is None:
+                # Um jogo com menu e sem marca própria: o véu de acento de sempre.
+                veu = design.misturar(t.surface_alta, t.accent, 0.18)
+                pintor.fillPath(caminho, QColor(veu))
+                escrita = QColor(design.garantir_contraste(t.primary, veu))
+            pintor.restore()
+            if luz >= 0.5:
+                cor_titulo = cor_detalhe = cor_tecla = escrita
+
+        pintor.setFont(fonte_item)
+        pintor.setPen(cor_titulo)
+        altura_titulo = float(m_item.height())
+        if gramatica == "lista_a_esquerda":
+            # Uma linha só: o título na ponta esquerda, a tecla na direita e o
+            # detalhe encostado nela — o valor de cada linha do menu de pausa.
+            meio = area.center().y()
+            caixa_tecla = QRectF(
+                area.right() - self.RECUO_MENU - largura_tecla, meio - altura_tecla / 2,
+                largura_tecla, altura_tecla,
+            )
+            x_titulo = area.left() + self.RECUO_MENU
+            espaco_titulo = max(0.0, caixa_tecla.left() - 24 - largura_detalhe - x_titulo)
+            pintor.drawText(
+                QRectF(x_titulo, meio - altura_titulo / 2, espaco_titulo, altura_titulo),
+                int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+                m_item.elidedText(titulo, Qt.TextElideMode.ElideRight, int(espaco_titulo)),
+            )
+            caixa_detalhe = QRectF(
+                caixa_tecla.left() - 8 - largura_detalhe, meio - m_micro.height() / 2,
+                largura_detalhe, m_micro.height(),
+            )
+        else:
+            topo = area.top() + self.RESPIRO_MENU
+            pintor.drawText(
+                QRectF(area.left() + 8, topo, area.width() - 16, altura_titulo),
+                int(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter),
+                m_item.elidedText(titulo, Qt.TextElideMode.ElideRight, int(area.width() - 16)),
+            )
+            y_linha = topo + altura_titulo + 3
+            detalhe_visivel = m_micro.elidedText(
+                self._detalhe, Qt.TextElideMode.ElideRight,
+                int(max(0.0, area.width() - 24 - largura_tecla)),
+            )
+            largura_visivel = float(m_micro.horizontalAdvance(detalhe_visivel))
+            inicio = area.center().x() - (largura_visivel + 8 + largura_tecla) / 2
+            caixa_detalhe = QRectF(inicio, y_linha, largura_visivel, m_micro.height())
+            caixa_tecla = QRectF(
+                caixa_detalhe.right() + 8, y_linha + (m_micro.height() - altura_tecla) / 2,
+                largura_tecla, altura_tecla,
+            )
+        pintor.setFont(fonte_micro)
+        pintor.setPen(cor_detalhe)
+        pintor.drawText(
+            caixa_detalhe, int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            m_micro.elidedText(
+                self._detalhe, Qt.TextElideMode.ElideRight, int(caixa_detalhe.width()) + 1
+            ),
+        )
+        # A tecla desenhada como tecla, como no cartão.
+        borda_tecla = QColor(cor_tecla)
+        borda_tecla.setAlphaF(0.55)
+        pintor.setPen(QPen(borda_tecla, 1.0))
+        pintor.setBrush(Qt.BrushStyle.NoBrush)
+        pintor.drawRoundedRect(caixa_tecla, 4.0, 4.0)
+        pintor.setPen(cor_tecla)
+        pintor.drawText(caixa_tecla, int(Qt.AlignmentFlag.AlignCenter), self._tecla)
         pintor.end()
 
 
@@ -470,6 +656,11 @@ class TelaInicial(QWidget):
     """O que a conversa mostra enquanto não há conversa."""
 
     LARGURA_MAX = 660
+    # Na gramática da coluna à esquerda: a distância da borda do painel até a
+    # coluna, e a largura da coluna de itens — a do menu de pausa, e não a do
+    # painel inteiro, ou o valor de cada linha fica longe do título dela.
+    RECUO_COLUNA = 40
+    LARGURA_COLUNA = 460
 
     def __init__(self, janela: Any, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -477,7 +668,7 @@ class TelaInicial(QWidget):
         self.setObjectName("telaInicial")
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
 
-        externa = QHBoxLayout(self)
+        self._externa = externa = QHBoxLayout(self)
         externa.setContentsMargins(0, 0, 0, 0)
         externa.addStretch(1)
         miolo = QWidget()
@@ -506,7 +697,7 @@ class TelaInicial(QWidget):
         self.corpo = rotulo("inicialCorpo")
         self.sequencia = rotulo("inicialSequencia")
 
-        fileira = QWidget()
+        self._fileira_widget = fileira = QWidget()
         self._fileira = cartoes = QHBoxLayout(fileira)
         cartoes.setContentsMargins(0, design.ESPACO_MD, 0, design.ESPACO_MD)
         cartoes.setSpacing(design.ESPACO_MD)
@@ -664,11 +855,47 @@ class TelaInicial(QWidget):
         """)
         for cartao in (self.cartao_revisar, self.cartao_caderno, self.cartao_historico):
             cartao.updateGeometry()
+        self._aplicar_gramatica()
         self._ajustar_fileira()
 
     def resizeEvent(self, evento: Any) -> None:
         super().resizeEvent(evento)
         self._ajustar_fileira()
+
+    @property
+    def gramatica(self) -> str:
+        """Como o jogo arruma o menu (ver ``Atmosfera.menu``); vazio, cartões."""
+        return str(getattr(self._janela.atmosfera, "menu", ""))
+
+    def _aplicar_gramatica(self) -> None:
+        """Arruma a tela como o menu do jogo: no meio, ou encostada à esquerda.
+
+        Na coluna de pausa, a tela INTEIRA muda de lugar, e não só os itens:
+        um menu encostado à esquerda sob um título centrado parece um erro de
+        alinhamento, e não uma escolha. As fichas de exemplo acompanham.
+        """
+        gramatica = self.gramatica
+        esquerda = gramatica == "lista_a_esquerda"
+        alinhamento = (
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+            if esquerda else Qt.AlignmentFlag.AlignCenter
+        )
+        for rotulo in (
+            self.glifo, self.titulo, self.corpo, self.sequencia, self.secao_exemplos,
+            self.atalhos, self.diagnostico,
+        ):
+            rotulo.setAlignment(alinhamento)
+        self._externa.setStretch(0, 0 if esquerda else 1)
+        self._externa.setContentsMargins(self.RECUO_COLUNA if esquerda else 0, 0, 0, 0)
+        self._fileira_fichas.setStretch(0, 0 if esquerda else 1)
+        for ficha in self.fichas:
+            self._fileira_fichas.setAlignment(
+                ficha, Qt.AlignmentFlag.AlignLeft if esquerda else Qt.AlignmentFlag.AlignHCenter
+            )
+        self._fileira_widget.setMaximumWidth(self.LARGURA_COLUNA if esquerda else 16_777_215)
+        # Menu de jogo é linha colada em linha, e aba encostada em aba sobre
+        # o mesmo fio; só os cartões respiram entre si.
+        self._fileira.setSpacing(0 if gramatica else design.ESPACO_MD)
 
     def _ajustar_fileira(self) -> None:
         """Três lado a lado quando cabem inteiros; um sobre o outro quando não.
@@ -676,11 +903,27 @@ class TelaInicial(QWidget):
         Com a janela no tamanho mínimo e o texto em "Maior", a fileira cortava
         os três títulos em "Re…", "Ca…" e "Hi…". Um cartão empilhado ocupa mais
         altura, e altura a conversa tem para rolar; título cortado não se lê.
+        As listas de menu estão sempre uma sobre a outra: é o que elas são.
         """
         cartoes = (self.cartao_revisar, self.cartao_caderno, self.cartao_historico)
-        necessaria = max(c.largura_ideal() for c in cartoes)
+        ideais = [c.largura_ideal() for c in cartoes]
         disponivel = min(self.width(), self.LARGURA_MAX)
-        cabe = len(cartoes) * necessaria + (len(cartoes) - 1) * design.ESPACO_MD <= disponivel
+        espaco = self._fileira.spacing()
+        gramatica = self.gramatica
+        if gramatica == "abas":
+            # Abas têm a largura do que está escrito nelas, como no Pip-Boy:
+            # cabem pela SOMA, e cada uma estica na proporção do que precisa.
+            # Pela regra dos cartões, a mais larga — "3 vencidas · offline" —
+            # empilhava as três mesmo sobrando lugar para elas lado a lado.
+            cabe = sum(ideais) + (len(cartoes) - 1) * espaco <= disponivel
+            for indice, ideal in enumerate(ideais):
+                self._fileira.setStretch(indice, max(1, ideal))
+        else:
+            cabe = len(cartoes) * max(ideais) + (len(cartoes) - 1) * espaco <= disponivel
+            for indice in range(len(cartoes)):
+                self._fileira.setStretch(indice, 1)
+        if gramatica.startswith("lista"):
+            cabe = False
         direcao = (
             QBoxLayout.Direction.LeftToRight if cabe else QBoxLayout.Direction.TopToBottom
         )

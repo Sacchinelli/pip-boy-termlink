@@ -106,6 +106,13 @@ class Atmosfera:
     # Como o jogo anuncia a palavra nova (ver avisos.AVISOS); vazio, o
     # cartão discreto do tema neutro.
     aviso: str = ""
+    # Como o jogo arruma o menu da tela inicial — revisar, caderno, histórico:
+    # vazio, cartões lado a lado; "lista_centrada", a pilha de itens no meio
+    # da tela dos menus de título da alta fantasia; "lista_a_esquerda", a
+    # coluna de pausa encostada à esquerda do velho oeste, do bruxo e da
+    # Night City; "abas", a fileira de abas do Pip-Boy, do celular do GTA e
+    # do lobby do visor. Ver tela_inicial.CartaoAcao.
+    menu: str = ""
 
     semente: int = 7
     # Cor de acento das camadas vivas; vazio usa o acento do tema.
@@ -117,6 +124,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # Terminal de fósforo: varredura densa, brilho sangrando do centro, tubo
     # abaulado e a tremulação característica de um CRT malcuidado.
     "Fallout": Atmosfera(
+        menu="abas",
         aviso="terminal",
         selecao="invertida",
         grao=0.05, varredura=0.22, passo_varredura=3, vinheta=0.62, curvatura=0.55,
@@ -125,6 +133,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
      brilho_texto=0.6,),
     # Luz dourada baixa e partículas subindo, contra pergaminho.
     "Elden Ring": Atmosfera(
+        menu="lista_centrada",
         aviso="graca",
         botao_principal="brilho_dourado",
         selecao="brilho_dourado",
@@ -137,6 +146,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # para ver, e o que faltava para esta crônica não ser o tema neutro com
     # neve. O halo do fundo desceu: com a aurora no alto, os dois brigavam.
     "Skyrim": Atmosfera(
+        menu="lista_centrada",
         aviso="descoberta",
         botao_principal="losangos",
         selecao="losangos",
@@ -146,6 +156,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     ),
     # Couro e vela: grão grosso, halo quente lateral, brasas lentas.
     "The Witcher 3": Atmosfera(
+        menu="lista_a_esquerda",
         aviso="diario",
         botao_principal="brasa",
         selecao="brasa",
@@ -158,6 +169,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # chão quente com Elden Ring e Witcher; o que só o velho oeste tem não é
     # a cor, é o SUPORTE.
     "Red Dead": Atmosfera(
+        menu="lista_a_esquerda",
         aviso="cartaz",
         botao_principal="pincelada",
         selecao="pincelada",
@@ -169,6 +181,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # o pôr do sol de neon no horizonte — a imagem inteira deste ambiente, e
     # o que ele não tinha. O halo saiu do alto: o brilho agora sobe da linha.
     "GTA": Atmosfera(
+        menu="abas",
         aviso="missao",
         botao_principal="letreiro",
         selecao="letreiro",
@@ -179,6 +192,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
      brilho_texto=0.32,),
     # Interferência digital, varredura fina e chuva de dados descendo.
     "Cyberpunk 2077": Atmosfera(
+        menu="lista_a_esquerda",
         aviso="fragmento",
         selecao="aba",
         divisoria="segmentada", moldura="circuito", espacamento_titulo=1.5,
@@ -191,6 +205,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # ele este ambiente e a rádio pirata eram dois fundos escuros arroxeados,
     # a 4,57 um do outro.
     "RPG / Aventura (geral)": Atmosfera(
+        menu="lista_centrada",
         aviso="pergaminho",
         botao_principal="iluminura",
         selecao="iluminura",
@@ -205,6 +220,7 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # grade volta ao papel de retícula de fundo. O pó é cinza de cinza, e não
     # laranja: partícula na cor do acento vira vaga-lume, e aqui é escombro.
     "FPS / Multiplayer": Atmosfera(
+        menu="abas",
         aviso="abate",
         selecao="mira",
         divisoria="regua", espacamento_titulo=1.5,
