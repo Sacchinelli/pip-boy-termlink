@@ -1723,6 +1723,15 @@ class Janela(QWidget):
         if self._caderno is not None:
             self._caderno.atualizar()
 
+    def modo_de_revisao(self) -> str:
+        """O jeito de revisar da última rodada: lembrar (padrão) ou escrever."""
+        return str(self._prefs.extras.get("modo_revisao", "") or "lembrar")
+
+    def definir_modo_de_revisao(self, modo: str) -> None:
+        """Guarda o jeito de revisar, para a próxima rodada já abrir nele."""
+        self._prefs.extras["modo_revisao"] = modo
+        self._preferencias.agendar()
+
     def marcar_estudo(self) -> None:
         """Ponto único de 'hoje houve estudo' — sessão ou revisão offline."""
         try:

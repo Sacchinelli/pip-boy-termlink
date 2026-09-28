@@ -1353,6 +1353,130 @@ def teste_revisao() -> None:
     checar(store.pendentes() == 1, "só a errada continua vencida no banco")
 
 
+def teste_revisao_escrita() -> None:
+    """O modo de escrever e a nota difícil.
+
+    O contrato: a resposta se confere sem caixa, sem acento e sem o "to" do
+    infinitivo; um erro de digitação numa palavra longa é *quase*; a frase
+    ganha um buraco onde a palavra estava (flexionada ou não); a pista dá o
+    começo e o tamanho; e a nota sai do que aconteceu — de primeira, acerto;
+    depois de errar ou por uma letra, difícil; na última tentativa, erro. No
+    banco, difícil afasta a palavra MENOS que um acerto limpo, e não a traz
+    de volta como um erro.
+    """
+    print("revisão escrita")
+    from pipboy.revisao import (
+        ACERTO,
+        DIFICIL,
+        ERRO,
+        TENTATIVAS,
+        RodadaDeRevisao,
+        conferir,
+        distancia,
+        lacuna,
+        normalizar,
+        nota_da_escrita,
+        pista,
+        trechos,
+    )
+
+    checar(
+        normalizar("  Ammo. ") == "ammo" and normalizar("Don\u2019t") == "don't"
+        and normalizar("CAFÉ") == "cafe",
+        "a resposta se compara sem caixa, sem acento, sem pontuação solta e com o apóstrofo reto",
+    )
+    checar(
+        conferir("Scavenge", "to scavenge").certa and conferir("to scavenge", "to scavenge").certa
+        and conferir("bounty", "a bounty").certa,
+        "o \"to\" do infinitivo e o artigo são opcionais",
+    )
+    checar(
+        distancia("recieve", "receive") == 1 and distancia("kitten", "sitting") == 3,
+        "duas letras trocadas de lugar pesam como um erro só",
+    )
+    quase = conferir("scavange", "to scavenge")
+    checar(
+        not quase.certa and quase.quase and quase.letras_no_lugar == 7 and quase.letras == 8,
+        f"uma letra errada numa palavra longa é quase ({quase.letras_no_lugar}/{quase.letras})",
+    )
+    checar(
+        not conferir("shot", "shoot").quase and not conferir("lot", "loot").quase,
+        "numa palavra curta, uma letra trocada já é outra palavra",
+    )
+    longe = conferir("scrap", "to scavenge")
+    checar(
+        longe.no_lugar == (True, True, False, False, False) and longe.letras_no_lugar == 2,
+        f"letra a letra, a tentativa diz o que já está no lugar ({longe.no_lugar})",
+    )
+    checar(
+        lacuna("We need to scavenge for parts.", "to scavenge") == "We need to _____ for parts."
+        and lacuna("He scavenged the ruins.", "to scavenge") == "He _____ the ruins."
+        and lacuna("Bounties everywhere.", "bounty") == "_____ everywhere."
+        and lacuna("I'm low on ammo now", "low on ammo") == "I'm _____ now",
+        "a frase ganha um buraco no lugar da palavra, flexionada ou não",
+    )
+    checar(
+        lacuna("Stay in stealth mode.", "loot") is None and lacuna("", "ammo") is None
+        and lacuna("Reloading the pistol.", "load") is None,
+        "sem a palavra na frase (nem dentro de outra), não há buraco — e o exemplo se esconde",
+    )
+    checar(
+        trechos("A bounty, then another bounty.", "bounty") == [(2, 8), (23, 29)],
+        "cada aparição da palavra é achada, para a frase inteira voltar com elas acesas",
+    )
+    checar(
+        pista("to scavenge") == "s _ _ _ _ _ _ _" and pista("to scavenge", 2) == "s c _ _ _ _ _ _"
+        and pista("low on ammo") == "l _ _   _ _   _ _ _ _",
+        "a pista dá o começo e o tamanho, com as palavras separadas",
+    )
+    checar(
+        nota_da_escrita(conferir("ammo", "ammo"), 0) == ACERTO
+        and nota_da_escrita(conferir("ammo", "ammo"), 1) == DIFICIL
+        and nota_da_escrita(quase, 0) == DIFICIL
+        and nota_da_escrita(longe, 0) is None
+        and nota_da_escrita(longe, TENTATIVAS - 1) == ERRO,
+        "de primeira é acerto; depois da pista ou por uma letra, difícil; na última, erro",
+    )
+
+    store = VocabularyStore(Path(tempfile.mkdtemp()) / "escrita.sqlite3")
+    for termo in ("limpo", "custoso"):
+        store.registrar(termo, "x")
+        store.avaliar(termo, True)
+        store.avaliar(termo, True)
+    limpo = store.avaliar("limpo", True)
+    custoso = store.avaliar("custoso", True, hesitou=True)
+    checar(
+        3 < int(custoso["proxima_revisao_em_dias"]) < int(limpo["proxima_revisao_em_dias"])
+        and custoso["acertos"] == 3 and custoso["hesitou"] is True,
+        f"difícil ainda afasta a palavra, mas menos que um acerto limpo "
+        f"({custoso['proxima_revisao_em_dias']} contra {limpo['proxima_revisao_em_dias']} dias)",
+    )
+    store.registrar("novo", "x")
+    checar(
+        store.avaliar("novo", True, hesitou=True)["proxima_revisao_em_dias"] == 1,
+        "a primeira revisão difícil agenda para amanhã, como a primeira certa",
+    )
+    depois = store.avaliar("custoso", True)
+    checar(
+        int(depois["proxima_revisao_em_dias"]) < round(int(custoso["proxima_revisao_em_dias"]) * 2.7),
+        "e o esforço pesa na facilidade: o acerto seguinte salta menos",
+    )
+    store.close()
+
+    rodada_store = VocabularyStore(Path(tempfile.mkdtemp()) / "rodada-escrita.sqlite3")
+    for termo in ("um", "dois", "tres"):
+        rodada_store.registrar(termo, "x")
+    rodada = RodadaDeRevisao(rodada_store)
+    rodada.responder(True)
+    rodada.responder(True, hesitou=True)
+    rodada.responder(False)
+    checar(
+        (rodada.acertos, rodada.dificeis, rodada.erros) == (1, 1, 1) and rodada.terminada,
+        "a rodada conta acertos, difíceis e erros em separado",
+    )
+    rodada_store.close()
+
+
 def teste_backup() -> None:
     """Cópia diária do caderno com rotação.
 
@@ -2963,6 +3087,7 @@ def main() -> int:
         teste_lancamento_sem_console,
         teste_fontes_embutidas,
         teste_dicas,
+        teste_revisao_escrita,
     ):
         try:
             teste()

@@ -499,12 +499,15 @@ class VocabularyStore:
                 ).fetchone()[0]
             )
 
-    def avaliar(self, termo: str, acertou: bool) -> dict[str, object]:
+    def avaliar(
+        self, termo: str, acertou: bool, *, hesitou: bool = False
+    ) -> dict[str, object]:
         """Registra o resultado de uma revisão e agenda a próxima.
 
         SM-2 simplificado: sem notas de 0 a 5 (inviáveis numa conversa por
-        voz), apenas acertou/errou. A ``facilidade`` faz o papel do fator E do
-        algoritmo original, limitada entre 1.3 e 3.0.
+        voz), apenas acertou/errou — e, na revisão offline, ``hesitou``: o
+        *difícil*, acertou mas custou. A ``facilidade`` faz o papel do fator E
+        do algoritmo original, limitada entre 1.3 e 3.0.
         """
         termo = " ".join(termo.split()).strip()
         with self._lock:
@@ -520,14 +523,23 @@ class VocabularyStore:
 
             if acertou:
                 acertos += 1
-                if intervalo <= 0:
-                    intervalo = 1
-                elif intervalo == 1:
-                    intervalo = 3
+                if hesitou:
+                    # Difícil: lembrou, mas custou. O intervalo cresce devagar
+                    # (×1,2, como o "Hard" do Anki) e a facilidade cai um
+                    # pouco — nem o salto de um acerto limpo, que empurraria
+                    # para longe uma palavra ainda frágil, nem o recomeço de
+                    # um erro, que jogaria fora o que a pessoa sabia.
+                    intervalo = 1 if intervalo <= 0 else max(intervalo + 1, round(intervalo * 1.2))
+                    facilidade = max(1.3, facilidade - 0.15)
                 else:
-                    intervalo = max(intervalo + 1, round(intervalo * facilidade))
+                    if intervalo <= 0:
+                        intervalo = 1
+                    elif intervalo == 1:
+                        intervalo = 3
+                    else:
+                        intervalo = max(intervalo + 1, round(intervalo * facilidade))
+                    facilidade = min(3.0, facilidade + 0.1)
                 intervalo = min(intervalo, MAX_INTERVALO_DIAS)
-                facilidade = min(3.0, facilidade + 0.1)
                 # Em UTC, como todo carimbo gravado (ver banco.agora). O
                 # ``.astimezone()`` que estava aqui devolvia o fuso LOCAL, e
                 # esta é a coluna que o SQL compara como TEXTO para responder
@@ -555,6 +567,7 @@ class VocabularyStore:
         return {
             "termo": str(row["termo"]),
             "acertou": acertou,
+            "hesitou": bool(acertou and hesitou),
             "proxima_revisao_em_dias": intervalo,
             "acertos": acertos,
             "erros": erros,

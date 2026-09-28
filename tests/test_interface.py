@@ -544,7 +544,7 @@ def main() -> int:
     checar(not revisao.grab().isNull(), "cartões de revisão desenham")
     revisao._revelar()
     aplicacao.processEvents()
-    revisao._responder(True)
+    revisao._responder("acerto")
     aplicacao.processEvents()
     checar(not revisao.grab().isNull(), "revisão sobrevive a revelar e responder")
     revisao.close()
@@ -1214,9 +1214,9 @@ def main() -> int:
             f"revelar não empurra os botões ({posicao_botoes} → {posicao_resposta})",
         )
 
-        rodada_ui._responder(True)
+        rodada_ui._responder("acerto")
         aplicacao.processEvents()
-        checar(rodada_ui._barra.resultados == [True], "acertar pinta o primeiro segmento")
+        checar(rodada_ui._barra.resultados == ["acerto"], "acertar pinta o primeiro segmento")
         checar(
             primeiro.termo in rodada_ui._recado.toolTip() and "volta" in rodada_ui._recado.toolTip(),
             f"e o recado diz quando a palavra volta ({rodada_ui._recado.toolTip()})",
@@ -1233,16 +1233,16 @@ def main() -> int:
         segundo = rodada_ui._rodada.atual
         assert segundo is not None
         rodada_ui._revelar()
-        rodada_ui._responder(False)
+        rodada_ui._responder("erro")
         aplicacao.processEvents()
-        checar(rodada_ui._barra.resultados == [True, False], "errar pinta o segmento seguinte")
+        checar(rodada_ui._barra.resultados == ["acerto", "erro"], "errar pinta o segmento seguinte")
         checar(
             rodada_ui._recado.toolTip() == f"{segundo.termo} volta na próxima rodada",
             f"e a palavra errada volta na próxima rodada ({rodada_ui._recado.toolTip()})",
         )
 
         rodada_ui._revelar()
-        rodada_ui._responder(False)
+        rodada_ui._responder("erro")
         aplicacao.processEvents()
         checar(
             rodada_ui._termo.text() == "1 acerto · 2 erros",
@@ -1268,7 +1268,7 @@ def main() -> int:
         janela.campo_atmosfera.setCurrentText("Desligada")
         aplicacao.processEvents()
         rodada_ui._revelar()
-        rodada_ui._responder(True)
+        rodada_ui._responder("acerto")
         checar(
             not rodada_ui._cartao.findChildren(ImagemQueSai),
             "com a atmosfera desligada o cartão troca num quadro",
@@ -1928,8 +1928,8 @@ def main() -> int:
 
     revisao_ima = RevisaoIma(janela, store, parent=janela)
     checar(
-        len(revisao_ima._campo_magnetico.botoes) == 5,
-        "as ações da revisão também",
+        len(revisao_ima._campo_magnetico.botoes) == 9,
+        f"as ações da revisão também — as dos dois jeitos ({len(revisao_ima._campo_magnetico.botoes)})",
     )
     revisao_ima.close()
 
@@ -4384,6 +4384,164 @@ def main() -> int:
     janela.campo_jogo.setCurrentText(jogo_rp)
     janela.campo_atmosfera.setCurrentText(atmosfera_rp)
     aplicacao.processEvents()
+
+    print("a revisão que pede a palavra")
+    from PySide6.QtTest import QTest
+
+    from pipboy.interface.revisao import (
+        MODO_ESCREVER,
+        MODO_LEMBRAR,
+        VOZES_DA_ESCRITA,
+        voz_da_escrita,
+    )
+    from pipboy.interface.revisao import JanelaRevisao as RevisaoEscrita
+    from pipboy.themes import TEMAS as TEMAS_ESCRITA
+
+    recusas = [voz_da_escrita(nome)[1] for nome in TEMAS_ESCRITA]
+    convites = [voz_da_escrita(nome)[0] for nome in TEMAS_ESCRITA]
+    checar(
+        set(VOZES_DA_ESCRITA) <= set(TEMAS_ESCRITA) and len(VOZES_DA_ESCRITA) == len(TEMAS_ESCRITA) - 1
+        and len(set(recusas)) == len(recusas)
+        and all("{n}" in r and "{total}" in r for r in recusas),
+        "cada jogo recusa uma tentativa do seu jeito, e toda recusa diz quantas letras acertou",
+    )
+    checar(len(set(convites)) >= 8, f"e o campo convida na voz do jogo ({len(set(convites))} convites)")
+
+    def enter(alvo: QWidget) -> None:
+        QApplication.sendEvent(
+            alvo, QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier)
+        )
+
+    caderno_escrita = VocabularyStore(dados / "revisao-escrita.sqlite3")
+    caderno_escrita.registrar("to scavenge", "vasculhar", "We need to scavenge for parts.", "Fallout")
+    caderno_escrita.registrar("bounty", "recompensa", "There's a bounty on your head.", "Red Dead")
+    caderno_escrita.registrar("ammo", "munição", "", "Fallout")
+    jogo_escrita = janela.campo_jogo.currentText()
+    modo_escrita = janela.modo_de_revisao()
+    janela.definir_modo_de_revisao(MODO_LEMBRAR)
+    janela.campo_jogo.setCurrentText("Fallout")
+    aplicacao.processEvents()
+    escrita = RevisaoEscrita(janela, caderno_escrita, parent=janela)
+    try:
+        escrita.show()
+        escrita.activateWindow()
+        aplicacao.processEvents()
+        checar(
+            escrita.modo == MODO_LEMBRAR and escrita.chips_modo[MODO_LEMBRAR].isChecked()
+            and not escrita.chips_modo[MODO_ESCREVER].isChecked(),
+            "a rodada começa no jeito guardado — lembrar, na primeira vez",
+        )
+        # Controle positivo: fora do campo, a letra é o atalho da nota.
+        escrita._revelar()
+        checar(
+            escrita._botao_dificil.isVisible() and escrita._botao_errei.isVisible()
+            and escrita._botao_acertei.isVisible(),
+            "revelada a resposta, são três notas: errei, difícil e acertei",
+        )
+        escrita._botao_acertei.setFocus()
+        QTest.keyClick(escrita._botao_acertei, Qt.Key.Key_D)
+        aplicacao.processEvents()
+        checar(
+            escrita._barra.resultados == ["dificil"] and escrita._rodada.dificeis == 1,
+            "lembrando, o D marca o cartão como difícil",
+        )
+        escrita.definir_modo(MODO_ESCREVER)
+        aplicacao.processEvents()
+        checar(
+            janela.modo_de_revisao() == MODO_ESCREVER and escrita.chips_modo[MODO_ESCREVER].isChecked()
+            and not escrita.chips_modo[MODO_LEMBRAR].isChecked(),
+            "trocar de jeito acende o outro chip e fica guardado para a próxima rodada",
+        )
+        cartao_escrita = escrita._rodada.atual
+        assert cartao_escrita is not None and cartao_escrita.termo == "bounty"
+        checar(
+            escrita._termo.text() == "recompensa" and not escrita._escrita.isHidden()
+            and escrita._verso.isHidden(),
+            "escrevendo, o cartão vira: a tradução na frente",
+        )
+        checar(
+            escrita._escrita.frase.text() in (
+                "There&#x27;s a _____ on your head.", "There's a _____ on your head.",
+            ),
+            f"e a frase do jogo com o buraco no lugar da palavra ({escrita._escrita.frase.text()})",
+        )
+        checar(
+            escrita._escrita.campo.placeholderText() == "> digite a senha_"
+            and escrita._escrita.campo.accessibleName() == "Escreva a palavra em inglês",
+            "no terminal, o campo pede a senha — e o leitor de tela ouve o nome de sempre",
+        )
+        campo_escrita = escrita._escrita.campo
+        campo_escrita.setFocus()
+        aplicacao.processEvents()
+        enter(campo_escrita)
+        checar(
+            escrita._erradas == 0 and escrita._escrita.retorno.text() == "",
+            "Enter no campo vazio não gasta tentativa",
+        )
+        QTest.keyClicks(campo_escrita, "bad")
+        aplicacao.processEvents()
+        checar(
+            campo_escrita.text() == "bad" and escrita._barra.resultados == ["dificil"],
+            "no campo, A, D e E são letras: digitar não responde cartão nenhum",
+        )
+        altura_escrita = escrita.height()
+        botoes_escrita = escrita._botao_conferir.mapTo(escrita, escrita._botao_conferir.rect().topLeft()).y()
+        enter(campo_escrita)
+        aplicacao.processEvents()
+        retorno_escrita = escrita._escrita.retorno.text()
+        checar(
+            "Semelhança=1/6" in retorno_escrita and escrita._escrita.pista.text() == "b _ _ _ _ _",
+            f"errar mostra a semelhança, como o terminal, e a pista ({escrita._escrita.pista.text()})",
+        )
+        checar(escrita._barra.resultados == ["dificil"], "e ainda não dá nota: sobram tentativas")
+        checar(
+            escrita.height() == altura_escrita
+            and escrita._botao_conferir.mapTo(escrita, escrita._botao_conferir.rect().topLeft()).y() == botoes_escrita,
+            "o retorno e a pista já tinham lugar: errar não empurra os botões",
+        )
+        campo_escrita.setText("Bounty")
+        enter(campo_escrita)
+        aplicacao.processEvents()
+        checar(
+            escrita._barra.resultados == ["dificil", "dificil"]
+            and escrita._botao_proximo.isVisible() and campo_escrita.isReadOnly(),
+            "certa depois de errar é difícil, e o cartão espera o Enter do próximo",
+        )
+        checar(
+            "bounty" in escrita._escrita.frase.text() and "_____" not in escrita._escrita.frase.text(),
+            "a frase volta inteira, com a palavra no lugar do buraco",
+        )
+        enter(campo_escrita)
+        aplicacao.processEvents()
+        cartao_escrita = escrita._rodada.atual
+        assert cartao_escrita is not None and cartao_escrita.termo == "ammo"
+        checar(
+            escrita._escrita.frase.isHidden() and campo_escrita.text() == "" and not campo_escrita.isReadOnly(),
+            "o mesmo Enter passa ao próximo; sem a palavra no exemplo, a frase se esconde",
+        )
+        escrita._nao_sei()
+        aplicacao.processEvents()
+        checar(
+            escrita._barra.resultados[-1] == "erro" and "ammo" in escrita._escrita.retorno.text(),
+            "não saber é honesto: a palavra aparece e a nota é erro",
+        )
+        enter(campo_escrita)
+        aplicacao.processEvents()
+        checar(
+            escrita._termo.text() == "0 acertos · 2 difíceis · 1 erro",
+            f"o resumo conta os difíceis à parte ({escrita._termo.text()})",
+        )
+        entrada_bounty = caderno_escrita.entrada("bounty")
+        checar(
+            entrada_bounty is not None and entrada_bounty.acertos == 1 and entrada_bounty.intervalo_dias == 1,
+            "no banco, difícil conta como lembrada e agenda a volta",
+        )
+    finally:
+        escrita.close()
+        caderno_escrita.close()
+        janela.definir_modo_de_revisao(modo_escrita)
+        janela.campo_jogo.setCurrentText(jogo_escrita)
+        aplicacao.processEvents()
 
     print("cada jogo mira do seu jeito")
     from PySide6.QtGui import QColor as CorMira
