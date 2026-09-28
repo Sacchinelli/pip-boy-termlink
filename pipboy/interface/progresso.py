@@ -37,7 +37,7 @@ import math
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -48,7 +48,15 @@ from PySide6.QtGui import (
     QPainterPath,
     QPen,
 )
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
+)
 
 from .. import design
 from ..nivel import REGRA_DO_XP, Nivel, nivel_de, xp_do_caderno
@@ -62,6 +70,12 @@ from .ornamentos import FAIXA_MOLDURA, MolduraDoPainel
 
 LARGURA = 640
 ALTURA_GRAFICO = 150
+# O quanto os dois gráficos de barras aceitam encolher numa tela baixa: ainda
+# legíveis, com a barra mais alta a meio caminho do tamanho de sempre.
+ALTURA_GRAFICO_MINIMA = 88
+ALTURA_PREVISAO_MINIMA = 78
+# A folga que a janela deixa entre ela e as bordas da área útil da tela.
+MARGEM_DA_TELA = 24
 ALTURA_BARRAS_JOGO = 26
 ALTURA_REGUA = 22
 
@@ -222,7 +236,12 @@ class _GraficoSemanas(_Grafico):
         super().__init__(janela, len(dados), atraso=0)
         self._dados = dados
         self._segundas = segundas_do_grafico(len(dados))
-        self.setMinimumHeight(ALTURA_GRAFICO)
+        # Elástico: o tamanho de sempre é o preferido, e numa tela baixa ele
+        # cede antes de o painel precisar rolar (ver JanelaProgresso).
+        self.setMinimumHeight(ALTURA_GRAFICO_MINIMA)
+
+    def sizeHint(self) -> QSize:
+        return QSize(super().sizeHint().width(), ALTURA_GRAFICO)
 
     def _area(self) -> tuple[QRectF, float]:
         metricas = QFontMetrics(self._janela.fonte("micro"))
@@ -438,7 +457,10 @@ class _GraficoPrevisao(_Grafico):
         super().__init__(janela, len(dados), atraso=60)
         self._dados = dados
         self._hoje = dados[0][0] if dados else date.today()
-        self.setMinimumHeight(ALTURA_PREVISAO)
+        self.setMinimumHeight(ALTURA_PREVISAO_MINIMA)
+
+    def sizeHint(self) -> QSize:
+        return QSize(super().sizeHint().width(), ALTURA_PREVISAO)
 
     def _area(self) -> tuple[QRectF, float]:
         metricas = QFontMetrics(self._janela.fonte("micro"))
@@ -1036,8 +1058,31 @@ class BarraDeNivel(QWidget):
         pintor.end()
 
 
+class RolagemDoPainel(QScrollArea):
+    """A rolagem dos gráficos, que pede a altura INTEIRA deles.
+
+    A ``QScrollArea`` do Qt limita o próprio tamanho preferido a umas vinte
+    linhas de texto, e o painel abriria rolando mesmo numa tela que o comporta
+    de sobra. Esta pede o que o conteúdo pede: rolar é o recurso de uma tela
+    baixa, não o jeito normal de ver o painel.
+    """
+
+    def sizeHint(self) -> QSize:
+        conteudo = self.widget()
+        if conteudo is None:
+            return super().sizeHint()
+        dica = conteudo.sizeHint()
+        return QSize(dica.width(), dica.height() + 2 * self.frameWidth())
+
+
 class JanelaProgresso(QDialog):
-    """O caderno em números, numa única tela sem rolagem.
+    """O caderno em números, numa única tela.
+
+    Numa tela que o comporta, sem rolagem nenhuma. Numa tela baixa — um
+    notebook de 768 linhas, onde o painel inteiro não cabe e o botão de
+    fechar ficaria abaixo da barra de tarefas —, os dois gráficos de barras
+    encolhem primeiro, e só o que ainda sobrar rola (ver ``caber_na_altura``).
+    O cabeçalho, o nível e os botões ficam sempre à vista.
 
     Fecha com ``REVISAR`` quando o jogador sai pelo botão de revisar a dívida
     de hoje: quem abriu o painel (o caderno) abre os cartões em seguida.
@@ -1182,8 +1227,23 @@ class JanelaProgresso(QDialog):
             secao("Por jogo")
             self.grafico_jogos = _GraficoJogos(janela, por_jogo, estatisticas.total)
             pilha.addWidget(self.grafico_jogos)
-        coluna.addWidget(self.painel)
-        self.moldura_graficos = MolduraDoPainel(janela, self.painel)
+        self.rolagem = RolagemDoPainel()
+        self.rolagem.setWidgetResizable(True)
+        self.rolagem.setFrameShape(QFrame.Shape.NoFrame)
+        self.rolagem.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.rolagem.setWidget(self.painel)
+        self.rolagem.setStyleSheet(f"""
+        QScrollArea, QScrollArea > QWidget > QWidget {{ background: transparent; border: none; }}
+        QScrollBar:vertical {{ background: transparent; width: 10px; margin: 4px 2px; }}
+        QScrollBar::handle:vertical {{
+            background: {tema.border}; border-radius: 4px; min-height: 40px;
+        }}
+        QScrollBar::handle:vertical:hover {{ background: {tema.border_forte}; }}
+        QScrollBar::add-line, QScrollBar::sub-line {{ height: 0px; }}
+        QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
+        """)
+        coluna.addWidget(self.rolagem, 1)
+        self.moldura_graficos = MolduraDoPainel(janela, self.rolagem)
 
         acoes = QHBoxLayout()
         acoes.addStretch(1)
@@ -1213,8 +1273,29 @@ class JanelaProgresso(QDialog):
         if hasattr(self, "_cursor_vivo"):
             self._cursor_vivo.reposicionar()
 
+    def caber_na_altura(self, disponivel: int) -> None:
+        """Ajusta a janela a ``disponivel`` pixels de altura, no máximo.
+
+        Com espaço, ela fica no tamanho preferido de tudo. Sem, a altura é a
+        que há: o layout encolhe os gráficos elásticos até o mínimo deles, e
+        daí para baixo a rolagem assume o resto.
+        """
+        preferida = self.sizeHint().height()
+        self.resize(self.width(), max(self.minimumSizeHint().height(), min(preferida, disponivel)))
+
     def showEvent(self, evento: Any) -> None:
         super().showEvent(evento)
+        tela = self.screen()
+        if tela is not None:
+            area = tela.availableGeometry()
+            self.caber_na_altura(area.height() - 2 * MARGEM_DA_TELA)
+            # Encolhida, a janela pode ter ficado centrada sobre um ponto que a
+            # empurra para fora da tela; traz de volta para dentro.
+            geometria = self.frameGeometry()
+            topo = min(max(geometria.top(), area.top() + MARGEM_DA_TELA),
+                       area.bottom() - MARGEM_DA_TELA - geometria.height())
+            if topo != geometria.top():
+                self.move(geometria.left(), max(area.top(), topo))
         self.moldura_graficos.montar()
         self._cursor_vivo.reposicionar()
 

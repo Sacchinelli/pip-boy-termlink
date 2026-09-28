@@ -1572,6 +1572,67 @@ def main() -> int:
         caderno_janela_plano.close()
     checar(revisoes_plano == [1], "o caderno abre os cartões quando o painel sai por Revisar, e só aí")
 
+    print("o progresso cabe na tela")
+    from pipboy.interface.progresso import (
+        ALTURA_GRAFICO,
+        ALTURA_GRAFICO_MINIMA,
+        MARGEM_DA_TELA,
+    )
+
+    # Um caderno de seis jogos: o painel inteiro passa da altura da tela de
+    # teste, e só assim abrir "cabendo" prova alguma coisa.
+    caderno_tela = VocabularyStore(dados / "progresso-tela.sqlite3")
+    for indice_tela in range(12):
+        caderno_tela.registrar(
+            f"palavra{indice_tela}", "x", "",
+            ("Fallout", "Skyrim", "GTA", "Red Dead", "Elden Ring", "Cyberpunk 2077")[indice_tela % 6],
+        )
+    painel_tela = ProgressoPlano(janela, caderno_tela, parent=janela)
+    try:
+        painel_tela.show()
+        aplicacao.processEvents()
+        area_tela = painel_tela.screen().availableGeometry()
+        limite_tela = area_tela.height() - 2 * MARGEM_DA_TELA
+        # Exatamente a altura que há, e não "no máximo": o Qt já limita toda
+        # janela recém-aberta a dois terços da tela, e "não passar dela" ele
+        # faz sozinho. O que o painel garante é USAR a altura disponível.
+        checar(
+            painel_tela.sizeHint().height() > limite_tela
+            and painel_tela.height() == max(painel_tela.minimumSizeHint().height(), limite_tela),
+            f"um painel mais alto que a tela abre ocupando a área útil dela, nem mais nem menos "
+            f"({painel_tela.sizeHint().height()} → {painel_tela.height()}, de {area_tela.height()})",
+        )
+        painel_tela.caber_na_altura(4000)
+        aplicacao.processEvents()
+        checar(
+            painel_tela.height() == painel_tela.sizeHint().height()
+            and painel_tela.rolagem.verticalScrollBar().maximum() == 0
+            and painel_tela.grafico_semanas.height() == ALTURA_GRAFICO,
+            "numa tela alta, abre inteiro, no tamanho de sempre e sem rolar",
+        )
+        painel_tela.caber_na_altura(560)
+        aplicacao.processEvents()
+        fundo_fechar = painel_tela._botao_fechar.mapTo(
+            painel_tela, painel_tela._botao_fechar.rect().bottomLeft()
+        ).y()
+        checar(
+            painel_tela.height() == 560 and fundo_fechar < painel_tela.height()
+            and painel_tela.barra_nivel.isVisible(),
+            f"numa tela baixa, a janela é da altura que há, e o botão de fechar fica nela ({fundo_fechar})",
+        )
+        checar(
+            painel_tela.grafico_semanas.height() == ALTURA_GRAFICO_MINIMA
+            and painel_tela.rolagem.verticalScrollBar().maximum() > 0,
+            "os gráficos encolhem primeiro, e só o que ainda sobra rola",
+        )
+        checar(
+            painel_tela.moldura_graficos.geometry() == painel_tela.rolagem.geometry(),
+            "e a moldura do jogo acompanha a rolagem",
+        )
+    finally:
+        painel_tela.close()
+        caderno_tela.close()
+
     vazio_plano = VocabularyStore(dados / "progresso-vazio.sqlite3")
     painel_vazio = ProgressoPlano(janela, vazio_plano, parent=janela)
     checar(not painel_vazio.botao_revisar.isVisibleTo(painel_vazio), "sem dívida, o botão de revisar nem aparece")
@@ -4602,7 +4663,8 @@ def main() -> int:
     )
     moldura_prog = painel_jogo.moldura_graficos
     checar(
-        moldura_prog.isVisible() and moldura_prog.geometry() == painel_jogo.painel.geometry()
+        moldura_prog.isVisible() and moldura_prog.geometry() == painel_jogo.rolagem.geometry()
+        and painel_jogo.rolagem.widget() is painel_jogo.painel
         and painel_jogo.grafico_semanas.parentWidget() is painel_jogo.painel,
         "a moldura contorna os gráficos, e só eles",
     )
