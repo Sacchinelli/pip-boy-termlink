@@ -304,6 +304,26 @@ class HistoricoStore:
             )
             self._connection.commit()
 
+    def dias_de_estudo(self, desde: date) -> set[date]:
+        """Os dias com estudo a partir de ``desde`` (inclusive), no fuso local.
+
+        É a mesma tabela da sequência, vista inteira em vez de contada de trás
+        para a frente: o calendário do painel mostra os buracos, que é o que a
+        sequência sozinha esconde ("três dias seguidos" não diz se o mês
+        inteiro foi assim). Dia ilegível — banco editado à mão — é pulado.
+        """
+        with self._lock:
+            linhas = self._connection.execute(
+                "SELECT dia FROM atividade WHERE dia >= ?", (desde.isoformat(),)
+            ).fetchall()
+        dias: set[date] = set()
+        for (texto,) in linhas:
+            try:
+                dias.add(date.fromisoformat(str(texto)))
+            except ValueError:
+                continue
+        return dias
+
     def sequencia_atual(self) -> int:
         """Dias consecutivos de estudo, contando de hoje (ou ontem) para trás.
 

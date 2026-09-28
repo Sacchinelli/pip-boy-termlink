@@ -18,6 +18,7 @@ import queue
 import threading
 import time
 from collections.abc import Callable
+from datetime import date
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -1772,6 +1773,13 @@ class Janela(QWidget):
             ),
             diagnostico=f"Modelo {config.model} · chave {config.redacted_key()}",
         )
+
+    def dias_de_estudo(self, desde: date) -> set[date]:
+        """Os dias com estudo desde ``desde``, para o calendário do progresso."""
+        try:
+            return self._historico.dias_de_estudo(desde)
+        except Exception:
+            return set()
 
     def sequencia_de_estudo(self) -> int:
         try:

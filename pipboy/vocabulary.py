@@ -18,7 +18,7 @@ import re
 import sqlite3
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from .banco import agora, carimbo, conectar, migrar_para_utc, padrao_de_busca, texto_de_busca
@@ -836,6 +836,40 @@ class VocabularyStore:
             segunda = data - timedelta(days=data.weekday())
             resultado.append((segunda.strftime("%d/%m"), por_semana.get(_semana_de(data), 0)))
         return resultado
+
+    def previsao(self, dias: int = 7) -> list[tuple[date, int]]:
+        """Quantas palavras vencem em cada um dos próximos dias, a partir de hoje.
+
+        Hoje junta a dívida inteira — o que já venceu, o que nunca foi
+        revisado e o que vence até a meia-noite —, porque é o que uma revisão
+        feita agora cobra. Os outros dias contam só o que vence neles. É a
+        previsão de carga do Anki: saber que amanhã vencem trinta muda a
+        decisão de revisar hoje.
+
+        No fuso LOCAL, como o gráfico de semanas: a revisão marcada para as
+        23h de hoje vence hoje, e não no amanhã que já começou em Greenwich.
+        Data ilegível conta como vencida, como em ``Entrada.dias_ate_revisao``.
+        """
+        dias = max(1, dias)
+        hoje = datetime.now(timezone.utc).astimezone().date()
+        with self._lock:
+            rows = self._connection.execute("SELECT proxima_revisao FROM vocabulario").fetchall()
+        contagem = [0] * dias
+        for r in rows:
+            texto = str(r["proxima_revisao"] or "")
+            try:
+                quando = datetime.fromisoformat(texto) if texto else None
+            except ValueError:
+                quando = None
+            if quando is None:
+                contagem[0] += 1
+                continue
+            if quando.tzinfo is None:
+                quando = quando.astimezone()
+            adiante = (quando.astimezone().date() - hoje).days
+            if adiante < dias:
+                contagem[max(0, adiante)] += 1
+        return [(hoje + timedelta(days=i), n) for i, n in enumerate(contagem)]
 
     def por_jogo(self, limite: int = 6) -> list[tuple[str, int]]:
         """Total de termos por jogo, do maior para o menor."""

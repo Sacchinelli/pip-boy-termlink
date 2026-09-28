@@ -1477,6 +1477,67 @@ def teste_revisao_escrita() -> None:
     rodada_store.close()
 
 
+def teste_previsao_e_calendario() -> None:
+    """A previsão de carga e os dias de estudo, que o painel desenha.
+
+    O contrato: hoje junta a dívida inteira (nova, vencida, ilegível e o que
+    vence até a meia-noite); os outros dias contam só o que vence neles; o que
+    passa da janela não aparece. E os dias de estudo são os da tabela da
+    sequência, a partir da data pedida, sem derrubar nada por um dia ilegível.
+    """
+    print("previsão e calendário")
+    from datetime import date as Dia
+    from datetime import datetime as Instante
+    from datetime import timedelta as Intervalo
+    from datetime import timezone as Fuso
+
+    from pipboy.banco import carimbo
+    from pipboy.historico import HistoricoStore
+
+    store = VocabularyStore(Path(tempfile.mkdtemp()) / "previsao.sqlite3")
+    for termo in ("nova", "vencida", "ilegivel", "amanha", "em3", "longe"):
+        store.registrar(termo, "x")
+    agora_local = Instante.now(Fuso.utc).astimezone()
+    meio_dia = agora_local.replace(hour=12, minute=0, second=0, microsecond=0)
+    datas = {
+        "vencida": carimbo((meio_dia - Intervalo(days=2)).astimezone(Fuso.utc)),
+        "ilegivel": "quando der",
+        "amanha": carimbo((meio_dia + Intervalo(days=1)).astimezone(Fuso.utc)),
+        "em3": carimbo((meio_dia + Intervalo(days=3)).astimezone(Fuso.utc)),
+        "longe": carimbo((meio_dia + Intervalo(days=10)).astimezone(Fuso.utc)),
+    }
+    for termo, quando in datas.items():
+        store._connection.execute(
+            "UPDATE vocabulario SET proxima_revisao = ? WHERE termo = ?", (quando, termo)
+        )
+    store._connection.commit()
+    previsao = store.previsao(7)
+    hoje = agora_local.date()
+    checar(
+        [dia for dia, _ in previsao] == [hoje + Intervalo(days=i) for i in range(7)],
+        "a previsão tem sete dias seguidos, a começar de hoje",
+    )
+    checar(
+        [n for _, n in previsao] == [3, 1, 0, 1, 0, 0, 0],
+        f"hoje junta a nova, a vencida e a ilegível; cada outro dia conta o seu ({[n for _, n in previsao]})",
+    )
+    checar(sum(n for _, n in previsao) == 5, "e o que vence depois da janela fica de fora")
+    store.close()
+
+    historico = HistoricoStore(Path(tempfile.mkdtemp()) / "calendario.sqlite3")
+    for atras in (0, 1, 5, 40):
+        historico.marcar_atividade((hoje - Intervalo(days=atras)).isoformat())
+    historico._connection.execute("INSERT INTO atividade (dia) VALUES ('ontem')")
+    historico._connection.commit()
+    dias = historico.dias_de_estudo(hoje - Intervalo(days=30))
+    checar(
+        dias == {hoje, hoje - Intervalo(days=1), hoje - Intervalo(days=5)}
+        and all(isinstance(d, Dia) for d in dias),
+        f"os dias de estudo desde a data pedida, sem o dia ilegível ({sorted(dias)})",
+    )
+    historico.close()
+
+
 def teste_backup() -> None:
     """Cópia diária do caderno com rotação.
 
@@ -3088,6 +3149,7 @@ def main() -> int:
         teste_fontes_embutidas,
         teste_dicas,
         teste_revisao_escrita,
+        teste_previsao_e_calendario,
     ):
         try:
             teste()

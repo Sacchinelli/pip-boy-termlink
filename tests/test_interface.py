@@ -1428,6 +1428,160 @@ def main() -> int:
     janela.campo_atmosfera.setCurrentText(atmosfera_progresso)
     aplicacao.processEvents()
 
+    print("o progresso que planeja")
+    from datetime import date as DiaPlano
+    from datetime import timedelta as IntervaloPlano
+
+    from PySide6.QtCore import QRectF as CaixaPlano
+    from PySide6.QtGui import QColor as CorPlano
+
+    from pipboy.interface import progresso as mod_progresso_plano
+    from pipboy.interface.progresso import (
+        FORMAS_DO_DIA,
+        caminho_do_dia,
+        descrever_dia,
+        descrever_previsao,
+        grade_do_calendario,
+        rotulo_do_dia,
+    )
+    from pipboy.interface.progresso import JanelaProgresso as ProgressoPlano
+
+    quarta = DiaPlano(2026, 9, 23)
+    checar(
+        [rotulo_do_dia(quarta + IntervaloPlano(days=i), quarta) for i in range(4)]
+        == ["hoje", "amanhã", "sex", "sáb"],
+        "a previsão chama os dias como se chama: hoje, amanhã, e o dia da semana",
+    )
+    dados_plano = [(quarta + IntervaloPlano(days=i), n) for i, n in enumerate((4, 1, 0))]
+    checar(
+        descrever_previsao(dados_plano, 0) == ("qua, 23/09 · hoje", "4 palavras vencem hoje")
+        and descrever_previsao(dados_plano, 1) == ("qui, 24/09", "1 palavra vence")
+        and descrever_previsao(dados_plano, 2)[1] == "nenhuma palavra vence",
+        "a ficha de um dia diz a data e quantas vencem, no singular e no plural",
+    )
+    grade_plano = grade_do_calendario(quarta, 3)
+    checar(
+        len(grade_plano) == 3 and grade_plano[0][0] == DiaPlano(2026, 9, 7)
+        and grade_plano[-1][2] == quarta and grade_plano[-1][3:] == [None] * 4,
+        "o calendário tem uma coluna por semana, de segunda a domingo, e o futuro fica vazio",
+    )
+    checar(
+        descrever_dia(quarta, quarta, False) == ("qua, 23/09 · hoje", "ainda sem estudo hoje")
+        and descrever_dia(quarta - IntervaloPlano(days=1), quarta, True)[1] == "dia de estudo",
+        "a ficha de um dia do calendário diz se houve estudo — e que hoje ainda dá tempo",
+    )
+    caixa_plano = CaixaPlano(0, 0, 11, 11)
+    contornos_plano = {
+        forma: caminho_do_dia(caixa_plano, forma).toFillPolygon().boundingRect().size().toTuple()
+        for forma in set(FORMAS_DO_DIA.values()) | {"macio"}
+    }
+    areas_plano = {
+        forma: round(sum(1 for y in range(11) for x in range(11)
+                         if caminho_do_dia(caixa_plano, forma).contains(QPointF(x + 0.5, y + 0.5))))
+        for forma in contornos_plano
+    }
+    checar(
+        len(set(areas_plano.values())) >= 5,
+        f"cada forma de dia desenha diferente — estrela, losango, bloco, chanfro, círculo ({areas_plano})",
+    )
+
+    atmosfera_plano = janela.campo_atmosfera.currentText()
+    jogo_plano = janela.campo_jogo.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    janela.campo_jogo.setCurrentText("Skyrim")
+    aplicacao.processEvents()
+    caderno_plano = VocabularyStore(dados / "progresso-plano.sqlite3")
+    for termo_plano in ("draugr", "shout", "jarl"):
+        caderno_plano.registrar(termo_plano, "x", "", "Skyrim")
+    janela.marcar_estudo()
+    painel_plano = ProgressoPlano(janela, caderno_plano, parent=janela)
+    try:
+        painel_plano.show()
+        aplicacao.processEvents()
+        checar(
+            painel_plano.grafico_semanas.crescimento.atraso
+            < painel_plano.grafico_previsao.crescimento.atraso
+            < painel_plano.calendario.crescimento.atraso
+            < painel_plano.regua.crescimento.atraso,
+            "a previsão e o calendário entram depois das semanas e antes do domínio, na ordem de leitura",
+        )
+        checar(
+            painel_plano.calendario.forma == "estrela",
+            "no céu do norte, cada dia de estudo é uma estrela",
+        )
+        aguardar(lambda: not painel_plano.calendario.crescimento.ativo
+                 and not painel_plano.grafico_previsao.crescimento.ativo)
+        hoje_plano = painel_plano.calendario._hoje
+        calendario_img = painel_plano.calendario.grab().toImage()
+        razao_plano = calendario_img.devicePixelRatio()
+
+        def cor_no_dia(coluna: int, linha: int) -> CorPlano:
+            centro = painel_plano.calendario.caixa(coluna, linha).center()
+            return calendario_img.pixelColor(round(centro.x() * razao_plano), round(centro.y() * razao_plano))
+
+        ultima_plano = len(painel_plano.calendario._colunas) - 1
+        cor_hoje = cor_no_dia(ultima_plano, hoje_plano.weekday())
+        cor_antes = cor_no_dia(ultima_plano - 3, hoje_plano.weekday())
+        acento_plano = CorPlano(janela.tema.accent)
+        checar(
+            abs(cor_hoje.red() - acento_plano.red()) + abs(cor_hoje.green() - acento_plano.green())
+            + abs(cor_hoje.blue() - acento_plano.blue()) < 40
+            and cor_antes != cor_hoje,
+            f"hoje, com estudo, acende no acento; três semanas atrás, sem estudo, fica apagado "
+            f"({cor_hoje.name()} / {cor_antes.name()})",
+        )
+        centro_hoje = painel_plano.calendario.caixa(ultima_plano, hoje_plano.weekday()).center()
+        mover_em(painel_plano.calendario, centro_hoje.x(), centro_hoje.y())
+        checar(
+            painel_plano.calendario.apontado == ultima_plano * 7 + hoje_plano.weekday(),
+            "o cursor sobre um dia do calendário o aponta",
+        )
+        mover_em(painel_plano.calendario, 1, 1)
+        checar(painel_plano.calendario.apontado is None, "e a coluna dos nomes não aponta dia nenhum")
+        previsao_plano = painel_plano.grafico_previsao
+        mover_em(previsao_plano, previsao_plano.width() / 14, previsao_plano.height() / 2)
+        checar(previsao_plano.apontado == 0, "o cursor sobre a primeira barra aponta hoje")
+        checar(
+            painel_plano.botao_revisar.isVisible()
+            and painel_plano.botao_revisar.text() == f"Revisar ({caderno_plano.pendentes()})",
+            "com dívida, o painel oferece revisá-la, com o tamanho dela no botão",
+        )
+        painel_plano.botao_revisar.click()
+        checar(
+            painel_plano.result() == ProgressoPlano.REVISAR,
+            "e sair por ele avisa quem abriu o painel para abrir os cartões",
+        )
+    finally:
+        painel_plano.close()
+
+    # O caderno, avisado, abre a revisão em seguida.
+    exec_original_plano = mod_progresso_plano.JanelaProgresso.exec
+    janela.abrir_caderno()
+    aplicacao.processEvents()
+    caderno_janela_plano = janela._caderno
+    revisoes_plano: list[int] = []
+    try:
+        mod_progresso_plano.JanelaProgresso.exec = lambda _self: ProgressoPlano.REVISAR  # type: ignore[method-assign]
+        caderno_janela_plano._abrir_revisao = lambda: revisoes_plano.append(1)  # type: ignore[method-assign]
+        caderno_janela_plano._abrir_progresso()
+        mod_progresso_plano.JanelaProgresso.exec = lambda _self: 1  # type: ignore[method-assign]
+        caderno_janela_plano._abrir_progresso()
+    finally:
+        mod_progresso_plano.JanelaProgresso.exec = exec_original_plano  # type: ignore[method-assign]
+        del caderno_janela_plano._abrir_revisao
+        caderno_janela_plano.close()
+    checar(revisoes_plano == [1], "o caderno abre os cartões quando o painel sai por Revisar, e só aí")
+
+    vazio_plano = VocabularyStore(dados / "progresso-vazio.sqlite3")
+    painel_vazio = ProgressoPlano(janela, vazio_plano, parent=janela)
+    checar(not painel_vazio.botao_revisar.isVisibleTo(painel_vazio), "sem dívida, o botão de revisar nem aparece")
+    painel_vazio.deleteLater()
+    vazio_plano.close()
+    caderno_plano.close()
+    janela.campo_jogo.setCurrentText(jogo_plano)
+    janela.campo_atmosfera.setCurrentText(atmosfera_plano)
+    aplicacao.processEvents()
+
     print("histórico que orienta")
     # Uma conversa longa o bastante para a fala marcada ficar fora da tela.
     sessao_longa = historico.iniciar_sessao(jogo="Fallout")

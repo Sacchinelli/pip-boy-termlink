@@ -940,7 +940,11 @@ class JanelaCaderno(QDialog):
     def _abrir_progresso(self) -> None:
         from .progresso import JanelaProgresso
 
-        JanelaProgresso(self._janela, self._store, parent=self).exec()
+        # O painel mostra a dívida de hoje e oferece pagá-la: quem sai por
+        # "Revisar" cai direto nos cartões, sem voltar ao caderno para achar
+        # o botão de novo.
+        if JanelaProgresso(self._janela, self._store, parent=self).exec() == JanelaProgresso.REVISAR:
+            self._abrir_revisao()
 
     def _abrir_revisao(self) -> None:
         from .revisao import JanelaRevisao

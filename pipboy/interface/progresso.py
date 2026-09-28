@@ -31,11 +31,12 @@ gráficos quando a janela abre.
 
 from __future__ import annotations
 
+import math
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QMouseEvent, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QMouseEvent, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from .. import design
@@ -299,6 +300,283 @@ class _GraficoSemanas(_Grafico):
         pintor.end()
 
 
+# Os nomes curtos dos dias, de segunda a domingo (``date.weekday``).
+DIAS_DA_SEMANA = ("seg", "ter", "qua", "qui", "sex", "sáb", "dom")
+DIAS_DA_PREVISAO = 7
+SEMANAS_DO_CALENDARIO = 15
+ALTURA_PREVISAO = 110
+
+
+def rotulo_do_dia(dia: date, hoje: date) -> str:
+    """O nome do dia na previsão: hoje, amanhã, e depois o dia da semana."""
+    diferenca = (dia - hoje).days
+    if diferenca == 0:
+        return "hoje"
+    if diferenca == 1:
+        return "amanhã"
+    return DIAS_DA_SEMANA[dia.weekday()]
+
+
+def descrever_previsao(dados: list[tuple[date, int]], indice: int) -> tuple[str, str]:
+    """Título e corpo da ficha de um dia da previsão."""
+    dia, valor = dados[indice]
+    titulo = f"{DIAS_DA_SEMANA[dia.weekday()]}, {dia:%d/%m}"
+    if indice == 0:
+        # Hoje junta a dívida inteira: o que já venceu e o que vence até a
+        # meia-noite (ver VocabularyStore.previsao).
+        titulo += " · hoje"
+        corpo = (
+            _plural(valor, "palavra vence hoje", "palavras vencem hoje")
+            if valor else "nada vence hoje"
+        )
+    else:
+        corpo = _plural(valor, "palavra vence", "palavras vencem") if valor else "nenhuma palavra vence"
+    return titulo, corpo
+
+
+def grade_do_calendario(hoje: date, semanas: int) -> list[list[date | None]]:
+    """As colunas do calendário: uma por semana, de segunda a domingo.
+
+    A última coluna é a semana corrente; os dias dela que ainda não chegaram
+    ficam vazios (``None``) — um quadrado apagado no futuro leria como um dia
+    perdido.
+    """
+    segunda = hoje - timedelta(days=hoje.weekday())
+    colunas: list[list[date | None]] = []
+    for atras in range(semanas - 1, -1, -1):
+        inicio = segunda - timedelta(weeks=atras)
+        dias: list[date | None] = []
+        for passo in range(7):
+            dia = inicio + timedelta(days=passo)
+            dias.append(dia if dia <= hoje else None)
+        colunas.append(dias)
+    return colunas
+
+
+def descrever_dia(dia: date, hoje: date, estudou: bool) -> tuple[str, str]:
+    """Título e corpo da ficha de um dia do calendário."""
+    titulo = f"{DIAS_DA_SEMANA[dia.weekday()]}, {dia:%d/%m}"
+    if dia == hoje:
+        titulo += " · hoje"
+        return titulo, "dia de estudo" if estudou else "ainda sem estudo hoje"
+    return titulo, "dia de estudo" if estudou else "sem estudo"
+
+
+# A forma de um dia de estudo no calendário, no traço do jogo: a estrela das
+# constelações do norte, o losango da graça e do grimório, o bloco do
+# terminal e do visor, o recorte chanfrado da Night City, o círculo do
+# medalhão e do furo de bala do oeste. O resto fica com o quadrado macio.
+FORMAS_DO_DIA: dict[str, str] = {
+    "terminal": "bloco", "tatico": "bloco",
+    "graca": "losango", "grimorio": "losango",
+    "nordico": "estrela",
+    "dados": "chanfro",
+    "bruxo": "circulo", "oeste": "circulo",
+}
+
+
+def caminho_do_dia(caixa: QRectF, forma: str) -> QPainterPath:
+    """O contorno de um dia do calendário na forma pedida."""
+    caminho = QPainterPath()
+    c = caixa.center()
+    r = caixa.width() / 2
+    if forma == "losango":
+        caminho.moveTo(c.x(), caixa.top())
+        caminho.lineTo(caixa.right(), c.y())
+        caminho.lineTo(c.x(), caixa.bottom())
+        caminho.lineTo(caixa.left(), c.y())
+        caminho.closeSubpath()
+    elif forma == "estrela":
+        for passo in range(8):
+            angulo = -math.pi / 2 + math.pi * passo / 4
+            raio = r if passo % 2 == 0 else r * 0.42
+            ponto = QPointF(c.x() + raio * math.cos(angulo), c.y() + raio * math.sin(angulo))
+            if passo == 0:
+                caminho.moveTo(ponto)
+            else:
+                caminho.lineTo(ponto)
+        caminho.closeSubpath()
+    elif forma == "chanfro":
+        corte = caixa.width() * 0.32
+        caminho.moveTo(caixa.left() + corte, caixa.top())
+        caminho.lineTo(caixa.right(), caixa.top())
+        caminho.lineTo(caixa.right(), caixa.bottom() - corte)
+        caminho.lineTo(caixa.right() - corte, caixa.bottom())
+        caminho.lineTo(caixa.left(), caixa.bottom())
+        caminho.lineTo(caixa.left(), caixa.top() + corte)
+        caminho.closeSubpath()
+    elif forma == "circulo":
+        caminho.addEllipse(caixa)
+    elif forma == "bloco":
+        caminho.addRect(caixa)
+    else:
+        caminho.addRoundedRect(caixa, caixa.width() * 0.25, caixa.width() * 0.25)
+    return caminho
+
+
+class _GraficoPrevisao(_Grafico):
+    """Barras verticais: quantas palavras vencem em cada um dos próximos dias.
+
+    A de hoje é a dívida que uma revisão feita agora paga, e sai na cor de
+    acento; as outras, na cor do tema. É a mesma divisão de trabalho dos
+    outros gráficos: os números vêm prontos de ``VocabularyStore.previsao``.
+    """
+
+    def __init__(self, janela: Any, dados: list[tuple[date, int]]) -> None:
+        super().__init__(janela, len(dados), atraso=60)
+        self._dados = dados
+        self._hoje = dados[0][0] if dados else date.today()
+        self.setMinimumHeight(ALTURA_PREVISAO)
+
+    def _area(self) -> tuple[QRectF, float]:
+        metricas = QFontMetrics(self._janela.fonte("micro"))
+        area = QRectF(0, metricas.height() + 4, self.width(), self.height() - 2 * metricas.height() - 12)
+        return area, area.width() / max(1, len(self._dados))
+
+    def _item_em(self, ponto: QPointF) -> int | None:
+        area, passo = self._area()
+        indice = int((ponto.x() - area.left()) // passo)
+        return indice if 0 <= indice < len(self._dados) else None
+
+    def paintEvent(self, _evento: Any) -> None:
+        tema = self._janela.tema
+        pintor = QPainter(self)
+        pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+        fonte = self._janela.fonte("micro")
+        pintor.setFont(fonte)
+        metricas = QFontMetrics(fonte)
+        area, passo = self._area()
+        maximo = max((v for _, v in self._dados), default=0)
+        largura_barra = min(26.0, passo * 0.56)
+        cor_texto = design.garantir_contraste(tema.text_muted, tema.surface)
+        cor_valor = design.garantir_contraste(tema.primary, tema.surface)
+        topo_apontado = area.bottom()
+        for i, (dia, valor) in enumerate(self._dados):
+            centro_x = area.left() + passo * (i + 0.5)
+            x = centro_x - largura_barra / 2
+            crescido = self.crescimento.progresso(i)
+            self._faixa(pintor, QRectF(centro_x - passo / 2 + 1, 0, passo - 2, self.height()), i)
+            cor = tema.accent if i == 0 else tema.primary
+            if maximo > 0 and valor > 0:
+                altura = max(3.0, area.height() * (valor / maximo)) * crescido
+                barra = QRectF(x, area.bottom() - altura, largura_barra, altura)
+                pintor.setPen(Qt.PenStyle.NoPen)
+                pintor.setBrush(QColor(self._apagar(cor, i)))
+                pintor.drawRoundedRect(barra, 2, 2)
+                if i == self._indice:
+                    topo_apontado = barra.top()
+                pintor.save()
+                pintor.setOpacity(crescido)
+                pintor.setPen(QColor(self._apagar(cor_valor, i)))
+                pintor.drawText(
+                    QRectF(centro_x - passo / 2, barra.top() - metricas.height() - 2, passo, metricas.height()),
+                    Qt.AlignmentFlag.AlignCenter, str(valor),
+                )
+                pintor.restore()
+            else:
+                pintor.setPen(Qt.PenStyle.NoPen)
+                pintor.setBrush(QColor(design.elevar(tema.surface, 0.18, tema.primary)))
+                pintor.drawRect(QRectF(x, area.bottom() - 2, largura_barra, 2))
+            pintor.setPen(QColor(self._apagar(cor_texto, i)))
+            pintor.drawText(
+                QRectF(centro_x - passo / 2, area.bottom() + 4, passo, metricas.height()),
+                Qt.AlignmentFlag.AlignCenter, rotulo_do_dia(dia, self._hoje),
+            )
+        if self._indice is not None and self._indice < len(self._dados):
+            titulo, corpo = descrever_previsao(self._dados, self._indice)
+            centro = area.left() + passo * (self._indice + 0.5)
+            self._ficha(pintor, QPointF(centro, max(area.top() + 40, topo_apontado - 8)), titulo, corpo)
+        pintor.end()
+
+
+class _CalendarioDeEstudo(_Grafico):
+    """Os dias de estudo das últimas semanas, uma coluna por semana.
+
+    A sequência diz há quantos dias seguidos; o calendário mostra o resto —
+    os buracos, o fim de semana que sempre cai, o mês bom. Cada dia de estudo
+    acende na forma do jogo (ver ``FORMAS_DO_DIA``); o de hoje, sem estudo
+    ainda, tem só o contorno: está esperando.
+    """
+
+    LADO = 11.0
+    VAO = 3.0
+
+    def __init__(self, janela: Any, estudados: set[date], hoje: date) -> None:
+        colunas = grade_do_calendario(hoje, SEMANAS_DO_CALENDARIO)
+        super().__init__(janela, len(colunas), atraso=90)
+        self._colunas = colunas
+        self._estudados = estudados
+        self._hoje = hoje
+        self.forma = FORMAS_DO_DIA.get(str(getattr(janela.atmosfera, "icones", "")), "macio")
+        metricas = QFontMetrics(janela.fonte("micro"))
+        self._margem = float(metricas.horizontalAdvance("sáb") + 6)
+        self.setMinimumHeight(round(7 * (self.LADO + self.VAO) + 2))
+        self.setMinimumWidth(round(self._margem + len(self._colunas) * (self.LADO + self.VAO)))
+
+    def caixa(self, coluna: int, linha: int) -> QRectF:
+        passo = self.LADO + self.VAO
+        return QRectF(self._margem + coluna * passo, 1 + linha * passo, self.LADO, self.LADO)
+
+    def _celula_em(self, ponto: QPointF) -> tuple[int, int] | None:
+        passo = self.LADO + self.VAO
+        coluna = int((ponto.x() - self._margem) // passo)
+        linha = int((ponto.y() - 1) // passo)
+        if 0 <= coluna < len(self._colunas) and 0 <= linha < 7 and self._colunas[coluna][linha]:
+            return coluna, linha
+        return None
+
+    def _item_em(self, ponto: QPointF) -> int | None:
+        celula = self._celula_em(ponto)
+        return None if celula is None else celula[0] * 7 + celula[1]
+
+    def dia_do_item(self, indice: int) -> date | None:
+        return self._colunas[indice // 7][indice % 7]
+
+    def paintEvent(self, _evento: Any) -> None:
+        tema = self._janela.tema
+        pintor = QPainter(self)
+        pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+        fonte = self._janela.fonte("micro")
+        pintor.setFont(fonte)
+        cor_texto = design.garantir_contraste(tema.text_muted, tema.surface)
+        pintor.setPen(QColor(cor_texto))
+        for linha in (0, 2, 4):
+            caixa = self.caixa(0, linha)
+            pintor.drawText(
+                QRectF(0, caixa.top() - 3, self._margem - 6, caixa.height() + 6),
+                int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
+                DIAS_DA_SEMANA[linha],
+            )
+        apagado = design.elevar(tema.surface, 0.14, tema.primary)
+        for coluna, dias in enumerate(self._colunas):
+            crescido = self.crescimento.progresso(coluna)
+            for linha, dia in enumerate(dias):
+                if dia is None:
+                    continue
+                indice = coluna * 7 + linha
+                caminho = caminho_do_dia(self.caixa(coluna, linha), self.forma)
+                pintor.save()
+                pintor.setOpacity(0.25 + 0.75 * crescido)
+                if dia in self._estudados:
+                    pintor.fillPath(caminho, QColor(self._apagar(tema.accent, indice)))
+                else:
+                    pintor.fillPath(caminho, QColor(self._apagar(apagado, indice)))
+                if dia == self._hoje:
+                    caneta = QPen(QColor(design.garantir_contraste(tema.accent, tema.surface, 3.0)))
+                    caneta.setWidthF(1.2)
+                    pintor.setPen(caneta)
+                    pintor.setBrush(Qt.BrushStyle.NoBrush)
+                    pintor.drawPath(caminho_do_dia(self.caixa(coluna, linha).adjusted(-1.5, -1.5, 1.5, 1.5), self.forma))
+                pintor.restore()
+        if self._indice is not None:
+            dia_apontado = self.dia_do_item(self._indice)
+            if dia_apontado is not None:
+                titulo, corpo = descrever_dia(dia_apontado, self._hoje, dia_apontado in self._estudados)
+                caixa = self.caixa(self._indice // 7, self._indice % 7)
+                self._ficha(pintor, QPointF(caixa.center().x(), max(caixa.top(), 40.0)), titulo, corpo)
+        pintor.end()
+
+
 class _GraficoJogos(_Grafico):
     """Barras horizontais: de que jogo o vocabulário está vindo."""
 
@@ -473,7 +751,13 @@ class _ReguaDominio(_Grafico):
 
 
 class JanelaProgresso(QDialog):
-    """O caderno em números, numa única tela sem rolagem."""
+    """O caderno em números, numa única tela sem rolagem.
+
+    Fecha com ``REVISAR`` quando o jogador sai pelo botão de revisar a dívida
+    de hoje: quem abriu o painel (o caderno) abre os cartões em seguida.
+    """
+
+    REVISAR = 2
 
     def __init__(self, janela: Any, store: VocabularyStore, parent: QWidget | None = None) -> None:
         super().__init__(parent if parent is not None else janela)
@@ -570,6 +854,35 @@ class JanelaProgresso(QDialog):
         self.grafico_semanas = _GraficoSemanas(janela, store.novas_por_semana(8))
         pilha.addWidget(self.grafico_semanas)
 
+        # O que vem pela frente e o que ficou para trás, lado a lado: quantas
+        # palavras vencem em cada um dos próximos dias e em que dias houve
+        # estudo nas últimas semanas.
+        hoje = datetime.now(timezone.utc).astimezone().date()
+        previsao = store.previsao(DIAS_DA_PREVISAO)
+        self.grafico_previsao = _GraficoPrevisao(janela, previsao)
+        inicio = hoje - timedelta(weeks=SEMANAS_DO_CALENDARIO)
+        self.calendario = _CalendarioDeEstudo(janela, janela.dias_de_estudo(inicio), hoje)
+        dupla = QHBoxLayout()
+        dupla.setSpacing(28)
+        for texto_secao, grafico in (
+            ("Próximos 7 dias", self.grafico_previsao),
+            ("Dias de estudo", self.calendario),
+        ):
+            coluna_dupla = QVBoxLayout()
+            coluna_dupla.setSpacing(8)
+            etiqueta_dupla = QLabel(texto_secao.upper())
+            etiqueta_dupla.setFont(janela.fonte("secao"))
+            etiqueta_dupla.setStyleSheet(
+                f"color: {design.garantir_contraste(tema.text_muted, self._fundo)};"
+                " background: transparent;"
+            )
+            coluna_dupla.addWidget(etiqueta_dupla)
+            coluna_dupla.addWidget(grafico)
+            coluna_dupla.addStretch(1)
+            dupla.addLayout(coluna_dupla, 1 if grafico is self.grafico_previsao else 0)
+        pilha.addSpacing(10)
+        pilha.addLayout(dupla)
+
         secao("Domínio")
         self.regua = _ReguaDominio(janela, novas, aprendendo, dominadas)
         pilha.addWidget(self.regua)
@@ -591,6 +904,17 @@ class JanelaProgresso(QDialog):
         botao.setFont(janela.fonte("corpo_forte"))
         botao.clicked.connect(self.accept)
         acoes.addWidget(botao)
+        # A dívida de agora, com o caminho para pagá-la ao lado do número.
+        vencidas_hoje = store.pendentes()
+        self.botao_revisar = Botao(
+            f"Revisar ({vencidas_hoje})", variante="primario", icone="revisao",
+            paleta=janela.paleta, forma=self._forma,
+        )
+        self.botao_revisar.setFont(janela.fonte("corpo_forte"))
+        self.botao_revisar.setToolTip("Fechar o painel e revisar as palavras vencidas")
+        self.botao_revisar.clicked.connect(lambda: self.done(self.REVISAR))
+        self.botao_revisar.setVisible(vencidas_hoje > 0)
+        acoes.addWidget(self.botao_revisar)
         coluna.addSpacing(8)
         coluna.addLayout(acoes)
         botao.setFocus()
