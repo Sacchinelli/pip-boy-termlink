@@ -33,13 +33,17 @@ from collections.abc import Callable
 from typing import Any
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
 # O que se desenha quando o jogo não tem ícone próprio: os glifos de antes.
 GLIFOS_PADRAO: dict[str, str] = {
     "caderno": "◫", "historico": "◷", "revisao": "▶", "progresso": "◔",
 }
+
+# O glifo de reserva ocupa esta fração da caixa: a mesma altura, na prática,
+# da letra de um botão cuja caixa de ícone é da altura do rótulo.
+PROPORCAO_DO_GLIFO = 0.78
 
 # As quatro portas que todo conjunto desenha.
 NOMES_DE_ICONE: tuple[str, ...] = ("caderno", "historico", "revisao", "progresso")
@@ -516,6 +520,13 @@ def pintar_icone(
     pintor.save()
     pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
     if desenhar is None:
+        # O glifo do tamanho da caixa, e não da letra de quem chamou. Num
+        # botão dá no mesmo — a caixa já é da altura do rótulo —, mas ao lado
+        # de um título o glifo saía na letra miúda do widget, perdido numa
+        # caixa da altura do título.
+        fonte = QFont(pintor.font())
+        fonte.setPixelSize(max(8, round(min(caixa.width(), caixa.height()) * PROPORCAO_DO_GLIFO)))
+        pintor.setFont(fonte)
         pintor.setPen(cor)
         pintor.drawText(caixa, int(Qt.AlignmentFlag.AlignCenter), GLIFOS_PADRAO.get(nome, "◆"))
         pintor.restore()

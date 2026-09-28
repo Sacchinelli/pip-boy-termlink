@@ -4253,6 +4253,21 @@ def main() -> int:
         "estilo desconhecido cai nos glifos de sempre, como o tema neutro",
     )
 
+    def altura_da_tinta(imagem: QImage) -> int:
+        linhas = [y for y in range(imagem.height()) if any(imagem.pixelColor(x, y).alpha() for x in range(imagem.width()))]
+        return (linhas[-1] - linhas[0] + 1) if linhas else 0
+
+    glifos_miudos = [
+        nome_glifo for nome_glifo in NOMES_DE_ICONE
+        if altura_da_tinta(retrato_do_icone(nome_glifo, "", lado=36)) < 36 * 0.4
+    ]
+    checar(
+        not glifos_miudos
+        and altura_da_tinta(retrato_do_icone("historico", "", lado=36))
+        > altura_da_tinta(retrato_do_icone("historico", "", lado=16)),
+        f"sem desenho próprio, o glifo cresce com a caixa — ao lado de um título, não sai miúdo ({glifos_miudos})",
+    )
+
     # Na janela: as portas e o trilho desenham o ícone do jogo em vigor.
     jogo_icone = janela.campo_jogo.currentText()
     janela.campo_jogo.setCurrentText("Red Dead")
