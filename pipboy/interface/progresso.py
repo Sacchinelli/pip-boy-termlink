@@ -26,7 +26,9 @@ do de cima: o olho percorre a tela na ordem em que ela se lê.
 E o painel é a tela do jogo em que já se mede o quanto se avançou: o STAT do
 Pip-Boy, o nível de runas, as habilidades do Skyrim, a carreira do visor. O
 nome e o objeto dela vão no alto, e a moldura do jogo se monta em volta dos
-gráficos quando a janela abre.
+gráficos quando a janela abre. Logo abaixo do título, o nível do caderno —
+o LVL do terminal, a patente do visor, a reputação da Night City — numa
+barra de experiência desenhada no medidor do jogo.
 """
 
 from __future__ import annotations
@@ -36,10 +38,20 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QMouseEvent, QPainter, QPainterPath, QPen
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QFontMetrics,
+    QLinearGradient,
+    QMouseEvent,
+    QPainter,
+    QPainterPath,
+    QPen,
+)
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from .. import design
+from ..nivel import REGRA_DO_XP, Nivel, nivel_de, xp_do_caderno
 from ..vocabulary import DIAS_PARA_DOMINIO, VocabularyStore
 from .atmosfera import ATENUACAO_NO_FUNDO_NU, Cenario, so_o_cursor
 from .componentes import Botao, acender_borda, caminho_forma
@@ -750,6 +762,280 @@ class _ReguaDominio(_Grafico):
         pintor.end()
 
 
+# ------------------------------------------------------------------- Nível
+# Como cada jogo chama o número que só sobe. O visor dá patente; o RPG, um
+# título a cada cinco níveis. Os outros dão o nome e o número.
+NOMES_DO_NIVEL: dict[str, str] = {
+    "Fallout": "LVL",
+    "Elden Ring": "Nível",
+    "Skyrim": "Nível",
+    "The Witcher 3": "Nível",
+    "Red Dead": "Rank",
+    "GTA": "Rank",
+    "Cyberpunk 2077": "Reputação",
+    "RPG / Aventura (geral)": "Nível",
+    "FPS / Multiplayer": "Patente",
+}
+PATENTES = (
+    "Recruta", "Soldado", "Cabo", "Terceiro-sargento", "Segundo-sargento",
+    "Primeiro-sargento", "Subtenente", "Aspirante", "Segundo-tenente",
+    "Primeiro-tenente", "Capitão", "Major", "Tenente-coronel", "Coronel", "General",
+)
+TITULOS_DO_RPG = ("Aprendiz", "Aventureiro", "Veterano", "Herói", "Lenda")
+
+
+def rotulo_do_nivel(jogo: str, numero: int) -> str:
+    """O nível dito do jeito do jogo: "LVL 7", "Cabo · 3", "Veterano · 12"."""
+    if jogo == "FPS / Multiplayer":
+        return f"{PATENTES[min(numero, len(PATENTES)) - 1]} · {numero}"
+    if jogo == "RPG / Aventura (geral)":
+        return f"{TITULOS_DO_RPG[min((numero - 1) // 5, len(TITULOS_DO_RPG) - 1)]} · {numero}"
+    return f"{NOMES_DO_NIVEL.get(jogo, 'Nível')} {numero}"
+
+
+# A barra de experiência no traço do medidor de cada jogo: os blocos do
+# Pip-Boy, o fio fino com moldura de ouro da Terra Intermédia, a barra do
+# norte que cresce do centro para as pontas, o paralelogramo do bruxo, o
+# núcleo redondo do velho oeste, a barra lisa do GTA, a chanfrada que se
+# desfaz em bits da Night City, a de vidro do RPG e os traços do visor.
+BARRAS_DE_NIVEL: dict[str, str] = {
+    "terminal": "blocos",
+    "graca": "fio_dourado",
+    "nordico": "do_centro",
+    "bruxo": "inclinada",
+    "oeste": "nucleo",
+    "celular": "plana",
+    "dados": "chanfrada",
+    "grimorio": "vidro",
+    "tatico": "tracos",
+}
+BARRA_PADRAO = "simples"
+
+
+def cor_da_barra(estilo: str, tema: Any) -> str:
+    """A cor do trecho cheio: o acento do jogo; no terminal, o fósforo dele.
+
+    O Pip-Boy é monocromático — a barra de experiência dele é do mesmo verde
+    do resto da tela, e uma barra âmbar ali seria de outro aparelho.
+    """
+    return str(tema.primary if estilo == "blocos" else tema.accent)
+
+
+def pintar_barra_de_nivel(
+    pintor: QPainter, caixa: QRectF, fracao: float, estilo: str, tema: Any
+) -> None:
+    """A barra de experiência, cheia até ``fracao``, no estilo pedido.
+
+    O trilho vazio é sempre visível: sem ele, um nível recém-alcançado (fração
+    zero) não desenharia nada, e a tela pareceria quebrada justo na hora boa.
+    """
+    fracao = max(0.0, min(1.0, fracao))
+    cheia = QColor(cor_da_barra(estilo, tema))
+    trilho = QColor(design.elevar(tema.surface, 0.16, tema.primary))
+    contorno = QColor(design.misturar(tema.border_forte, tema.accent, 0.35))
+    pintor.save()
+    pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pintor.setPen(Qt.PenStyle.NoPen)
+    x, y, w, h = caixa.x(), caixa.y(), caixa.width(), caixa.height()
+    if estilo == "blocos":
+        blocos, vao = 20, 2.0
+        lado = (w - vao * (blocos - 1)) / blocos
+        acesos = round(fracao * blocos)
+        for indice in range(blocos):
+            bloco = QRectF(x + indice * (lado + vao), y, lado, h)
+            pintor.fillRect(bloco, cheia if indice < acesos else trilho)
+    elif estilo == "fio_dourado":
+        interno = caixa.adjusted(0, h * 0.25, 0, -h * 0.25)
+        pintor.fillRect(interno, trilho)
+        pintor.fillRect(QRectF(interno.x(), interno.y(), interno.width() * fracao, interno.height()), cheia)
+        caneta = QPen(contorno, 1.0)
+        pintor.setPen(caneta)
+        pintor.setBrush(Qt.BrushStyle.NoBrush)
+        pintor.drawRect(interno.adjusted(-1.5, -1.5, 1.5, 1.5))
+    elif estilo == "do_centro":
+        meio = y + h / 2
+        pintor.fillRect(QRectF(x, meio - 1, w, 2), trilho)
+        largura = w * fracao
+        pintor.fillRect(QRectF(x + (w - largura) / 2, y + h * 0.2, largura, h * 0.6), cheia)
+        for ponta in (x, x + w):
+            losango = QPainterPath()
+            losango.moveTo(ponta, meio - h / 2)
+            losango.lineTo(ponta + h / 2, meio)
+            losango.lineTo(ponta, meio + h / 2)
+            losango.lineTo(ponta - h / 2, meio)
+            losango.closeSubpath()
+            pintor.fillPath(losango, contorno)
+    elif estilo == "inclinada":
+        def paralelogramo(largura: float) -> QPainterPath:
+            caminho = QPainterPath()
+            caminho.moveTo(x + h, y)
+            caminho.lineTo(x + h + largura, y)
+            caminho.lineTo(x + largura, y + h)
+            caminho.lineTo(x, y + h)
+            caminho.closeSubpath()
+            return caminho
+
+        pintor.fillPath(paralelogramo(w - h), trilho)
+        if fracao > 0:
+            pintor.fillPath(paralelogramo((w - h) * fracao), cheia)
+    elif estilo == "nucleo":
+        lado = min(w, h)
+        anel = QRectF(x + (w - lado) / 2, y + (h - lado) / 2, lado, lado).adjusted(2, 2, -2, -2)
+        caneta = QPen(trilho, max(2.5, lado * 0.12))
+        caneta.setCapStyle(Qt.PenCapStyle.FlatCap)
+        pintor.setPen(caneta)
+        pintor.drawEllipse(anel)
+        caneta.setColor(cheia)
+        pintor.setPen(caneta)
+        pintor.drawArc(anel, 90 * 16, -round(360 * 16 * fracao))
+    elif estilo == "plana":
+        pintor.fillRect(caixa, trilho)
+        pintor.fillRect(QRectF(x, y, w * fracao, h), cheia)
+        pintor.setPen(QPen(QColor(tema.surface), 1.0))
+        for quinto in range(1, 5):
+            pintor.drawLine(QPointF(x + w * quinto / 5, y), QPointF(x + w * quinto / 5, y + h))
+    elif estilo == "chanfrada":
+        corte = h * 0.8
+
+        def chanfro(largura: float) -> QPainterPath:
+            caminho = QPainterPath()
+            caminho.moveTo(x, y)
+            caminho.lineTo(x + largura, y)
+            caminho.lineTo(x + largura, y + h - corte)
+            caminho.lineTo(x + max(0.0, largura - corte), y + h)
+            caminho.lineTo(x, y + h)
+            caminho.closeSubpath()
+            return caminho
+
+        pintor.fillPath(chanfro(w), trilho)
+        cheio = w * fracao
+        if cheio > 0:
+            pintor.fillPath(chanfro(cheio), cheia)
+            # A ponta se desfaz em bits soltos, como dado ainda chegando.
+            for passo, largura_bit in ((4.0, 3.0), (10.0, 2.0), (15.0, 1.5)):
+                if x + cheio + passo + largura_bit < x + w:
+                    pintor.fillRect(QRectF(x + cheio + passo, y + h * 0.25, largura_bit, h * 0.5), cheia)
+    elif estilo == "vidro":
+        raio = h / 2
+        pintor.setBrush(trilho)
+        pintor.drawRoundedRect(caixa, raio, raio)
+        if fracao > 0:
+            preenchida = QRectF(x, y, max(h, w * fracao), h)
+            gradiente = QLinearGradient(preenchida.topLeft(), preenchida.bottomLeft())
+            gradiente.setColorAt(0.0, QColor(design.misturar(tema.accent, "#ffffff", 0.35)))
+            gradiente.setColorAt(0.55, cheia)
+            gradiente.setColorAt(1.0, QColor(design.misturar(tema.accent, "#000000", 0.25)))
+            pintor.setBrush(gradiente)
+            pintor.drawRoundedRect(preenchida, raio, raio)
+    elif estilo == "tracos":
+        tracos = 30
+        passo = w / tracos
+        acesos = round(fracao * tracos)
+        for indice in range(tracos):
+            pintor.fillRect(
+                QRectF(x + indice * passo, y, max(1.5, passo * 0.45), h),
+                cheia if indice < acesos else trilho,
+            )
+    else:
+        raio = min(3.0, h / 2)
+        pintor.setBrush(trilho)
+        pintor.drawRoundedRect(caixa, raio, raio)
+        if fracao > 0:
+            pintor.setBrush(cheia)
+            pintor.drawRoundedRect(QRectF(x, y, max(2 * raio, w * fracao), h), raio, raio)
+    pintor.restore()
+
+
+class BarraDeNivel(QWidget):
+    """O nível do caderno no alto do painel: o nome do jogo, a barra e o XP.
+
+    A barra enche ao abrir, junto com os gráficos; passar o cursor mostra a
+    regra do XP — o número só convence quem sabe de onde ele vem.
+    """
+
+    ALTURA = 40
+    ALTURA_BARRA = 10.0
+
+    def __init__(self, janela: Any, nivel: Nivel) -> None:
+        super().__init__()
+        self._janela = janela
+        self.nivel = nivel
+        self.estilo = BARRAS_DE_NIVEL.get(str(getattr(janela.atmosfera, "icones", "")), BARRA_PADRAO)
+        self.rotulo = rotulo_do_nivel(janela.tema.name, nivel.numero)
+        reduzir = lambda: bool(janela.intensidade_atmosfera <= 0.0)  # noqa: E731
+        self.crescimento = Crescimento(self, 1, reduzir=reduzir, atraso=0)
+        self._cresceu = False
+        self.setFixedHeight(self.ALTURA)
+        self.setToolTip(REGRA_DO_XP)
+        self.setAccessibleName(
+            f"{self.rotulo}: {nivel.xp} de {nivel.teto} XP, faltam {nivel.faltam} para o próximo"
+        )
+
+    @property
+    def texto_do_xp(self) -> str:
+        return f"{self.nivel.xp - self.nivel.piso} / {self.nivel.teto - self.nivel.piso} XP"
+
+    def showEvent(self, evento: Any) -> None:
+        super().showEvent(evento)
+        if not self._cresceu:
+            self._cresceu = True
+            self.crescimento.iniciar()
+
+    def caixa_da_barra(self) -> QRectF:
+        """Onde a barra é desenhada — no núcleo, o anel à esquerda."""
+        if self.estilo == "nucleo":
+            return QRectF(0, 0, float(self.ALTURA), float(self.ALTURA))
+        m_rotulo = QFontMetrics(self._fonte_rotulo())
+        m_xp = QFontMetrics(self._janela.fonte("micro"))
+        esquerda = m_rotulo.horizontalAdvance(self.rotulo) + 16
+        direita = m_xp.horizontalAdvance(self.texto_do_xp) + 14
+        return QRectF(
+            esquerda, (self.height() - self.ALTURA_BARRA) / 2,
+            max(40.0, self.width() - esquerda - direita), self.ALTURA_BARRA,
+        )
+
+    def _fonte_rotulo(self) -> QFont:
+        fonte: QFont = self._janela.fonte("titulo", ui=False)
+        return fonte
+
+    def paintEvent(self, _evento: Any) -> None:
+        tema = self._janela.tema
+        pintor = QPainter(self)
+        pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+        caixa = self.caixa_da_barra()
+        fracao = self.nivel.fracao * self.crescimento.progresso(0)
+        pintar_barra_de_nivel(pintor, caixa, fracao, self.estilo, tema)
+        cor_rotulo = design.garantir_contraste(tema.primary, tema.surface)
+        cor_xp = design.garantir_contraste(tema.text_muted, tema.surface)
+        pintor.setFont(self._fonte_rotulo())
+        pintor.setPen(QColor(cor_rotulo))
+        if self.estilo == "nucleo":
+            # O número dentro do anel; o nome e o que falta ao lado dele.
+            pintor.drawText(caixa, int(Qt.AlignmentFlag.AlignCenter), str(self.nivel.numero))
+            nome = NOMES_DO_NIVEL.get(tema.name, "Nível")
+            texto = QRectF(caixa.right() + 12, 0, self.width() - caixa.right() - 12, self.height())
+            pintor.drawText(texto, int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), nome)
+            pintor.setFont(self._janela.fonte("micro"))
+            pintor.setPen(QColor(cor_xp))
+            pintor.drawText(
+                texto, int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
+                f"{self.texto_do_xp} · faltam {self.nivel.faltam} para o {self.nivel.numero + 1}",
+            )
+            pintor.end()
+            return
+        pintor.drawText(
+            QRectF(0, 0, caixa.left() - 8, self.height()),
+            int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), self.rotulo,
+        )
+        pintor.setFont(self._janela.fonte("micro"))
+        pintor.setPen(QColor(cor_xp))
+        pintor.drawText(
+            QRectF(caixa.right() + 10, 0, self.width() - caixa.right() - 10, self.height()),
+            int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter), self.texto_do_xp,
+        )
+        pintor.end()
+
+
 class JanelaProgresso(QDialog):
     """O caderno em números, numa única tela sem rolagem.
 
@@ -831,6 +1117,9 @@ class JanelaProgresso(QDialog):
         )
         cabecalho.addWidget(self.subtitulo, 0, Qt.AlignmentFlag.AlignBottom)
         coluna.addLayout(cabecalho)
+        # O nível do caderno, no nome e na barra do jogo (ver pipboy/nivel.py).
+        self.barra_nivel = BarraDeNivel(janela, nivel_de(xp_do_caderno(estatisticas)))
+        coluna.addWidget(self.barra_nivel)
 
         partes = [f"{estatisticas.total} termos no caderno"]
         if estatisticas.acertos or estatisticas.erros:

@@ -1582,6 +1582,104 @@ def main() -> int:
     janela.campo_atmosfera.setCurrentText(atmosfera_plano)
     aplicacao.processEvents()
 
+    print("o nível de cada jogo")
+    from PySide6.QtCore import QRectF as CaixaNivel
+    from PySide6.QtGui import QColor as CorNivel
+    from PySide6.QtGui import QImage as ImagemNivel
+    from PySide6.QtGui import QPainter as PintorNivel
+
+    from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_NIVEL
+    from pipboy.interface.progresso import (
+        BARRA_PADRAO,
+        BARRAS_DE_NIVEL,
+        cor_da_barra,
+        pintar_barra_de_nivel,
+        rotulo_do_nivel,
+    )
+    from pipboy.interface.progresso import JanelaProgresso as ProgressoNivel
+    from pipboy.nivel import REGRA_DO_XP, xp_do_caderno
+    from pipboy.themes import TEMAS as TEMAS_NIVEL
+
+    estilos_nivel = {
+        nome: BARRAS_DE_NIVEL.get(r.icones, BARRA_PADRAO) for nome, r in RECEITAS_NIVEL.items()
+    }
+    proprios_nivel = [e for n, e in estilos_nivel.items() if n != "Genérico / Outro"]
+    checar(
+        len(set(proprios_nivel)) == len(proprios_nivel) == 9
+        and estilos_nivel["Genérico / Outro"] == BARRA_PADRAO,
+        f"nove jogos, nove barras de experiência, e o neutro com a simples ({estilos_nivel})",
+    )
+    checar(
+        rotulo_do_nivel("Fallout", 7) == "LVL 7"
+        and rotulo_do_nivel("FPS / Multiplayer", 3) == "Cabo · 3"
+        and rotulo_do_nivel("FPS / Multiplayer", 40) == "General · 40"
+        and rotulo_do_nivel("RPG / Aventura (geral)", 12) == "Veterano · 12"
+        and rotulo_do_nivel("Cyberpunk 2077", 5) == "Reputação 5"
+        and rotulo_do_nivel("Genérico / Outro", 4) == "Nível 4",
+        "o nível é dito do jeito do jogo: LVL, patente, título, reputação",
+    )
+
+    tema_nivel = TEMAS_NIVEL["Skyrim"]
+
+    def barra_pintada(estilo: str, fracao: float) -> ImagemNivel:
+        imagem = ImagemNivel(240, 40, ImagemNivel.Format.Format_ARGB32_Premultiplied)
+        imagem.fill(0)
+        pintor = PintorNivel(imagem)
+        pintar_barra_de_nivel(pintor, CaixaNivel(10, 10, 220, 20), fracao, estilo, tema_nivel)
+        pintor.end()
+        return imagem
+
+    def tinta_acesa(imagem: ImagemNivel, estilo: str) -> int:
+        acento_nivel = CorNivel(cor_da_barra(estilo, tema_nivel))
+        return sum(
+            1 for y in range(imagem.height()) for x in range(imagem.width())
+            if (c := imagem.pixelColor(x, y)).alpha() > 200
+            and abs(c.red() - acento_nivel.red()) + abs(c.green() - acento_nivel.green())
+            + abs(c.blue() - acento_nivel.blue()) < 30
+        )
+
+    nao_crescem, sem_trilho = [], []
+    for estilo_nivel in set(BARRAS_DE_NIVEL.values()) | {BARRA_PADRAO}:
+        vazia = barra_pintada(estilo_nivel, 0.0)
+        if not any(vazia.pixelColor(x, y).alpha() for y in range(40) for x in range(240)):
+            sem_trilho.append(estilo_nivel)
+        if not (
+            tinta_acesa(barra_pintada(estilo_nivel, 0.25), estilo_nivel)
+            < tinta_acesa(barra_pintada(estilo_nivel, 0.75), estilo_nivel)
+        ):
+            nao_crescem.append(estilo_nivel)
+    checar(not sem_trilho, f"vazia, toda barra ainda mostra o trilho ({sem_trilho})")
+    checar(not nao_crescem, f"e toda barra acende mais quanto mais XP ({nao_crescem})")
+    checar(
+        cor_da_barra("blocos", TEMAS_NIVEL["Fallout"]) == TEMAS_NIVEL["Fallout"].primary
+        and cor_da_barra("tracos", TEMAS_NIVEL["FPS / Multiplayer"]) == TEMAS_NIVEL["FPS / Multiplayer"].accent,
+        "no terminal, a barra é do verde do fósforo; nos outros, do acento do jogo",
+    )
+    retratos_nivel = {e: barra_pintada(e, 0.5) for e in set(BARRAS_DE_NIVEL.values()) | {BARRA_PADRAO}}
+    iguais_nivel = sorted(
+        (a, b) for a in retratos_nivel for b in retratos_nivel if a < b and retratos_nivel[a] == retratos_nivel[b]
+    )
+    checar(not iguais_nivel, f"e cada uma desenha diferente das outras ({iguais_nivel})")
+
+    jogo_nivel = janela.campo_jogo.currentText()
+    for nome_nivel, estilo_esperado, rotulo_esperado in (
+        ("Fallout", "blocos", "LVL"), ("Red Dead", "nucleo", "Rank"), ("FPS / Multiplayer", "tracos", "Recruta"),
+    ):
+        janela.campo_jogo.setCurrentText(nome_nivel)
+        aplicacao.processEvents()
+        painel_nivel = ProgressoNivel(janela, store, parent=janela)
+        barra_nivel = painel_nivel.barra_nivel
+        checar(
+            barra_nivel.estilo == estilo_esperado and barra_nivel.rotulo.startswith(rotulo_esperado)
+            and barra_nivel.nivel.xp == xp_do_caderno(store.estatisticas())
+            and barra_nivel.toolTip() == REGRA_DO_XP,
+            f"no {nome_nivel}, o nível vem como {rotulo_esperado}, na barra {estilo_esperado} — "
+            f"com a regra do XP a um passar de cursor ({barra_nivel.rotulo})",
+        )
+        painel_nivel.deleteLater()
+    janela.campo_jogo.setCurrentText(jogo_nivel)
+    aplicacao.processEvents()
+
     print("histórico que orienta")
     # Uma conversa longa o bastante para a fala marcada ficar fora da tela.
     sessao_longa = historico.iniciar_sessao(jogo="Fallout")

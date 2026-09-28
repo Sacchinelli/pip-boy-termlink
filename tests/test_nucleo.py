@@ -1538,6 +1538,43 @@ def teste_previsao_e_calendario() -> None:
     historico.close()
 
 
+def teste_nivel() -> None:
+    """O nível do caderno: a regra do XP e a curva, sem banco nenhum.
+
+    O contrato é o que a dica de ferramenta promete — 10 por palavra, 5 por
+    revisão certa, 25 por dominada — e uma curva em que cada nível pede 100
+    XP a mais que o anterior, a partir do nível 1 no zero.
+    """
+    print("nível")
+    from pipboy.nivel import REGRA_DO_XP, Nivel, nivel_de, xp_do_caderno, xp_para
+    from pipboy.vocabulary import Estatisticas
+
+    checar(
+        xp_do_caderno(Estatisticas(total=3, vencidas=2, dominadas=1, acertos=4, erros=9)) == 75,
+        "o XP soma palavras, revisões certas e dominadas — errar e vencer não tiram nada",
+    )
+    checar(
+        [xp_para(n) for n in range(1, 6)] == [0, 100, 300, 600, 1000],
+        "cada nível pede 100 XP a mais que o anterior",
+    )
+    checar(
+        nivel_de(0) == Nivel(1, 0, 0, 100) and nivel_de(99).numero == 1
+        and nivel_de(100) == Nivel(2, 100, 100, 300) and nivel_de(4500).numero == 10
+        and nivel_de(-5).numero == 1,
+        "o nível começa no 1, sobe exatamente no limiar e não desce abaixo do começo",
+    )
+    meio = nivel_de(150)
+    checar(
+        meio.fracao == 0.25 and meio.faltam == 150,
+        f"a fração é o trecho do nível já percorrido, e o que falta é o resto ({meio.fracao}, {meio.faltam})",
+    )
+    checar(
+        "10 XP por palavra" in REGRA_DO_XP and "5 por revisão certa" in REGRA_DO_XP
+        and "25 por palavra dominada" in REGRA_DO_XP,
+        "a regra que a tela mostra é a que o código conta",
+    )
+
+
 def teste_backup() -> None:
     """Cópia diária do caderno com rotação.
 
@@ -3150,6 +3187,7 @@ def main() -> int:
         teste_dicas,
         teste_revisao_escrita,
         teste_previsao_e_calendario,
+        teste_nivel,
     ):
         try:
             teste()
