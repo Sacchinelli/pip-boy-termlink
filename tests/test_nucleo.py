@@ -1575,6 +1575,89 @@ def teste_nivel() -> None:
     )
 
 
+def teste_ferramenta_de_mutantes() -> None:
+    """A ferramenta de testes de mutação, rodada num projeto de brinquedo.
+
+    O contrato: a especificação mal escrita é recusada; o trecho sumido ou
+    repetido é relatado em vez de plantado; a cópia deixa de fora o .env, o
+    .git e o build; o defeito vai para a CÓPIA, nunca para o original; e um
+    mutante que a suíte não pega aparece como escapado.
+    """
+    print("ferramenta de mutantes")
+    import importlib.util
+
+    caminho = Path(__file__).resolve().parent.parent / "ferramentas" / "mutantes.py"
+    especificacao = importlib.util.spec_from_file_location("mutantes", caminho)
+    assert especificacao is not None and especificacao.loader is not None
+    mutantes = importlib.util.module_from_spec(especificacao)
+    sys.modules["mutantes"] = mutantes
+    especificacao.loader.exec_module(mutantes)
+
+    brinquedo = Path(tempfile.mkdtemp()) / "brinquedo"
+    (brinquedo / "pipboy").mkdir(parents=True)
+    (brinquedo / "tests").mkdir()
+    (brinquedo / "build").mkdir()
+    (brinquedo / ".env").write_text("GEMINI_API_KEY=segredo", encoding="utf-8")
+    (brinquedo / "pipboy" / "conta.py").write_text(
+        "def dobro(x):\n    return x * 2\n\n\ndef metade(x):\n    return x / 2\n", encoding="utf-8"
+    )
+    # A "suíte" do brinquedo só confere o dobro — a metade não tem teste.
+    (brinquedo / "tests" / "test_nucleo.py").write_text(
+        "import sys\nsys.path.insert(0, '.')\nfrom pipboy.conta import dobro\n"
+        "print('  ok   dobro' if dobro(3) == 6 else '  FALHA  dobro')\n",
+        encoding="utf-8",
+    )
+    (brinquedo / "pipboy" / "__init__.py").write_text("", encoding="utf-8")
+
+    copia = mutantes.copiar_projeto(brinquedo, Path(tempfile.mkdtemp()))
+    checar(
+        (copia / "pipboy" / "conta.py").is_file() and not (copia / ".env").exists()
+        and not (copia / "build").exists(),
+        "a cópia leva o código e os testes, e deixa o .env e o build para trás",
+    )
+
+    especie = Path(tempfile.mkdtemp()) / "espec.py"
+    especie.write_text(
+        "MUTANTES = [\n"
+        "    ('dobro vira triplo', 'pipboy/conta.py', 'return x * 2', 'return x * 3', 'nucleo'),\n"
+        "    ('metade vira terço', 'pipboy/conta.py', 'return x / 2', 'return x / 3', 'nucleo'),\n"
+        "    ('trecho sumido', 'pipboy/conta.py', 'return x ** 2', 'return 0', 'nucleo'),\n"
+        "    ('trecho repetido', 'pipboy/conta.py', 'def ', 'def _', 'nucleo'),\n"
+        "]\n",
+        encoding="utf-8",
+    )
+    lidos = mutantes.ler_especificacao(especie)
+    problemas = mutantes.problemas(lidos, brinquedo)
+    checar(
+        len(lidos) == 4 and len(problemas) == 2
+        and "sumiu" in problemas[0] and "aparece 2 vezes" in problemas[1],
+        f"trecho sumido ou repetido é relatado, e não plantado ({problemas})",
+    )
+    mal_escrita = Path(tempfile.mkdtemp()) / "mal.py"
+    mal_escrita.write_text("MUTANTES = [('só o nome',)]\n", encoding="utf-8")
+    try:
+        mutantes.ler_especificacao(mal_escrita)
+        checar(False, "especificação mal escrita é recusada")
+    except SystemExit:
+        checar(True, "especificação mal escrita é recusada")
+
+    pego = mutantes.rodar_mutante(lidos[0], brinquedo)
+    escapou = mutantes.rodar_mutante(lidos[1], brinquedo)
+    checar(
+        pego.pego and not escapou.pego,
+        "o defeito no que tem teste é pego; o defeito no que não tem, escapa",
+    )
+    checar(
+        "return x * 2" in (brinquedo / "pipboy" / "conta.py").read_text(encoding="utf-8"),
+        "e o arquivo original nunca é tocado",
+    )
+    checar(
+        mutantes.falhas_da_saida("  ok   a\nTraceback (x)\n  FALHA  b\n", "nucleo") == ("FALHA  b",)
+        and len(mutantes.falhas_da_saida("Traceback (x)\n", "interface")) == 1,
+        "traço de pilha só reprova a suíte de interface; no núcleo, há testes que o provocam",
+    )
+
+
 def teste_backup() -> None:
     """Cópia diária do caderno com rotação.
 
@@ -3188,6 +3271,7 @@ def main() -> int:
         teste_revisao_escrita,
         teste_previsao_e_calendario,
         teste_nivel,
+        teste_ferramenta_de_mutantes,
     ):
         try:
             teste()
