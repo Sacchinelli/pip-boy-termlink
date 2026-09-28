@@ -566,8 +566,13 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         saudacao="Link neural estável",
         convite="// transmitir pergunta",
         font_candidates=("Rajdhani", "Bahnschrift", "Consolas", "Segoe UI"),
-        shell="#08080a",
-        screen="#101014",
+        # O preto azulado dos menus da Night City, que ficam sobre uma grade
+        # azul-petróleo. O preto neutro de antes deixava o amarelo sobre quase
+        # preto do Elden Ring a 6,84 de distância (ver distancia_dos_temas.py),
+        # o par mais parecido da tabela: ouro velho e neon eram, na média da
+        # tela, a mesma tela escura com letra amarela. Agora, 8,96.
+        shell="#070a10",
+        screen="#0b0f17",
         primary="#fcee0a",
         secondary="#9a9410",
         faint="#2d2d12",
@@ -693,10 +698,16 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         saudacao="Pronto para ouvir",
         convite="Perguntar por texto…",
         font_candidates=("Segoe UI", "Consolas", "Arial"),
-        shell="#0d1116",
-        screen="#171c22",
+        # O neutro é um cinza-azulado ESMAECIDO, um degrau mais claro que o
+        # quase-preto dos nove jogos. No mesmo escuro deles, o azul frio do
+        # neutro era o do céu do norte com outra letra: Skyrim e Genérico
+        # mediam 5,97, o par mais parecido de todos. Um grafite sem matiz
+        # fugia do Skyrim e caía no cinza quente do Witcher (5,71); o degrau de
+        # claridade afasta dos dois — Skyrim a 7,10 — sem parecer tema de jogo.
+        shell="#1c2128",
+        screen="#22272e",
         primary="#e6edf3",
-        secondary="#8b98a5",
+        secondary="#909dab",
         faint="#2d353d",
         accent="#58a6ff",
         alert="#f85149",

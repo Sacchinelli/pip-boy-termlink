@@ -1667,9 +1667,9 @@ class Pilula(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._texto = "OFFLINE"
-        self._cor = QColor("#8b98a5")
-        self._cheia = QColor("#8b98a5")
-        self._fundo = QColor("#171c22")
+        self._cor = QColor("#909dab")
+        self._cheia = QColor("#909dab")
+        self._fundo = QColor("#22272e")
         self._pulsando = False
         self.setFixedHeight(design.PILULA_ALTURA)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
