@@ -1633,6 +1633,52 @@ def main() -> int:
         painel_tela.close()
         caderno_tela.close()
 
+    print("os gráficos se leem")
+    from pipboy.interface.progresso import (
+        ler_calendario,
+        ler_dominio,
+        ler_jogos,
+        ler_previsao,
+        ler_semanas,
+    )
+    from pipboy.interface.revisao import BarraDaRodada, ler_rodada
+
+    checar(
+        ler_semanas([("03/08", 0), ("10/08", 2)]) == "Palavras novas por semana: 03/08, 0; esta semana, 2."
+        and ler_previsao(dados_plano) == "Palavras que vencem nos próximos 3 dias: hoje, 4; amanhã, 1; sex, 0."
+        and ler_dominio(4, 2, 1) == "Domínio: 4 novas, 2 aprendendo, 1 dominadas."
+        and ler_jogos([("Fallout", 3), ("Red Dead", 1)]) == "Palavras por jogo: Fallout, 3; Red Dead, 1.",
+        "cada gráfico se diz em palavras, com os mesmos números das barras",
+    )
+    checar(
+        ler_calendario({quarta, quarta - IntervaloPlano(days=1), quarta - IntervaloPlano(days=30)}, quarta, 3)
+        == "2 dias de estudo nas últimas 3 semanas; hoje já teve estudo."
+        and ler_calendario(set(), quarta, 3).endswith("hoje ainda não teve estudo."),
+        "o calendário conta só os dias da janela dele, e diz se hoje já foi",
+    )
+    painel_lido = ProgressoPlano(janela, caderno_plano, parent=janela)
+    graficos_lidos = [
+        painel_lido.grafico_semanas, painel_lido.grafico_previsao, painel_lido.calendario,
+        painel_lido.regua, *([painel_lido.grafico_jogos] if painel_lido.grafico_jogos else []),
+    ]
+    checar(
+        all(g.accessibleName() and g.accessibleDescription() for g in graficos_lidos)
+        and painel_lido.grafico_semanas.accessibleDescription() == ler_semanas(caderno_plano.novas_por_semana(8))
+        and painel_lido.grafico_previsao.accessibleDescription() == ler_previsao(caderno_plano.previsao(7)),
+        "no painel, todo gráfico tem nome e descrição para o leitor de tela",
+    )
+    painel_lido.deleteLater()
+    barra_lida = BarraDaRodada(janela)
+    barra_lida.recomecar(3)
+    barra_lida.registrar("acerto")
+    barra_lida.registrar("erro")
+    checar(
+        barra_lida.accessibleDescription() == ler_rodada(3, ["acerto", "erro"])
+        == "2 de 3 cartões respondidos: 1 acerto, 0 difíceis, 1 erro.",
+        "e a barra da rodada conta o que já foi respondido, a cada resposta",
+    )
+    barra_lida.deleteLater()
+
     vazio_plano = VocabularyStore(dados / "progresso-vazio.sqlite3")
     painel_vazio = ProgressoPlano(janela, vazio_plano, parent=janela)
     checar(not painel_vazio.botao_revisar.isVisibleTo(painel_vazio), "sem dívida, o botão de revisar nem aparece")

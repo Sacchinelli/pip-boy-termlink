@@ -124,6 +124,45 @@ def descrever_semana(
     return titulo, corpo
 
 
+def _itens(dados: list[tuple[str, int]]) -> str:
+    return "; ".join(f"{rotulo}, {valor}" for rotulo, valor in dados)
+
+
+def ler_semanas(dados: list[tuple[str, int]]) -> str:
+    """O gráfico de semanas em palavras, para o leitor de tela."""
+    if not dados:
+        return "Nenhuma semana registrada."
+    itens = [*dados[:-1], ("esta semana", dados[-1][1])]
+    return f"Palavras novas por semana: {_itens(itens)}."
+
+
+def ler_previsao(dados: list[tuple[date, int]]) -> str:
+    """A previsão em palavras: quantas vencem em cada dia, a partir de hoje."""
+    if not dados:
+        return "Nada vence nos próximos dias."
+    hoje = dados[0][0]
+    return (
+        f"Palavras que vencem nos próximos {len(dados)} dias: "
+        + _itens([(rotulo_do_dia(dia, hoje), valor) for dia, valor in dados]) + "."
+    )
+
+
+def ler_calendario(estudados: set[date], hoje: date, semanas: int) -> str:
+    """O calendário em palavras: quantos dias de estudo, e se hoje já foi um."""
+    inicio = hoje - timedelta(days=hoje.weekday()) - timedelta(weeks=semanas - 1)
+    dias = sum(1 for dia in estudados if inicio <= dia <= hoje)
+    hoje_ja = "hoje já teve estudo" if hoje in estudados else "hoje ainda não teve estudo"
+    return f"{_plural(dias, 'dia', 'dias')} de estudo nas últimas {semanas} semanas; {hoje_ja}."
+
+
+def ler_dominio(novas: int, aprendendo: int, dominadas: int) -> str:
+    return f"Domínio: {novas} novas, {aprendendo} aprendendo, {dominadas} dominadas."
+
+
+def ler_jogos(dados: list[tuple[str, int]]) -> str:
+    return f"Palavras por jogo: {_itens(dados)}."
+
+
 class _Grafico(QWidget):
     """O que os três gráficos têm em comum: crescer ao abrir e apontar um item.
 
@@ -145,6 +184,16 @@ class _Grafico(QWidget):
         self._cresceu = False
         # Sem filhos: o rastreamento do próprio widget basta para o hover.
         self.setMouseTracking(True)
+
+    def anunciar(self, nome: str, descricao: str) -> None:
+        """O que o leitor de tela diz deste gráfico: o título e os números.
+
+        Um gráfico desenhado com QPainter é, para a acessibilidade, um
+        retângulo mudo — quem não vê a tela ouvia "painel" e mais nada. Os
+        números que as barras mostram vão também por extenso, na descrição.
+        """
+        self.setAccessibleName(nome)
+        self.setAccessibleDescription(descricao)
 
     def showEvent(self, evento: Any) -> None:
         super().showEvent(evento)
@@ -236,6 +285,7 @@ class _GraficoSemanas(_Grafico):
         super().__init__(janela, len(dados), atraso=0)
         self._dados = dados
         self._segundas = segundas_do_grafico(len(dados))
+        self.anunciar("Palavras novas por semana", ler_semanas(dados))
         # Elástico: o tamanho de sempre é o preferido, e numa tela baixa ele
         # cede antes de o painel precisar rolar (ver JanelaProgresso).
         self.setMinimumHeight(ALTURA_GRAFICO_MINIMA)
@@ -457,6 +507,7 @@ class _GraficoPrevisao(_Grafico):
         super().__init__(janela, len(dados), atraso=60)
         self._dados = dados
         self._hoje = dados[0][0] if dados else date.today()
+        self.anunciar("Próximos 7 dias", ler_previsao(dados))
         self.setMinimumHeight(ALTURA_PREVISAO_MINIMA)
 
     def sizeHint(self) -> QSize:
@@ -540,6 +591,7 @@ class _CalendarioDeEstudo(_Grafico):
         super().__init__(janela, len(colunas), atraso=90)
         self._colunas = colunas
         self._estudados = estudados
+        self.anunciar("Dias de estudo", ler_calendario(estudados, hoje, len(colunas)))
         self._hoje = hoje
         self.forma = FORMAS_DO_DIA.get(str(getattr(janela.atmosfera, "icones", "")), "macio")
         metricas = QFontMetrics(janela.fonte("micro"))
@@ -618,6 +670,7 @@ class _GraficoJogos(_Grafico):
         super().__init__(janela, len(dados), atraso=240)
         self._dados = dados
         self._total = total
+        self.anunciar("Por jogo", ler_jogos(dados))
         self.setMinimumHeight(ALTURA_BARRAS_JOGO * max(1, len(dados)) + 8)
 
     def _item_em(self, ponto: QPointF) -> int | None:
@@ -695,6 +748,7 @@ class _ReguaDominio(_Grafico):
     def __init__(self, janela: Any, novas: int, aprendendo: int, dominadas: int) -> None:
         super().__init__(janela, 1, atraso=120)
         self._partes = (novas, aprendendo, dominadas)
+        self.anunciar("Domínio", ler_dominio(novas, aprendendo, dominadas))
         self._legenda: list[QRectF] = []
         self._segmentos: list[tuple[float, float]] = []
         linha_explicacao = QFontMetrics(janela.fonte("micro")).height() + 6

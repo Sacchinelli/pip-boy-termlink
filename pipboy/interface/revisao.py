@@ -144,6 +144,19 @@ def quando_volta(dias: int) -> str:
     return f"em {dias} dias"
 
 
+def ler_rodada(total: int, resultados: list[str]) -> str:
+    """A barra da rodada em palavras, para o leitor de tela."""
+    if total <= 0:
+        return "Nenhum cartão nesta rodada."
+    feitos = len(resultados)
+    contas = (
+        f"{_plural(resultados.count(ACERTO), 'acerto', 'acertos')}, "
+        f"{_plural(resultados.count(DIFICIL), 'difícil', 'difíceis')}, "
+        f"{_plural(resultados.count(ERRO), 'erro', 'erros')}"
+    )
+    return f"{feitos} de {total} cartões respondidos: {contas}."
+
+
 def cor_da_nota(tema: Any, nota: str) -> str:
     """Acerto na cor do tema, difícil na cor de informação, erro no alerta."""
     return {ACERTO: tema.primary, DIFICIL: tema.info}.get(nota, tema.alert)
@@ -173,10 +186,17 @@ class BarraDaRodada(QWidget):
         self.resultados = []
         self._chegada.saltar(1.0)
         self.setVisible(total > 0)
+        self._anunciar()
         self.update()
+
+    def _anunciar(self) -> None:
+        # A barra é desenhada; sem isto, o leitor de tela não sabia dela.
+        self.setAccessibleName("Rodada")
+        self.setAccessibleDescription(ler_rodada(self._total, self.resultados))
 
     def registrar(self, nota: str) -> None:
         self.resultados.append(nota)
+        self._anunciar()
         # O segmento recém-respondido acende a partir do cinza, em vez de
         # simplesmente já estar colorido quando o olho chega nele.
         self._chegada.saltar(0.0)
