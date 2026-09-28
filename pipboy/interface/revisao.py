@@ -20,7 +20,8 @@ o tamanho. Três tentativas; a nota sai sozinha do que aconteceu (de
 primeira, acerto; depois da pista, ou por uma letra, difícil; nunca, erro).
 A escolha do jeito fica guardada nas preferências.
 
-Cada gesto tem resposta na tela, e cada resposta diz alguma coisa:
+Cada gesto tem resposta na tela — e no ouvido, na voz do jogo (ver
+``_registrar``) —, e cada resposta diz alguma coisa:
 
 * **A barra da rodada** é uma fileira de segmentos, um por cartão, e cada
   resposta pinta o seu na cor da nota. No fim, a própria barra é o resumo —
@@ -697,6 +698,11 @@ class JanelaRevisao(QDialog):
         # renomeação em silêncio — a sequência de estudo simplesmente pararia
         # de contar, e ninguém descobriria por meses.
         self._janela.marcar_estudo()
+        # A nota no ouvido, na voz do jogo: o marcador de acerto do visor, o
+        # dedilhado do violão no oeste, o "negado" do terminal. O acerto e o
+        # difícil tocam o som de palavra ganha — lembrar custando ainda é
+        # lembrar —; o erro, o de erro.
+        self._janela.tocar_som("erro" if nota == ERRO else "vocab")
         cor = cor_da_nota(self._tema, nota)
         self._barra.registrar(nota)
         self._recado.setStyleSheet(

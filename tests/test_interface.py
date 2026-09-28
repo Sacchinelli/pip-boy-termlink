@@ -4797,6 +4797,10 @@ def main() -> int:
     janela.campo_jogo.setCurrentText("Fallout")
     aplicacao.processEvents()
     escrita = RevisaoEscrita(janela, caderno_escrita, parent=janela)
+    # Os sons da rodada, anotados em vez de tocados.
+    sons_escrita: list[str] = []
+    tocar_original = janela._campainha.tocar
+    janela._campainha.tocar = sons_escrita.append  # type: ignore[method-assign]
     try:
         escrita.show()
         escrita.activateWindow()
@@ -4906,12 +4910,17 @@ def main() -> int:
             escrita._termo.text() == "0 acertos · 2 difíceis · 1 erro",
             f"o resumo conta os difíceis à parte ({escrita._termo.text()})",
         )
+        checar(
+            sons_escrita == ["vocab", "vocab", "erro"],
+            f"cada nota soa na voz do jogo: difícil e acerto como palavra ganha, erro como erro ({sons_escrita})",
+        )
         entrada_bounty = caderno_escrita.entrada("bounty")
         checar(
             entrada_bounty is not None and entrada_bounty.acertos == 1 and entrada_bounty.intervalo_dias == 1,
             "no banco, difícil conta como lembrada e agenda a volta",
         )
     finally:
+        janela._campainha.tocar = tocar_original  # type: ignore[method-assign]
         escrita.close()
         caderno_escrita.close()
         janela.definir_modo_de_revisao(modo_escrita)

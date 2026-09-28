@@ -1724,6 +1724,15 @@ class Janela(QWidget):
         if self._caderno is not None:
             self._caderno.atualizar()
 
+    def tocar_som(self, evento: str) -> None:
+        """Toca um dos sons do jogo em vigor (ver campainha.py e sons.py).
+
+        Porta pública para as outras janelas — a revisão toca o som de palavra
+        ganha a cada acerto e o de erro a cada erro. Atmosfera desligada
+        silencia, como em todo som de interface.
+        """
+        self._campainha.tocar(evento)
+
     def modo_de_revisao(self) -> str:
         """O jeito de revisar da última rodada: lembrar (padrão) ou escrever."""
         return str(self._prefs.extras.get("modo_revisao", "") or "lembrar")
