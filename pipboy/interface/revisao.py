@@ -425,6 +425,8 @@ class JanelaRevisao(QDialog):
 
         def rotulo(nome_fonte: str, cor: str, *, ui: bool = True, wrap: bool = True) -> QLabel:
             etiqueta = QLabel("")
+            # O termo, a tradução e o exemplo vêm do caderno: texto, nunca HTML.
+            etiqueta.setTextFormat(Qt.TextFormat.PlainText)
             etiqueta.setFont(janela.fonte(nome_fonte, ui=ui))
             etiqueta.setStyleSheet(
                 f"color: {design.garantir_contraste(cor, self._fundo)};"

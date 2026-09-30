@@ -201,7 +201,11 @@ class CartaoTermo(QFrame):
         topo.setSpacing(14)
         # O termo usa a fonte do TEMA: é a palavra do jogo, a única coisa nesta
         # janela que veio de lá. Tradução e metadados ficam na fonte neutra.
+        # Os três campos são dados do caderno — gravados pelo modelo, importados
+        # de arquivo —, e o QLabel, por padrão, renderiza como HTML o texto que
+        # começa com uma tag. Texto puro, sempre.
         termo = QLabel(entrada.termo)
+        termo.setTextFormat(Qt.TextFormat.PlainText)
         termo.setFont(janela.fonte("titulo", ui=False))
         termo.setStyleSheet(
             f"color: {design.garantir_contraste(tema.primary, self._fundo)};"
@@ -211,6 +215,7 @@ class CartaoTermo(QFrame):
         topo.addWidget(termo, 0, Qt.AlignmentFlag.AlignTop)
 
         traducao = QLabel(entrada.traducao)
+        traducao.setTextFormat(Qt.TextFormat.PlainText)
         traducao.setWordWrap(True)
         traducao.setFont(janela.fonte("corpo"))
         traducao.setStyleSheet(
@@ -232,6 +237,7 @@ class CartaoTermo(QFrame):
 
         if entrada.exemplo:
             exemplo = QLabel(entrada.exemplo)
+            exemplo.setTextFormat(Qt.TextFormat.PlainText)
             exemplo.setWordWrap(True)
             exemplo.setFont(janela.fonte("vocab", ui=False))
             exemplo.setStyleSheet(

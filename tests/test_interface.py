@@ -4987,6 +4987,47 @@ def main() -> int:
         janela.campo_jogo.setCurrentText(jogo_escrita)
         aplicacao.processEvents()
 
+    print("o caderno mostra texto, não HTML")
+    from PySide6.QtWidgets import QLabel as RotuloTexto
+
+    from pipboy.interface.componentes import RotuloElidido as ElididoTexto
+    from pipboy.interface.revisao import JanelaRevisao as RevisaoTexto
+
+    # Uma palavra gravada com marcação ANTES da limpeza na borda existir: o
+    # banco guarda o texto cru, e a tela precisa mostrá-lo como texto.
+    caderno_texto = VocabularyStore(dados / "texto-cru.sqlite3")
+    caderno_texto.registrar("legado", "x")
+    caderno_texto._connection.execute(
+        "UPDATE vocabulario SET termo = ?, traducao = ? WHERE termo = 'legado'",
+        ("<b>legado</b>", "<i>antigo</i>"),
+    )
+    caderno_texto._connection.commit()
+    revisao_texto = RevisaoTexto(janela, caderno_texto, parent=janela)
+    checar(
+        revisao_texto._termo.text() == "<b>legado</b>"
+        and revisao_texto._termo.textFormat() == Qt.TextFormat.PlainText
+        and revisao_texto._traducao.textFormat() == Qt.TextFormat.PlainText,
+        "na revisão, a palavra do caderno aparece como está — com as tags à vista, e não interpretadas",
+    )
+    revisao_texto.deleteLater()
+    caderno_texto.close()
+    checar(
+        ElididoTexto().textFormat() == Qt.TextFormat.PlainText,
+        "o rótulo abreviado, que leva a palavra no recado, também é texto puro",
+    )
+    janela.abrir_caderno()
+    aplicacao.processEvents()
+    rotulos_do_caderno = [
+        r for r in janela._caderno.findChildren(RotuloTexto)
+        if r.text() and any(r.text() == c._entrada.termo for c in janela._caderno._cartoes)
+    ]
+    checar(
+        bool(rotulos_do_caderno)
+        and all(r.textFormat() == Qt.TextFormat.PlainText for r in rotulos_do_caderno),
+        f"no caderno, o termo de cada cartão é texto puro ({len(rotulos_do_caderno)} cartões)",
+    )
+    janela._caderno.close()
+
     print("cada jogo mira do seu jeito")
     from PySide6.QtGui import QColor as CorMira
 
