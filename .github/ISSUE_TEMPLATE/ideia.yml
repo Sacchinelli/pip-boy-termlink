@@ -1,0 +1,19 @@
+name: Uma ideia
+description: Algo que o programa poderia fazer, ou fazer melhor.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problema
+    attributes:
+      label: O problema
+      description: O que hoje é difícil, lento ou impossível — antes da solução.
+    validations:
+      required: true
+  - type: textarea
+    id: proposta
+    attributes:
+      label: O que você imagina
+  - type: input
+    id: jogo
+    attributes:
+      label: Jogo em que isso apareceu (se for de um jogo)
