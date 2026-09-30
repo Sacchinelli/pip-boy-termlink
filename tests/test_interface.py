@@ -15,8 +15,12 @@ defeito que os testes do núcleo, de propósito, nunca veem.
 
 from __future__ import annotations
 
+import atexit
+import gc
+import logging
 import os
 import queue
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -28,6 +32,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 _TEMP = tempfile.mkdtemp(prefix="pipboy-teste-ui-")
 os.environ["LOCALAPPDATA"] = _TEMP
 os.environ["XDG_DATA_HOME"] = _TEMP
+
+# Todo ``mkdtemp()`` daqui em diante nasce DENTRO desta pasta, e ela é
+# apagada na saída. Sem isto, cada execução deixava para trás a pasta de dados
+# e dezenas de bancos de teste no TEMP da máquina: numa máquina de
+# desenvolvimento, isso somava ~6.500 pastas e ~0,7 GB. A coleta de lixo antes
+# da faxina fecha as conexões SQLite que ainda seguram arquivos no Windows, e
+# o ``logging.shutdown`` solta o pipboy.log pelo mesmo motivo.
+tempfile.tempdir = _TEMP
+
+
+def _apagar_temporarios() -> None:
+    logging.shutdown()
+    gc.collect()
+    shutil.rmtree(_TEMP, ignore_errors=True)
+
+
+atexit.register(_apagar_temporarios)
 os.environ["GEMINI_API_KEY"] = "AIzaTESTE_INTERFACE_1234"
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -6479,6 +6500,9 @@ if __name__ == "__main__":
     # cápsula e campainha abertos) foi medido separadamente e encerra limpo
     # de forma consistente. Quem cria janelas soltas e conexões duplicadas
     # é este arquivo, e é só ele que precisa desta porta.
+    #
+    # E por pular o ``atexit``, a faxina da pasta temporária é chamada aqui.
     sys.stdout.flush()
     sys.stderr.flush()
+    _apagar_temporarios()
     os._exit(codigo)

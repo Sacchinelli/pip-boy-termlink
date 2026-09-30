@@ -9,9 +9,13 @@ exige hardware não é executado, e teste não executado não protege nada.
 
 from __future__ import annotations
 
+import atexit
 import contextlib
+import gc
 import itertools
+import logging
 import os
+import shutil
 import sys
 import tempfile
 import traceback
@@ -28,6 +32,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 _TEMP = tempfile.mkdtemp(prefix="pipboy-testes-")
 os.environ["LOCALAPPDATA"] = _TEMP
 os.environ["XDG_DATA_HOME"] = _TEMP
+
+# Todo ``mkdtemp()`` daqui em diante nasce DENTRO desta pasta, e ela é
+# apagada na saída. Sem isto, cada execução deixava para trás a pasta de dados
+# e dezenas de bancos de teste no TEMP da máquina: numa máquina de
+# desenvolvimento, isso somava ~6.500 pastas e ~0,7 GB. A coleta de lixo antes
+# da faxina fecha as conexões SQLite que ainda seguram arquivos no Windows, e
+# o ``logging.shutdown`` solta o pipboy.log pelo mesmo motivo.
+tempfile.tempdir = _TEMP
+
+
+def _apagar_temporarios() -> None:
+    logging.shutdown()
+    gc.collect()
+    shutil.rmtree(_TEMP, ignore_errors=True)
+
+
+atexit.register(_apagar_temporarios)
 
 # O console do Windows abre em cp1252 quando a página de código do sistema é a
 # legada; sem isto, imprimir uma seta derruba a suíte inteira com
@@ -1658,6 +1679,15 @@ def teste_ferramenta_de_mutantes() -> None:
     )
 
 
+def teste_temporarios_da_suite() -> None:
+    """Tudo que a suíte cria em disco mora na pasta dela, apagada na saída."""
+    print("temporários da suíte")
+    checar(
+        Path(tempfile.mkdtemp()).parent == Path(_TEMP),
+        "um mkdtemp() qualquer nasce dentro da pasta da suíte, e não solto no TEMP da máquina",
+    )
+
+
 def teste_backup() -> None:
     """Cópia diária do caderno com rotação.
 
@@ -3272,6 +3302,7 @@ def main() -> int:
         teste_previsao_e_calendario,
         teste_nivel,
         teste_ferramenta_de_mutantes,
+        teste_temporarios_da_suite,
     ):
         try:
             teste()
