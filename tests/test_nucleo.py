@@ -692,6 +692,34 @@ def teste_config() -> None:
     os.environ["GEMINI_API_KEY"] = "AIzaTESTE1234567890"
     cfg = AppConfiguration.load(base)
     checar(cfg.redacted_key() == "AIza…7890", "chave é mascarada em log")
+    chave_inteira = "AIza" + "S" * 31 + "wxyz"
+    os.environ["GEMINI_API_KEY"] = chave_inteira
+    cfg_inteira = AppConfiguration.load(base)
+    checar(
+        chave_inteira not in repr(cfg_inteira) and chave_inteira not in str(cfg_inteira),
+        "o repr da configuração não carrega a chave — um log do objeto não a vaza",
+    )
+    import logging as registro
+
+    from pipboy import FormatadorSemSegredo
+    from pipboy.config import mascarar_segredos
+
+    formatador = FormatadorSemSegredo("%(message)s")
+    try:
+        raise ConnectionError(f"wss://exemplo/ws?key={chave_inteira} fechou")
+    except ConnectionError:
+        linha = registro.LogRecord(
+            "pip_boy", registro.WARNING, __file__, 1, "caiu: %s", (chave_inteira,), sys.exc_info()
+        )
+    formatada = formatador.format(linha)
+    checar(
+        chave_inteira not in formatada and formatada.count("AIza…wxyz") == 2,
+        "o log mascara a chave na mensagem, nos argumentos e no traço de pilha",
+    )
+    checar(
+        mascarar_segredos("sem chave: AIzaTESTE1234567890") == "sem chave: AIzaTESTE1234567890",
+        "e só mexe no que tem o formato de uma chave do Google",
+    )
     checar("esc" not in cfg.hotkey_toggle.lower(), "atalho global não sequestra Esc")
     checar("f12" not in cfg.hotkey_toggle.lower(), "atalho global não sequestra F12")
 
@@ -3097,6 +3125,13 @@ def teste_lancamento_sem_console() -> None:
         checar(
             not any(type(h) is logging.StreamHandler for h in LOGGER.handlers),
             f"sem console, nenhum StreamHandler é instalado ({instalados})",
+        )
+        from pipboy import FormatadorSemSegredo
+
+        checar(
+            bool(LOGGER.handlers)
+            and all(isinstance(h.formatter, FormatadorSemSegredo) for h in LOGGER.handlers),
+            "todo destino do log passa pelo formatador que mascara a chave",
         )
         checar(
             any(isinstance(h, RotatingFileHandler) for h in LOGGER.handlers),

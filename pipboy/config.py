@@ -14,6 +14,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -24,6 +25,24 @@ from dotenv import load_dotenv
 from .constants import APP_SLUG, DEFAULT_GAME_AUDIO_GAIN, DEFAULT_MODEL
 
 LOGGER = logging.getLogger("pip_boy.config")
+
+
+# As chaves de API do Google têm formato fixo: "AIza" e mais 35 caracteres
+# (o mesmo padrão de ferramentas/verificar_segredos.py).
+_CHAVE_DO_GOOGLE = re.compile(r"AIza[0-9A-Za-z_\-]{35}")
+
+
+def mascarar_segredos(texto: str) -> str:
+    """Troca toda chave do Google no texto pela forma mascarada ("AIza…wxyz").
+
+    É o que o formatador do log aplica a cada linha, traços de pilha
+    incluídos: a chave pode chegar ao log por caminhos que ninguém escreveu
+    de propósito — a mensagem de uma exceção da biblioteca que carregue a
+    URL da conexão, um objeto de configuração registrado para depurar. O
+    pipboy.log é justamente o arquivo que se pede para anexar a um relato de
+    erro.
+    """
+    return _CHAVE_DO_GOOGLE.sub(lambda achado: f"{achado.group()[:4]}…{achado.group()[-4:]}", texto)
 
 
 class ConfigurationError(RuntimeError):
@@ -163,7 +182,9 @@ def _env_float(name: str, default: float = 0.0) -> float:
 class AppConfiguration:
     """Segredos e parâmetros globais. Nunca lidos direto pela thread da UI."""
 
-    api_key: str
+    # Fora do repr: o repr automático do dataclass imprime todos os campos, e
+    # a chave inteira sairia em qualquer log ou traço que mostrasse o objeto.
+    api_key: str = field(repr=False)
     model: str
     hotkey_toggle: str
     hotkey_mute: str
