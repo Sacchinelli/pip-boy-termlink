@@ -1,4 +1,7 @@
-"""Ícone do aplicativo, sintetizado com o QPainter.
+"""O ícone do PROGRAMA — o da barra de tarefas e do .exe —, sintetizado.
+
+Não confundir com ``icones.py``, que desenha os objetos de cada jogo (o
+caderno, o histórico, a revisão, o progresso) dentro da interface.
 
 Nenhum arquivo de imagem no repositório — o mesmo princípio da atmosfera. O
 ícone é um visor de fósforo verde com o losango ◈ da marca: legível a 16 px
@@ -29,7 +32,7 @@ _VERDE_ESCURO = "#1d5c3c"
 TAMANHOS = (16, 24, 32, 48, 64, 128, 256)
 
 
-def pintar_icone(tamanho: int) -> QPixmap:
+def pintar_icone_do_programa(tamanho: int) -> QPixmap:
     """Um quadro do ícone, desenhado do zero no tamanho pedido."""
     mapa = QPixmap(tamanho, tamanho)
     mapa.fill(Qt.GlobalColor.transparent)
@@ -103,5 +106,5 @@ def criar_icone() -> QIcon:
     """O ícone da janela e da barra de tarefas, em todos os tamanhos."""
     icone = QIcon()
     for tamanho in TAMANHOS:
-        icone.addPixmap(pintar_icone(tamanho))
+        icone.addPixmap(pintar_icone_do_programa(tamanho))
     return icone

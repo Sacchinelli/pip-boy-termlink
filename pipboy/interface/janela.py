@@ -37,7 +37,6 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (
     QColor,
     QFont,
-    QFontDatabase,
     QFontMetrics,
     QPainter,
     QPainterPath,
@@ -69,6 +68,7 @@ from ..profiles import (
     SessionSettings,
     personas_for,
 )
+from ..texto import contagem
 from ..themes import GameTheme, paleta_de, theme_for
 from ..vocabulary import FILTRO_REVISAR, VocabularyStore
 from . import montagem
@@ -90,7 +90,7 @@ from .componentes import (
 from .cursor import CampoMagnetico, RastreadorDeCursor, abraco_de, centro_de
 from .dialogo import avisar
 from .estilo import RAIO_PADRAO, RAIO_POR_FORMA, folha_da_janela
-from .fontes import ajuste_optico, compor_titulo, registrar_fontes, tem_negrito
+from .fontes import FONTES_MONO, fonte_do_papel, primeira_instalada
 from .icones import definir_estilo_de_icone
 from .moldura import (
     GripsRedimensionamento,
@@ -125,7 +125,6 @@ if TYPE_CHECKING:  # pragma: no cover
 LOGGER = logging.getLogger("pip_boy.interface")
 
 
-FONTES_MONO: tuple[str, ...] = ("Cascadia Mono", "Consolas", "Courier New", "Courier")
 
 
 class Sobreposicao(QWidget):
@@ -223,11 +222,7 @@ class Janela(QWidget):
 
         self._tema: GameTheme = theme_for(self._prefs.jogo)
         self._atmosfera = atmosfera_de(self._tema.name)
-        # As fontes que acompanham o programa entram antes de a janela
-        # perguntar quais existem.
-        registrar_fontes()
-        self._instaladas = set(QFontDatabase.families())
-        self._mono = self._primeira_instalada(FONTES_MONO)
+        self._mono = primeira_instalada(FONTES_MONO)
 
         self._cenario = Cenario()
 
@@ -418,12 +413,6 @@ class Janela(QWidget):
         """Cores do tema num dicionário simples, para os componentes pintados."""
         return paleta_de(self._tema)
 
-    def _primeira_instalada(self, candidatas: tuple[str, ...]) -> str:
-        for nome in candidatas:
-            if nome in self._instaladas:
-                return nome
-        return candidatas[-1]
-
     def fonte(self, papel: str, *, ui: bool = True) -> QFont:
         """Fonte para um degrau da rampa tipográfica.
 
@@ -435,24 +424,7 @@ class Janela(QWidget):
         que o tamanho do texto é um fator aplicado aqui, e não uma rampa
         alternativa a manter em paralelo.
         """
-        tipo = design.TIPO[papel]
-        if ui:
-            candidatas = self._tema.ui_font_candidates
-        elif papel == "display":
-            # Os títulos na letra de título do jogo, quando ele tem uma.
-            candidatas = self._tema.display_candidates
-        else:
-            candidatas = self._tema.font_candidates
-        familia = self._primeira_instalada(candidatas)
-        # A letra de LER no corpo aparente da de referência (ver
-        # fontes.ajuste_optico); o título fica no corpo que o desenho dele pede.
-        ajuste = 1.0 if papel == "display" else ajuste_optico(familia)
-        fonte = QFont(familia, design.escalar(tipo.tamanho, self._escala_texto * ajuste))
-        fonte.setBold(tipo.peso == "bold" and tem_negrito(familia))
-        fonte.setItalic(tipo.estilo == "italic")
-        if papel == "display" and not ui:
-            compor_titulo(fonte, self._tema)
-        return fonte
+        return fonte_do_papel(self._tema, papel, ui=ui, escala=self._escala_texto)
 
     def fonte_de_secao(self) -> QFont:
         """O título de seção: a fonte do jogo, com o espaçamento dos menus dele."""
@@ -1198,7 +1170,7 @@ class Janela(QWidget):
     def _atualizar_caderno(self) -> None:
         total = self._store.total()
         self._total_no_caderno = total
-        texto = f"Caderno · {total} {'termo' if total == 1 else 'termos'}"
+        texto = f"Caderno · {contagem(total, 'termo', 'termos')}"
         vencidas = self._store.pendentes()
         if vencidas:
             texto += f"\n{vencidas} para revisar"

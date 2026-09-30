@@ -15,8 +15,12 @@ defeito que os testes do núcleo, de propósito, nunca veem.
 
 from __future__ import annotations
 
+import atexit
+import gc
+import logging
 import os
 import queue
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -28,6 +32,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 _TEMP = tempfile.mkdtemp(prefix="pipboy-teste-ui-")
 os.environ["LOCALAPPDATA"] = _TEMP
 os.environ["XDG_DATA_HOME"] = _TEMP
+
+# Todo ``mkdtemp()`` daqui em diante nasce DENTRO desta pasta, e ela é
+# apagada na saída. Sem isto, cada execução deixava para trás a pasta de dados
+# e dezenas de bancos de teste no TEMP da máquina: numa máquina de
+# desenvolvimento, isso somava ~6.500 pastas e ~0,7 GB. A coleta de lixo antes
+# da faxina fecha as conexões SQLite que ainda seguram arquivos no Windows, e
+# o ``logging.shutdown`` solta o pipboy.log pelo mesmo motivo.
+tempfile.tempdir = _TEMP
+
+
+def _apagar_temporarios() -> None:
+    logging.shutdown()
+    gc.collect()
+    shutil.rmtree(_TEMP, ignore_errors=True)
+
+
+atexit.register(_apagar_temporarios)
 os.environ["GEMINI_API_KEY"] = "AIzaTESTE_INTERFACE_1234"
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -873,6 +894,32 @@ def main() -> int:
         f"as nove famílias do programa entram no banco do Qt ({familias_embutidas})",
     )
     checar(registrar_fontes() == familias_embutidas, "e registrar de novo não duplica nada")
+
+    # Uma regra de escolha só (fontes.primeira_instalada / fonte_do_papel), e
+    # não uma cópia por janela: o cartão de boas-vindas, que aparece antes da
+    # janela existir, escolhe exatamente a mesma letra que ela.
+    from pipboy.interface.boas_vindas import _ProvedorMinimo
+    from pipboy.interface.fontes import primeira_instalada
+
+    checar(
+        primeira_instalada(("Família Que Não Existe", "Outra Que Não Existe")) == "Outra Que Não Existe"
+        and primeira_instalada(("Família Que Não Existe", "Cinzel", "Georgia")) == "Cinzel",
+        "a primeira candidata instalada vale — as embutidas contam —, e a última é a reserva",
+    )
+    provedor_letra = _ProvedorMinimo()
+    tema_provedor = janela.tema
+    provedor_letra.tema = tema_provedor
+    escala_letra = janela._escala_texto
+    janela._escala_texto = 1.0
+    diferentes_letra = [
+        (papel, ui) for papel in design_letra.TIPO for ui in (True, False)
+        if provedor_letra.fonte(papel, ui=ui) != janela.fonte(papel, ui=ui)
+    ]
+    janela._escala_texto = escala_letra
+    checar(
+        not diferentes_letra,
+        f"a janela e o cartão de boas-vindas escolhem a mesma fonte em todo degrau ({diferentes_letra})",
+    )
 
     jogo_letra = janela.campo_jogo.currentText()
     janela.campo_jogo.setCurrentText("Red Dead")
@@ -3544,8 +3591,21 @@ def main() -> int:
     checar(tela_fichas.fichas_empilhadas, "numa tela estreita, as fichas se empilham")
     tela_fichas.resize(largura_tela, tela_fichas.height())
     tela_fichas._ajustar_fileira()
+    # A mesma régua de ``_ajustar_fileira``: a largura útil é limitada pelo
+    # miolo, e entre as fichas há espaço. A versão anterior somava só as
+    # fichas contra a largura da tela, e discordava do código justamente no
+    # caso limite — sem fontes reais (offscreen em Linux) as três somam menos
+    # que a tela e ainda assim não cabem, e a suíte reprovava o que o programa
+    # fazia certo.
+    from pipboy.design import ESPACO_SM as ESPACO_FICHAS
+
+    disponivel_fichas = min(largura_tela, tela_fichas.LARGURA_MAX)
+    cabem_fichas = (
+        sum(f.sizeHint().width() for f in fichas) + (len(fichas) - 1) * ESPACO_FICHAS
+        <= disponivel_fichas
+    )
     checar(
-        not tela_fichas.fichas_empilhadas or sum(f.sizeHint().width() for f in fichas) > largura_tela,
+        tela_fichas.fichas_empilhadas == (not cabem_fichas),
         "e voltam para a linha quando cabem",
     )
 
@@ -6161,6 +6221,73 @@ def main() -> int:
         "e disparar Ctrl+L leva mesmo o cursor ao campo de texto",
     )
 
+    # A recusa de um atalho GLOBAL é uma linha de aviso, não um traço de pilha.
+    # Fora do Windows a biblioteca recusa toda combinação (precisa de root em
+    # Linux) e levantava três traços idênticos de quinze linhas, um por atalho,
+    # para dizer o que uma linha diz. O traço continua existindo — em debug.
+    import logging
+
+    from pipboy.events import UiEventKind as TipoDeEvento
+    from pipboy.interface import atalhos as modulo_atalhos
+
+    class _TecladoQueRecusa:
+        @staticmethod
+        def add_hotkey(*_argumentos: object, **_nomeados: object) -> None:
+            raise AssertionError  # exatamente o que a biblioteca levanta sem permissão
+
+        @staticmethod
+        def remove_hotkey(_handle: object) -> None:
+            pass
+
+    class _Coletor(logging.Handler):
+        def __init__(self) -> None:
+            super().__init__()
+            self.registros: list[logging.LogRecord] = []
+
+        def emit(self, registro: logging.LogRecord) -> None:
+            self.registros.append(registro)
+
+    coletor = _Coletor()
+    nivel_anterior = modulo_atalhos.LOGGER.level
+    teclado_real = modulo_atalhos.keyboard
+    avisos_na_conversa: list[str] = []
+    modulo_atalhos.LOGGER.addHandler(coletor)
+    modulo_atalhos.LOGGER.setLevel(logging.DEBUG)
+    modulo_atalhos.keyboard = _TecladoQueRecusa
+    try:
+        hospedeiro = QWidget()
+        recusados = modulo_atalhos.Atalhos(
+            hospedeiro,
+            locais={},
+            globais=[("ctrl+alt+p", TipoDeEvento.START_REQUEST)],
+            globais_ligados=True,
+            publicar=lambda _evento: None,
+            avisar=avisos_na_conversa.append,
+        )
+        recusados.instalar()
+        recusados.remover()
+        hospedeiro.deleteLater()
+    finally:
+        modulo_atalhos.keyboard = teclado_real
+        modulo_atalhos.LOGGER.setLevel(nivel_anterior)
+        modulo_atalhos.LOGGER.removeHandler(coletor)
+    avisos_no_log = [r for r in coletor.registros if r.levelno == logging.WARNING]
+    checar(
+        len(avisos_no_log) == 1
+        and avisos_no_log[0].exc_info is None
+        and "ctrl+alt+p" in avisos_no_log[0].getMessage()
+        and "AssertionError" in avisos_no_log[0].getMessage(),
+        "atalho global recusado vira UMA linha de aviso, com a razão e sem traço de pilha",
+    )
+    checar(
+        any(r.levelno == logging.DEBUG and r.exc_info for r in coletor.registros),
+        "e o traço inteiro continua disponível em debug",
+    )
+    checar(
+        avisos_na_conversa == ["Atalho global ctrl+alt+p indisponível."],
+        "e o jogador lê o aviso na conversa",
+    )
+
     print("modo compacto")
     janela.entrar_modo_compacto()
     aplicacao.processEvents()
@@ -6479,6 +6606,9 @@ if __name__ == "__main__":
     # cápsula e campainha abertos) foi medido separadamente e encerra limpo
     # de forma consistente. Quem cria janelas soltas e conexões duplicadas
     # é este arquivo, e é só ele que precisa desta porta.
+    #
+    # E por pular o ``atexit``, a faxina da pasta temporária é chamada aqui.
     sys.stdout.flush()
     sys.stderr.flush()
+    _apagar_temporarios()
     os._exit(codigo)

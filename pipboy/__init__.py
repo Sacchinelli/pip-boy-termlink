@@ -108,7 +108,7 @@ def main() -> int:
     aplicacao = instancia if isinstance(instancia, QApplication) else QApplication(sys.argv)
     aplicacao.setApplicationName(APP_NAME)
     try:
-        from .interface.icone import criar_icone
+        from .interface.icone_do_programa import criar_icone
 
         aplicacao.setWindowIcon(criar_icone())
     except Exception:

@@ -27,6 +27,7 @@ fábrica, como sempre caiu.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,11 @@ PASTA_DAS_FONTES = Path(__file__).resolve().parent.parent / "fontes"
 # Até onde o ajuste óptico pode ir. Fora disso a medida é que está errada —
 # uma família sem métrica, uma fonte de reserva quadrada.
 AJUSTE_MINIMO, AJUSTE_MAXIMO = 0.9, 1.25
+
+# Monoespaçadas, da preferida à reserva. O rodapé de consumo é uma coluna de
+# números que muda a cada meio segundo: com fonte proporcional, os dígitos
+# mudam de largura e o texto inteiro dança.
+FONTES_MONO: tuple[str, ...] = ("Cascadia Mono", "Consolas", "Courier New", "Courier")
 
 _REGISTRADAS: list[str] = []
 
@@ -64,6 +70,59 @@ def registrar_fontes() -> list[str]:
             if familia not in _REGISTRADAS:
                 _REGISTRADAS.append(familia)
     return list(_REGISTRADAS)
+
+
+@lru_cache(maxsize=1)
+def familias_instaladas() -> frozenset[str]:
+    """As famílias que o Qt enxerga, já com as embutidas registradas.
+
+    Perguntado uma vez só: a lista não muda com o programa aberto, e ela era
+    montada de novo em cada lugar que escolhia uma fonte. Exige a aplicação
+    Qt viva, como toda pergunta ao banco de fontes.
+    """
+    registrar_fontes()
+    return frozenset(QFontDatabase.families())
+
+
+def primeira_instalada(candidatas: Sequence[str]) -> str:
+    """A primeira candidata que existe nesta máquina; a última é a reserva.
+
+    A regra de TODA escolha de fonte do programa, num lugar só. Ela estava
+    escrita em sete — a janela, a abertura, o cartão de boas-vindas, o
+    ajuste óptico, o diagnóstico e as duas ferramentas de glifos —, e o
+    diagnóstico nem registrava as fontes embutidas antes de perguntar:
+    relatava "queria Cinzel, obteve Georgia" de uma fonte que o programa
+    usava. A reserva não é detalhe: por isso a última candidata de cada tema
+    é uma fonte de fábrica que nenhum outro tema usa (ver themes.py).
+    """
+    instaladas = familias_instaladas()
+    return next((nome for nome in candidatas if nome in instaladas), candidatas[-1])
+
+
+def fonte_do_papel(tema: Any, papel: str, *, ui: bool = True, escala: float = 1.0) -> QFont:
+    """A fonte de um degrau da rampa tipográfica (``design.TIPO``) no tema.
+
+    ``ui=True`` é a letra dos controles; ``ui=False``, a do jogo — e, no
+    degrau "display", a de título dele. A letra de LER vem no corpo aparente
+    da de referência (``ajuste_optico``); o título, no corpo que o desenho
+    dele pede. Negrito só se a família o tem, e o título na composição do
+    jogo (``compor_titulo``). ``escala`` é o tamanho do texto escolhido.
+    """
+    tipo = design.TIPO[papel]
+    if ui:
+        candidatas = tema.ui_font_candidates
+    elif papel == "display":
+        candidatas = tema.display_candidates
+    else:
+        candidatas = tema.font_candidates
+    familia = primeira_instalada(candidatas)
+    ajuste = 1.0 if papel == "display" else ajuste_optico(familia)
+    fonte = QFont(familia, design.escalar(tipo.tamanho, escala * ajuste))
+    fonte.setBold(tipo.peso == "bold" and tem_negrito(familia))
+    fonte.setItalic(tipo.estilo == "italic")
+    if papel == "display" and not ui:
+        compor_titulo(fonte, tema)
+    return fonte
 
 
 @lru_cache(maxsize=64)
@@ -103,10 +162,7 @@ def ajuste_optico(familia: str) -> float:
     baixa, e a 9 pt ficava menor que a Segoe a 8; a legenda do Cyberpunk
     sumia. Medido, e não tabelado: vale para qualquer família da cadeia.
     """
-    instaladas = set(QFontDatabase.families())
-    referencia_nome = next(
-        (nome for nome in design.FONTES_UI if nome in instaladas), design.FONTES_UI[-1]
-    )
+    referencia_nome = primeira_instalada(design.FONTES_UI)
     if familia == referencia_nome:
         return 1.0
     def razao(nome: str) -> float:

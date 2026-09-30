@@ -36,8 +36,12 @@ vizinho, porque aí não sobrou identidade nenhuma.
 
 from __future__ import annotations
 
+import atexit
 import contextlib
+import gc
+import logging
 import os
+import shutil
 import sys
 import tempfile
 from itertools import combinations
@@ -58,6 +62,23 @@ os.environ.setdefault("QT_QPA_FONTDIR", r"C:\Windows\Fonts")
 # O caderno e as preferências de quem roda a ferramenta ficam de fora.
 _TEMP = tempfile.mkdtemp(prefix="pipboy-regua-")
 os.environ["LOCALAPPDATA"] = _TEMP
+
+# Todo ``mkdtemp()`` daqui em diante nasce DENTRO desta pasta, e ela é
+# apagada na saída. Sem isto, cada execução deixava para trás a pasta de dados
+# e dezenas de bancos de teste no TEMP da máquina: numa máquina de
+# desenvolvimento, isso somava ~6.500 pastas e ~0,7 GB. A coleta de lixo antes
+# da faxina fecha as conexões SQLite que ainda seguram arquivos no Windows, e
+# o ``logging.shutdown`` solta o pipboy.log pelo mesmo motivo.
+tempfile.tempdir = _TEMP
+
+
+def _apagar_temporarios() -> None:
+    logging.shutdown()
+    gc.collect()
+    shutil.rmtree(_TEMP, ignore_errors=True)
+
+
+atexit.register(_apagar_temporarios)
 os.environ.setdefault("GEMINI_API_KEY", "AIzaREGUA_DOS_TEMAS_0000")
 
 import numpy as np  # noqa: E402

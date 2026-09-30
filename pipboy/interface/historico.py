@@ -49,6 +49,7 @@ from PySide6.QtWidgets import (
 
 from .. import design
 from ..historico import Fala, HistoricoStore, ResumoDeSessao
+from ..texto import conforme
 from .atmosfera import ATENUACAO_NO_FUNDO_NU, Cenario, so_o_cursor
 from .componentes import Botao, caminho_forma
 from .conversa import quem_fala
@@ -408,7 +409,7 @@ class JanelaHistorico(QDialog):
         for resumo, casam in achados:
             # Com busca ativa, o número que importa é quantas falas casam —
             # é ele que diz onde vale entrar. Sem busca, o tamanho da conversa.
-            falas = "fala" if resumo.falas == 1 else "falas"
+            falas = conforme(resumo.falas, "fala", "falas")
             contagem = (
                 f"{casam} de {resumo.falas} {falas}" if procurado else f"{resumo.falas} {falas}"
             )
