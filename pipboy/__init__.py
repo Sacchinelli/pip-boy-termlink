@@ -13,7 +13,7 @@ from pathlib import Path
 
 # Fonte única da versão: o pyproject.toml declara a mesma string, e o teste do
 # núcleo confere que as duas não voltem a divergir.
-__version__ = "3.0.0"
+__version__ = "3.1.0"
 
 LOGGER = logging.getLogger("pip_boy")
 

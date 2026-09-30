@@ -2,7 +2,7 @@
 name = "pip-boy-termlink"
 # Igual a pipboy.__version__. Estavam em 1.0.0 e 3.0.0, e nada apontava qual
 # das duas era a do programa.
-version = "3.0.0"
+version = "3.1.0"
 description = "Tutor de inglês por voz, em tempo real, para quem joga em inglês."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -17,6 +17,13 @@ dependencies = [
     "numpy>=1.24",
     "keyboard>=0.13.5",
 ]
+
+# Nomes em inglês de propósito: são as chaves que o pip, o PyPI e os
+# editores reconhecem e mostram como links.
+[project.urls]
+Homepage = "https://github.com/Sacchinelli/pip-boy-termlink"
+Issues = "https://github.com/Sacchinelli/pip-boy-termlink/issues"
+Changelog = "https://github.com/Sacchinelli/pip-boy-termlink/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 # Faixas de versão para quem instala o extra. As versões EXATAS que o CI usa
