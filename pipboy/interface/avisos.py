@@ -47,7 +47,7 @@ from PySide6.QtWidgets import QWidget
 
 from .. import design
 from .componentes import movimento_reduzido
-from .ornamentos import FAIXA_MOLDURA, contorno_de_pincel
+from .ornamentos import FAIXA_MOLDURA, contorno_de_pincel, cor_com_alfa, fio_que_some
 
 # Do canto do painel até o anúncio: a faixa da moldura e um respiro.
 MARGEM = FAIXA_MOLDURA + 8.0
@@ -175,12 +175,6 @@ def _com_contagem(texto: str, novas: int) -> str:
     return f"{texto} ({novas})" if novas > 1 else texto
 
 
-def _cor(base: str, alfa: float) -> QColor:
-    cor = QColor(base)
-    cor.setAlphaF(max(0.0, min(1.0, alfa)))
-    return cor
-
-
 def _escuro(t: Any, quanto: float = 0.55) -> str:
     """O véu escuro do jogo: a tela dele puxada para o preto, e não um preto neutro."""
     return design.misturar(t.screen, "#000000", quanto)
@@ -191,21 +185,11 @@ def _faixa_que_some(
 ) -> None:
     """Uma faixa cheia no meio que se apaga nas duas pontas."""
     gradiente = QLinearGradient(caixa.topLeft(), caixa.topRight())
-    gradiente.setColorAt(0.0, _cor(cor, 0.0))
-    gradiente.setColorAt(borda, _cor(cor, alfa))
-    gradiente.setColorAt(1.0 - borda, _cor(cor, alfa))
-    gradiente.setColorAt(1.0, _cor(cor, 0.0))
+    gradiente.setColorAt(0.0, cor_com_alfa(cor, 0.0))
+    gradiente.setColorAt(borda, cor_com_alfa(cor, alfa))
+    gradiente.setColorAt(1.0 - borda, cor_com_alfa(cor, alfa))
+    gradiente.setColorAt(1.0, cor_com_alfa(cor, 0.0))
     pintor.fillRect(caixa, QBrush(gradiente))
-
-
-def _fio_que_some(
-    pintor: QPainter, de: float, ate: float, y: float, cor: str, alfa: float, largura: float
-) -> None:
-    gradiente = QLinearGradient(QPointF(de, y), QPointF(ate, y))
-    gradiente.setColorAt(0.0, _cor(cor, alfa))
-    gradiente.setColorAt(1.0, _cor(cor, 0.0))
-    pintor.setPen(QPen(QBrush(gradiente), largura))
-    pintor.drawLine(QPointF(de, y), QPointF(ate, y))
 
 
 # ----------------------------------------------------------------- Estilos
@@ -243,7 +227,7 @@ def _cartao(pintor: QPainter, painel: QRectF, r: Recado, c: Contexto) -> QRectF:
     caixa = QRectF(painel.center().x() - largura / 2, y, largura, altura)
     caminho = QPainterPath()
     caminho.addRoundedRect(caixa, 10.0, 10.0)
-    pintor.fillPath(caminho, _cor(fundo, 0.98))
+    pintor.fillPath(caminho, cor_com_alfa(fundo, 0.98))
     pintor.setPen(QPen(QColor(t.border_forte), 1.0))
     pintor.drawPath(caminho)
     x, y = caixa.left() + 20, caixa.top() + 12
@@ -276,7 +260,7 @@ def _terminal(pintor: QPainter, painel: QRectF, r: Recado, c: Contexto) -> QRect
     alto_barra = _altura(barra_f) + 6
     altura = alto_barra + 14 + _altura(termo_f) + (_altura(traducao_f) if traducao else 0)
     caixa = QRectF(painel.left() + MARGEM, painel.top() + MARGEM, largura, altura)
-    pintor.fillRect(caixa, _cor(fundo, VEU))
+    pintor.fillRect(caixa, cor_com_alfa(fundo, VEU))
     pintor.setPen(QPen(QColor(t.primary), 1.0))
     pintor.drawRect(caixa.adjusted(0.5, 0.5, -0.5, -0.5))
     barra = QRectF(caixa.left(), caixa.top(), caixa.width(), alto_barra)
@@ -323,8 +307,8 @@ def _graca(pintor: QPainter, painel: QRectF, r: Recado, c: Contexto) -> QRectF:
     _faixa_que_some(pintor, faixa, veu, VEU, 0.2)
     centro = faixa.center().x()
     for y in (faixa.top() + 0.5, faixa.bottom() - 0.5):
-        _fio_que_some(pintor, centro, faixa.left() + faixa.width() * 0.12, y, t.accent, 0.8, 1.0)
-        _fio_que_some(pintor, centro, faixa.right() - faixa.width() * 0.12, y, t.accent, 0.8, 1.0)
+        fio_que_some(pintor, centro, faixa.left() + faixa.width() * 0.12, y, t.accent, 0.8, 1.0)
+        fio_que_some(pintor, centro, faixa.right() - faixa.width() * 0.12, y, t.accent, 0.8, 1.0)
     # A aproximação lenta: 4% ao longo da chegada, que aqui dura a vida toda.
     pintor.save()
     if c.movimento:
@@ -373,7 +357,7 @@ def _descoberta(pintor: QPainter, painel: QRectF, r: Recado, c: Contexto) -> QRe
                          painel.top() + painel.height() * 0.24))
     sombra = QRadialGradient(QPointF(0, 0), raio)
     for ponto, alfa in ((0.0, VEU), (0.5, VEU), (0.66, 0.62), (0.8, 0.3), (0.92, 0.09), (1.0, 0.0)):
-        sombra.setColorAt(ponto, _cor(veu, alfa))
+        sombra.setColorAt(ponto, cor_com_alfa(veu, alfa))
     pintor.save()
     pintor.translate(centro)
     pintor.scale(1.0, achatamento)
@@ -401,8 +385,8 @@ def _descoberta(pintor: QPainter, painel: QRectF, r: Recado, c: Contexto) -> QRe
     if comprimento > 4:
         meio_y = escrito_termo.center().y()
         esquerda, direita = escrito_termo.left() - 16, escrito_termo.right() + 16
-        _fio_que_some(pintor, esquerda, esquerda - comprimento, meio_y, t.accent, 0.85, 1.0)
-        _fio_que_some(pintor, direita, direita + comprimento, meio_y, t.accent, 0.85, 1.0)
+        fio_que_some(pintor, esquerda, esquerda - comprimento, meio_y, t.accent, 0.85, 1.0)
+        fio_que_some(pintor, direita, direita + comprimento, meio_y, t.accent, 0.85, 1.0)
     return QRectF(centro.x() - raio, centro.y() - raio * achatamento, raio * 2,
                   raio * achatamento * 2)
 
@@ -428,16 +412,16 @@ def _diario(pintor: QPainter, painel: QRectF, r: Recado, c: Contexto) -> QRectF:
     cheia = texto_x + texto_l + 12 - x0
     caixa = QRectF(x0, y0, min(cheia + 140, painel.right() - MARGEM - x0), altura)
     gradiente = QLinearGradient(caixa.topLeft(), caixa.topRight())
-    gradiente.setColorAt(0.0, _cor(veu, VEU))
-    gradiente.setColorAt(min(0.95, cheia / caixa.width()), _cor(veu, VEU))
-    gradiente.setColorAt(1.0, _cor(veu, 0.0))
+    gradiente.setColorAt(0.0, cor_com_alfa(veu, VEU))
+    gradiente.setColorAt(min(0.95, cheia / caixa.width()), cor_com_alfa(veu, VEU))
+    gradiente.setColorAt(1.0, cor_com_alfa(veu, 0.0))
     pintor.fillRect(caixa, QBrush(gradiente))
     # O medalhão: a argola dupla com os dentes em cima e embaixo.
     centro = QPointF(x0 + 26, caixa.center().y())
     pintor.setBrush(Qt.BrushStyle.NoBrush)
     pintor.setPen(QPen(QColor(t.accent), 1.8))
     pintor.drawEllipse(centro, 14.0, 14.0)
-    pintor.setPen(QPen(_cor(t.accent, 0.6), 0.9))
+    pintor.setPen(QPen(cor_com_alfa(t.accent, 0.6), 0.9))
     pintor.drawEllipse(centro, 9.5, 9.5)
     pintor.setBrush(QColor(t.accent))
     pintor.drawEllipse(centro, 2.4, 2.4)
@@ -455,7 +439,7 @@ def _diario(pintor: QPainter, painel: QRectF, r: Recado, c: Contexto) -> QRectF:
                       QRectF(texto_x, y, texto_l, _altura(fonte)), texto)
             y += _altura(fonte)
             if fonte is manchete_f:
-                _fio_que_some(pintor, texto_x, texto_x + texto_l + 60, y + 0.5, t.border_forte, 1.0, 1.0)
+                fio_que_some(pintor, texto_x, texto_x + texto_l + 60, y + 0.5, t.border_forte, 1.0, 1.0)
                 y += 2
     return caixa
 
@@ -478,8 +462,8 @@ def _cartaz(pintor: QPainter, painel: QRectF, r: Recado, c: Contexto) -> QRectF:
                   _largura(traducao_f, traducao) + 36)
     altura = 12 + alto_pincel + 12 + _altura(termo_f) + (_altura(traducao_f) if traducao else 0) + 12
     caixa = QRectF(painel.left() + MARGEM, painel.top() + MARGEM, largura, altura)
-    pintor.fillRect(caixa, _cor(fundo, VEU))
-    pintor.setPen(QPen(_cor(t.primary, 0.35), 1.0))
+    pintor.fillRect(caixa, cor_com_alfa(fundo, VEU))
+    pintor.setPen(QPen(cor_com_alfa(t.primary, 0.35), 1.0))
     pintor.drawRect(caixa.adjusted(3.5, 3.5, -3.5, -3.5))
     pincel = QRectF(caixa.left() + 8, caixa.top() + 12, _largura(manchete_f, manchete) + 44, alto_pincel)
     tinta = QColor(design.misturar(t.alert, "#000000", 0.22))
@@ -491,7 +475,7 @@ def _cartaz(pintor: QPainter, painel: QRectF, r: Recado, c: Contexto) -> QRectF:
               pincel.adjusted(20, 0, -8, 0), manchete)
     y = pincel.bottom() + 6
     for alfa, largura_fio, dy in ((0.55, 2.0, 0.0), (0.35, 1.0, 3.5)):
-        pintor.setPen(QPen(_cor(t.primary, alfa), largura_fio))
+        pintor.setPen(QPen(cor_com_alfa(t.primary, alfa), largura_fio))
         pintor.drawLine(QPointF(caixa.left() + 16, y + dy), QPointF(caixa.right() - 16, y + dy))
     y += 8
     for fonte, cor, texto in ((termo_f, t.primary, termo), (traducao_f, t.text_muted, traducao)):
@@ -534,7 +518,7 @@ def _missao(pintor: QPainter, painel: QRectF, r: Recado, c: Contexto) -> QRectF:
     if c.letras:
         # O halo do neon: o título repetido, fraco, meio pixel para cada lado.
         pintor.setFont(manchete_f)
-        pintor.setPen(_cor(t.accent, 0.28))
+        pintor.setPen(cor_com_alfa(t.accent, 0.28))
         for dx, dy in ((-1.5, 0.0), (1.5, 0.0), (0.0, -1.5), (0.0, 1.5)):
             pintor.drawText(caixa_manchete.translated(dx, dy), int(Qt.AlignmentFlag.AlignCenter),
                             MANCHETES["missao"])
@@ -584,12 +568,12 @@ def _fragmento(pintor: QPainter, painel: QRectF, r: Recado, c: Contexto) -> QRec
     forma.lineTo(caixa.right() - corte, caixa.bottom())
     forma.lineTo(caixa.left(), caixa.bottom())
     forma.closeSubpath()
-    pintor.fillPath(forma, _cor(fundo, VEU))
-    pintor.setPen(QPen(_cor(t.accent, 0.85), 1.0))
+    pintor.fillPath(forma, cor_com_alfa(fundo, VEU))
+    pintor.setPen(QPen(cor_com_alfa(t.accent, 0.85), 1.0))
     pintor.drawPath(forma)
     pintor.fillRect(QRectF(caixa.left(), caixa.top(), 3.0, caixa.height()), QColor(t.primary))
     for i in range(3):
-        pintor.fillRect(QRectF(caixa.right() - 12 - i * 7, caixa.top() + 6, 4, 4), _cor(t.accent, 0.8))
+        pintor.fillRect(QRectF(caixa.right() - 12 - i * 7, caixa.top() + 6, 4, 4), cor_com_alfa(t.accent, 0.8))
     x, y = caixa.left() + 18, caixa.top() + 12
     for fonte, cor, texto in (
         (manchete_f, t.accent, manchete),
@@ -604,7 +588,7 @@ def _fragmento(pintor: QPainter, painel: QRectF, r: Recado, c: Contexto) -> QRec
             pintor.setFont(fonte)
             desvio = 3.0 * (1.0 - c.entrada)
             for tinta, dx in ((t.alert, -desvio), (t.accent, desvio)):
-                pintor.setPen(_cor(tinta, 0.7 * (1.0 - c.entrada)))
+                pintor.setPen(cor_com_alfa(tinta, 0.7 * (1.0 - c.entrada)))
                 pintor.drawText(linha.translated(dx, 0),
                                 int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), texto)
         _escrever(pintor, c, fonte, _legivel(c, cor, fundo), linha, texto)
@@ -646,7 +630,7 @@ def _pergaminho(pintor: QPainter, painel: QRectF, r: Recado, c: Contexto) -> QRe
         fita.lineTo(borda - lado * 14, base)
         fita.closeSubpath()
         pintor.fillPath(fita, avesso)
-        pintor.setPen(QPen(_cor(t.accent, 0.6), 1.0))
+        pintor.setPen(QPen(cor_com_alfa(t.accent, 0.6), 1.0))
         pintor.drawPath(fita)
         dobrinha = QPainterPath()
         dobrinha.moveTo(borda, corpo.bottom())
@@ -657,7 +641,7 @@ def _pergaminho(pintor: QPainter, painel: QRectF, r: Recado, c: Contexto) -> QRe
     pintor.fillRect(corpo, QColor(fundo))
     pintor.setPen(QPen(QColor(t.accent), 1.0))
     pintor.drawRect(corpo.adjusted(0.5, 0.5, -0.5, -0.5))
-    pintor.setPen(QPen(_cor(t.accent, 0.4), 1.0))
+    pintor.setPen(QPen(cor_com_alfa(t.accent, 0.4), 1.0))
     pintor.drawRect(corpo.adjusted(3.5, 3.5, -3.5, -3.5))
     y = corpo.top() + 9
     for fonte, cor, texto in (
@@ -717,7 +701,7 @@ def _abate(pintor: QPainter, painel: QRectF, r: Recado, c: Contexto) -> QRectF:
     _faixa_que_some(pintor, faixa, veu, VEU, borda)
     # A régua do visor, sob o grupo.
     y_regua = faixa.bottom() - 4
-    pintor.setPen(QPen(_cor(t.primary, 0.5), 1.0))
+    pintor.setPen(QPen(cor_com_alfa(t.primary, 0.5), 1.0))
     pintor.drawLine(QPointF(grupo.left(), y_regua), QPointF(grupo.right(), y_regua))
     x = grupo.left()
     while x <= grupo.right():
@@ -728,7 +712,7 @@ def _abate(pintor: QPainter, painel: QRectF, r: Recado, c: Contexto) -> QRectF:
     carimbo = 1.0 + (0.5 * (1.0 - c.entrada) if c.movimento else 0.0)
     medalha = _hexagono(centro, raio * carimbo)
     pintor.fillPath(medalha, QColor(t.accent))
-    pintor.setPen(QPen(_cor(t.primary, 0.8), 1.0))
+    pintor.setPen(QPen(cor_com_alfa(t.primary, 0.8), 1.0))
     pintor.drawPath(_hexagono(centro, raio * carimbo + 3))
     _escrever(pintor, c, ganho_f, QColor(design.garantir_contraste(t.on_accent, t.accent, CONTRASTE)),
               QRectF(centro.x() - raio, centro.y() - raio, raio * 2, raio * 2), f"+{r.novas}",

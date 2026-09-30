@@ -60,6 +60,7 @@ from PySide6.QtWidgets import (
 
 from .. import design
 from ..historico import sessao_em
+from ..texto import contagem
 from ..vocabulary import (
     FILTRO_DIFICEIS,
     FILTRO_DOMINADAS,
@@ -116,16 +117,12 @@ TODOS_OS_JOGOS = "Todos os jogos"
 CASCATA_MAXIMA = 8
 
 
-def _plural(quantidade: int, singular: str, plural: str) -> str:
-    return f"{quantidade} {singular if quantidade == 1 else plural}"
-
-
 def _selo(entrada: Entrada) -> tuple[str, str]:
     """Texto e papel de cor do estado de revisão de uma palavra."""
     if entrada.vencida:
         return "revisar agora", "accent"
     dias = entrada.dias_ate_revisao
-    prazo = "amanhã" if dias == 1 else f"em {_plural(dias, 'dia', 'dias')}"
+    prazo = "amanhã" if dias == 1 else f"em {contagem(dias, 'dia', 'dias')}"
     return (f"dominada · {prazo}", "info") if entrada.dominada else (prazo, "secondary")
 
 
@@ -312,12 +309,12 @@ class CartaoTermo(QFrame):
         base = QHBoxLayout()
         base.setSpacing(8)
         partes = [
-            p for p in (entrada.jogo, _plural(entrada.encontros, "encontro", "encontros")) if p
+            p for p in (entrada.jogo, contagem(entrada.encontros, "encontro", "encontros")) if p
         ]
         if entrada.acertos or entrada.erros:
             partes.append(
-                f"{_plural(entrada.acertos, 'acerto', 'acertos')} · "
-                f"{_plural(entrada.erros, 'erro', 'erros')}"
+                f"{contagem(entrada.acertos, 'acerto', 'acertos')} · "
+                f"{contagem(entrada.erros, 'erro', 'erros')}"
             )
         rodape = QLabel("   ·   ".join(partes))
         rodape.setFont(janela.fonte("micro"))
@@ -903,9 +900,9 @@ class JanelaCaderno(QDialog):
             aproveitamento = ""
         self.resumo.setText(
             "caderno de vocabulário   ·   "
-            f"{_plural(estatisticas.total, 'termo', 'termos')}"
+            f"{contagem(estatisticas.total, 'termo', 'termos')}"
             f"   ·   {estatisticas.vencidas} para revisar"
-            f"   ·   {_plural(estatisticas.dominadas, 'dominada', 'dominadas')}"
+            f"   ·   {contagem(estatisticas.dominadas, 'dominada', 'dominadas')}"
             f"{aproveitamento}"
         )
 
@@ -922,7 +919,7 @@ class JanelaCaderno(QDialog):
         if excedeu:
             self.contagem.setText(f"mostrando os primeiros {LIMITE_CARTOES} — refine a busca")
         elif entradas:
-            self.contagem.setText(_plural(len(entradas), "resultado", "resultados"))
+            self.contagem.setText(contagem(len(entradas), "resultado", "resultados"))
         else:
             self.contagem.setText("")
 
@@ -1061,5 +1058,5 @@ class JanelaCaderno(QDialog):
         total = self._janela.exportar_vocabulario()
         if total is not None:
             self.botao_exportar.concluir(
-                _plural(total, "termo exportado", "termos exportados")
+                contagem(total, "termo exportado", "termos exportados")
             )

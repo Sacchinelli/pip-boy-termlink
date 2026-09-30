@@ -60,6 +60,7 @@ from PySide6.QtWidgets import (
 
 from .. import design
 from ..nivel import REGRA_DO_XP, Nivel, nivel_de, xp_do_caderno
+from ..texto import contagem
 from ..vocabulary import DIAS_PARA_DOMINIO, VocabularyStore
 from .atmosfera import ATENUACAO_NO_FUNDO_NU, Cenario, so_o_cursor
 from .componentes import Botao, acender_borda, caminho_forma
@@ -86,10 +87,6 @@ EXPLICACOES_DOMINIO = (
 )
 
 
-def _plural(quantidade: int, singular: str, plural: str) -> str:
-    return f"{quantidade} {singular if quantidade == 1 else plural}"
-
-
 def segundas_do_grafico(quantidade: int, hoje: date | None = None) -> list[date]:
     """As segundas-feiras das barras, da mais antiga à semana corrente.
 
@@ -112,7 +109,7 @@ def descrever_semana(
     if indice == len(dados) - 1:
         titulo += " · esta semana"
     valor = dados[indice][1]
-    corpo = _plural(valor, "palavra nova", "palavras novas")
+    corpo = contagem(valor, "palavra nova", "palavras novas")
     if indice > 0:
         diferenca = valor - dados[indice - 1][1]
         if diferenca > 0:
@@ -152,7 +149,7 @@ def ler_calendario(estudados: set[date], hoje: date, semanas: int) -> str:
     inicio = hoje - timedelta(days=hoje.weekday()) - timedelta(weeks=semanas - 1)
     dias = sum(1 for dia in estudados if inicio <= dia <= hoje)
     hoje_ja = "hoje já teve estudo" if hoje in estudados else "hoje ainda não teve estudo"
-    return f"{_plural(dias, 'dia', 'dias')} de estudo nas últimas {semanas} semanas; {hoje_ja}."
+    return f"{contagem(dias, 'dia', 'dias')} de estudo nas últimas {semanas} semanas; {hoje_ja}."
 
 
 def ler_dominio(novas: int, aprendendo: int, dominadas: int) -> str:
@@ -407,11 +404,11 @@ def descrever_previsao(dados: list[tuple[date, int]], indice: int) -> tuple[str,
         # meia-noite (ver VocabularyStore.previsao).
         titulo += " · hoje"
         corpo = (
-            _plural(valor, "palavra vence hoje", "palavras vencem hoje")
+            contagem(valor, "palavra vence hoje", "palavras vencem hoje")
             if valor else "nada vence hoje"
         )
     else:
-        corpo = _plural(valor, "palavra vence", "palavras vencem") if valor else "nenhuma palavra vence"
+        corpo = contagem(valor, "palavra vence", "palavras vencem") if valor else "nenhuma palavra vence"
     return titulo, corpo
 
 

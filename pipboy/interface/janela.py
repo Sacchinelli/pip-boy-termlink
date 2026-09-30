@@ -68,6 +68,7 @@ from ..profiles import (
     SessionSettings,
     personas_for,
 )
+from ..texto import contagem
 from ..themes import GameTheme, paleta_de, theme_for
 from ..vocabulary import FILTRO_REVISAR, VocabularyStore
 from . import montagem
@@ -1169,7 +1170,7 @@ class Janela(QWidget):
     def _atualizar_caderno(self) -> None:
         total = self._store.total()
         self._total_no_caderno = total
-        texto = f"Caderno · {total} {'termo' if total == 1 else 'termos'}"
+        texto = f"Caderno · {contagem(total, 'termo', 'termos')}"
         vencidas = self._store.pendentes()
         if vencidas:
             texto += f"\n{vencidas} para revisar"

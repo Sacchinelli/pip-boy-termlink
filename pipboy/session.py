@@ -42,6 +42,7 @@ from .constants import (
 )
 from .events import Tag, UiEvent, UiEventKind
 from .profiles import SessionSettings, build_greeting, build_system_instruction
+from .texto import contagem
 from .themes import ROLE_ACCENT, ROLE_PRIMARY, theme_for
 from .tools import ToolDispatcher, build_tools
 from .vocabulary import VocabularyStore
@@ -249,7 +250,7 @@ class LiveSessionWorker:
 
     def _on_review(self, termo: str, acertou: bool, dias: int) -> None:
         if acertou:
-            prazo = f"revisão em {dias} dia{'s' if dias != 1 else ''}"
+            prazo = f"revisão em {contagem(dias, 'dia', 'dias')}"
         else:
             prazo = "voltará no próximo quiz"
         self._log(f"{'✓' if acertou else '✗'} {termo} — {prazo}", Tag.VOCAB)

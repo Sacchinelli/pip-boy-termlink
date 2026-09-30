@@ -85,6 +85,7 @@ from ..revisao import (
     pista,
     trechos,
 )
+from ..texto import conforme, contagem
 from ..vocabulary import Entrada, VocabularyStore
 from .atmosfera import ATENUACAO_NO_FUNDO_NU, Cenario, so_o_cursor
 from .componentes import Botao, RotuloElidido, acender_borda, caminho_forma
@@ -132,10 +133,6 @@ def voz_da_escrita(jogo: str) -> tuple[str, str]:
     return VOZES_DA_ESCRITA.get(jogo, VOZ_PADRAO)
 
 
-def _plural(quantidade: int, singular: str, plural: str) -> str:
-    return f"{quantidade} {singular if quantidade == 1 else plural}"
-
-
 def quando_volta(dias: int) -> str:
     """Os dias até a próxima revisão, ditos como se diz."""
     if dias <= 0:
@@ -151,9 +148,9 @@ def ler_rodada(total: int, resultados: list[str]) -> str:
         return "Nenhum cartão nesta rodada."
     feitos = len(resultados)
     contas = (
-        f"{_plural(resultados.count(ACERTO), 'acerto', 'acertos')}, "
-        f"{_plural(resultados.count(DIFICIL), 'difícil', 'difíceis')}, "
-        f"{_plural(resultados.count(ERRO), 'erro', 'erros')}"
+        f"{contagem(resultados.count(ACERTO), 'acerto', 'acertos')}, "
+        f"{contagem(resultados.count(DIFICIL), 'difícil', 'difíceis')}, "
+        f"{contagem(resultados.count(ERRO), 'erro', 'erros')}"
     )
     return f"{feitos} de {total} cartões respondidos: {contas}."
 
@@ -348,7 +345,7 @@ class VersoDaEscrita(QWidget):
             f"{html.escape(letra) if letra != ' ' else '&nbsp;'}</span>"
             for i, letra in enumerate(conferencia.resposta)
         )
-        sobra = "resta 1 tentativa" if restantes == 1 else f"restam {restantes} tentativas"
+        sobra = f"{conforme(restantes, 'resta', 'restam')} {contagem(restantes, 'tentativa', 'tentativas')}"
         self.retorno.setText(
             f'<span style="font-weight:600; letter-spacing:1px;">{letras}</span>'
             f"&nbsp;&nbsp;·&nbsp;&nbsp;{html.escape(self.recusa(conferencia))}"
@@ -802,13 +799,13 @@ class JanelaRevisao(QDialog):
             self._meta.setText("Todas as palavras estão agendadas para o futuro.")
         else:
             self._progresso.setText("RODADA CONCLUÍDA")
-            partes = [_plural(self._rodada.acertos, "acerto", "acertos")]
+            partes = [contagem(self._rodada.acertos, "acerto", "acertos")]
             if self._rodada.dificeis:
-                partes.append(_plural(self._rodada.dificeis, "difícil", "difíceis"))
-            partes.append(_plural(self._rodada.erros, "erro", "erros"))
+                partes.append(contagem(self._rodada.dificeis, "difícil", "difíceis"))
+            partes.append(contagem(self._rodada.erros, "erro", "erros"))
             self._termo.setText(" · ".join(partes))
             self._meta.setText(
-                f"{_plural(restantes, 'palavra ainda vencida', 'palavras ainda vencidas')}."
+                f"{contagem(restantes, 'palavra ainda vencida', 'palavras ainda vencidas')}."
                 if restantes
                 else "Fila zerada — nada mais vencido por hoje."
             )

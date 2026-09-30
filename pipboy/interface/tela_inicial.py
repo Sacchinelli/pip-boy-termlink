@@ -55,6 +55,7 @@ from PySide6.QtWidgets import (
 
 from .. import design
 from ..dicas import dica_do_dia
+from ..texto import contagem
 from .componentes import Holofote, RotuloDecifravel, acender_borda, caminho_forma
 from .movimento import animar_entrada
 from .ornamentos import estilo_de_selecao, pintar_selecao
@@ -74,10 +75,6 @@ class Resumo:
     # quando atalhos globais não existem nesta máquina ou foram desligados.
     atalhos: tuple[tuple[str, str], ...]
     diagnostico: str
-
-
-def _contagem(quantidade: int, singular: str, plural: str) -> str:
-    return f"{quantidade} {singular if quantidade == 1 else plural}"
 
 
 def _inteiro(texto: str) -> str:
@@ -812,15 +809,15 @@ class TelaInicial(QWidget):
         # Detalhes curtos de propósito: é a linha mais larga do cartão, e é ela
         # que decide se os três cabem lado a lado na janela no tamanho mínimo.
         self.cartao_revisar.definir(
-            f"{_contagem(resumo.vencidas, 'vencida', 'vencidas')} · offline"
+            f"{contagem(resumo.vencidas, 'vencida', 'vencidas')} · offline"
             if resumo.vencidas else "Em dia",
             destaque=resumo.vencidas > 0,
         )
         self.cartao_caderno.definir(
-            _contagem(resumo.termos, "termo", "termos") if resumo.termos else "Ainda vazio"
+            contagem(resumo.termos, "termo", "termos") if resumo.termos else "Ainda vazio"
         )
         self.cartao_historico.definir(
-            _contagem(resumo.conversas, "conversa", "conversas")
+            contagem(resumo.conversas, "conversa", "conversas")
             if resumo.conversas else "Nenhuma ainda"
         )
 

@@ -43,7 +43,8 @@ from .movimento import no_ritmo
 ALTURA_DIVISORIA = 11
 
 
-def _cor(base: str, alfa: float) -> QColor:
+def cor_com_alfa(base: str, alfa: float) -> QColor:
+    """A cor ``base`` com a opacidade ``alfa``, limitada a 0–1."""
     cor = QColor(base)
     cor.setAlphaF(max(0.0, min(1.0, alfa)))
     return cor
@@ -62,13 +63,13 @@ def _losango(pintor: QPainter, centro: QPointF, raio: float, *, cheio: bool) -> 
         pintor.drawPath(caminho)
 
 
-def _fio_que_some(
+def fio_que_some(
     pintor: QPainter, de: float, ate: float, y: float, cor: str, alfa: float, largura: float
 ) -> None:
     """Um fio que nasce aceso em ``de`` e se apaga até ``ate``."""
     gradiente = QLinearGradient(QPointF(de, y), QPointF(ate, y))
-    gradiente.setColorAt(0.0, _cor(cor, alfa))
-    gradiente.setColorAt(1.0, _cor(cor, 0.0))
+    gradiente.setColorAt(0.0, cor_com_alfa(cor, alfa))
+    gradiente.setColorAt(1.0, cor_com_alfa(cor, 0.0))
     pintor.setPen(QPen(QBrush(gradiente), largura))
     pintor.drawLine(QPointF(de, y), QPointF(ate, y))
 
@@ -88,26 +89,26 @@ def _fio_de_ouro(pintor: QPainter, caixa: QRectF, t: Any) -> None:
     filigranas que nascem acesas e somem antes de chegar à borda.
     """
     y = caixa.center().y()
-    pintor.setPen(QPen(_cor(t.accent, 0.95), 1.0))
+    pintor.setPen(QPen(cor_com_alfa(t.accent, 0.95), 1.0))
     _losango(pintor, QPointF(caixa.left() + 3.5, y), 3.2, cheio=True)
-    _fio_que_some(pintor, caixa.left() + 10, caixa.right(), y, t.accent, 0.75, 1.0)
+    fio_que_some(pintor, caixa.left() + 10, caixa.right(), y, t.accent, 0.75, 1.0)
 
 
 def _nordica(pintor: QPainter, caixa: QRectF, t: Any) -> None:
     """Skyrim: fio duplo de pedra entalhada, terminado num losango vazado."""
     y = caixa.center().y()
     fim = caixa.right() - 9
-    pintor.setPen(QPen(_cor(t.primary, 0.42), 1.0))
+    pintor.setPen(QPen(cor_com_alfa(t.primary, 0.42), 1.0))
     pintor.drawLine(QPointF(caixa.left(), y - 1.5), QPointF(fim - 4, y - 1.5))
     pintor.drawLine(QPointF(caixa.left(), y + 1.5), QPointF(fim - 4, y + 1.5))
-    pintor.setPen(QPen(_cor(t.primary, 0.75), 1.1))
+    pintor.setPen(QPen(cor_com_alfa(t.primary, 0.75), 1.1))
     _losango(pintor, QPointF(fim + 1, y), 3.6, cheio=False)
 
 
 def _medalhao(pintor: QPainter, caixa: QRectF, t: Any) -> None:
     """The Witcher 3: a argola do medalhão abrindo um fio de ferro."""
     y = caixa.center().y()
-    pintor.setPen(QPen(_cor(t.accent, 0.9), 1.3))
+    pintor.setPen(QPen(cor_com_alfa(t.accent, 0.9), 1.3))
     pintor.setBrush(Qt.BrushStyle.NoBrush)
     pintor.drawEllipse(QPointF(caixa.left() + 4.5, y), 3.4, 3.4)
     pintor.setPen(QPen(QColor(t.border_forte), 1.0))
@@ -118,9 +119,9 @@ def _medalhao(pintor: QPainter, caixa: QRectF, t: Any) -> None:
 def _cartaz(pintor: QPainter, caixa: QRectF, t: Any) -> None:
     """Red Dead: a régua dupla — grossa e fina — dos cartazes de procurado."""
     y = caixa.center().y()
-    pintor.setPen(QPen(_cor(t.primary, 0.55), 2.0))
+    pintor.setPen(QPen(cor_com_alfa(t.primary, 0.55), 2.0))
     pintor.drawLine(QPointF(caixa.left(), y - 1.5), QPointF(caixa.right(), y - 1.5))
-    pintor.setPen(QPen(_cor(t.primary, 0.35), 1.0))
+    pintor.setPen(QPen(cor_com_alfa(t.primary, 0.35), 1.0))
     pintor.drawLine(QPointF(caixa.left(), y + 2.0), QPointF(caixa.right(), y + 2.0))
 
 
@@ -129,9 +130,9 @@ def _neon(pintor: QPainter, caixa: QRectF, t: Any) -> None:
     y = caixa.center().y()
     gradiente = QLinearGradient(QPointF(caixa.left(), y), QPointF(caixa.right(), y))
     for alfa, largura in ((0.10, 6.0), (0.22, 3.5), (0.95, 1.6)):
-        gradiente.setColorAt(0.0, _cor(t.accent, alfa))
-        gradiente.setColorAt(0.65, _cor(t.info, alfa))
-        gradiente.setColorAt(1.0, _cor(t.info, 0.0))
+        gradiente.setColorAt(0.0, cor_com_alfa(t.accent, alfa))
+        gradiente.setColorAt(0.65, cor_com_alfa(t.info, alfa))
+        gradiente.setColorAt(1.0, cor_com_alfa(t.info, 0.0))
         pintor.setPen(
             QPen(QBrush(gradiente), largura, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
         )
@@ -146,8 +147,8 @@ _SEGMENTOS = (22.0, 5.0, 9.0, 3.0, 34.0, 6.0, 4.0, 14.0)
 def _segmentada(pintor: QPainter, caixa: QRectF, t: Any) -> None:
     """Cyberpunk 2077: barramento de dados recortado, com o bloco de início."""
     y = caixa.center().y()
-    pintor.fillRect(QRectF(caixa.left(), y - 2.0, 7.0, 4.0), _cor(t.accent, 0.95))
-    pintor.setPen(QPen(_cor(t.accent, 0.55), 1.2))
+    pintor.fillRect(QRectF(caixa.left(), y - 2.0, 7.0, 4.0), cor_com_alfa(t.accent, 0.95))
+    pintor.setPen(QPen(cor_com_alfa(t.accent, 0.55), 1.2))
     x = caixa.left() + 11
     indice = 0
     while x < caixa.right():
@@ -160,12 +161,12 @@ def _segmentada(pintor: QPainter, caixa: QRectF, t: Any) -> None:
 def _iluminura(pintor: QPainter, caixa: QRectF, t: Any) -> None:
     """RPG: o fio de iluminura, com um losango em cada ponta e um ponto no meio."""
     y = caixa.center().y()
-    pintor.setPen(QPen(_cor(t.accent, 0.5), 1.0))
+    pintor.setPen(QPen(cor_com_alfa(t.accent, 0.5), 1.0))
     pintor.drawLine(QPointF(caixa.left() + 7, y), QPointF(caixa.right() - 7, y))
-    pintor.setPen(QPen(_cor(t.accent, 0.9), 1.0))
+    pintor.setPen(QPen(cor_com_alfa(t.accent, 0.9), 1.0))
     _losango(pintor, QPointF(caixa.left() + 3, y), 2.8, cheio=True)
     _losango(pintor, QPointF(caixa.right() - 3, y), 2.8, cheio=True)
-    pintor.setBrush(_cor(t.accent, 0.9))
+    pintor.setBrush(cor_com_alfa(t.accent, 0.9))
     pintor.setPen(Qt.PenStyle.NoPen)
     pintor.drawEllipse(QPointF(caixa.center().x(), y), 1.6, 1.6)
 
@@ -175,7 +176,7 @@ def _regua(pintor: QPainter, caixa: QRectF, t: Any) -> None:
     y = caixa.center().y()
     pintor.setPen(QPen(QColor(t.border_forte), 1.0))
     pintor.drawLine(QPointF(caixa.left(), y), QPointF(caixa.right(), y))
-    pintor.setPen(QPen(_cor(t.primary, 0.4), 1.0))
+    pintor.setPen(QPen(cor_com_alfa(t.primary, 0.4), 1.0))
     passo, x, contagem = 6.0, caixa.left(), 0
     while x <= caixa.right():
         alto = 4.0 if contagem % 5 == 0 else 2.0
@@ -249,23 +250,23 @@ def _graca(pintor: QPainter, caixa: QRectF, t: Any) -> None:
     # Recuados o bastante para o losango caber inteiro: rente à borda, a
     # metade de cima dele ficava fora da camada e saía um triângulo.
     for y in (caixa.top() + 5.0, caixa.bottom() - 5.0):
-        _fio_que_some(pintor, meio - 8, caixa.left() + 12, y, t.accent, 0.7, 1.0)
-        _fio_que_some(pintor, meio + 8, caixa.right() - 12, y, t.accent, 0.7, 1.0)
-        pintor.setPen(QPen(_cor(t.accent, 0.95), 1.0))
+        fio_que_some(pintor, meio - 8, caixa.left() + 12, y, t.accent, 0.7, 1.0)
+        fio_que_some(pintor, meio + 8, caixa.right() - 12, y, t.accent, 0.7, 1.0)
+        pintor.setPen(QPen(cor_com_alfa(t.accent, 0.95), 1.0))
         _losango(pintor, QPointF(meio, y), 3.6, cheio=True)
 
 
 def _placa(pintor: QPainter, caixa: QRectF, t: Any) -> None:
     """Skyrim: placa de pedra entalhada — fio duplo no alto e no pé, losangos
     vazados nos quatro cantos, como os cravos de um tampo nórdico."""
-    pintor.setPen(QPen(_cor(t.primary, 0.32), 1.0))
+    pintor.setPen(QPen(cor_com_alfa(t.primary, 0.32), 1.0))
     for y, sentido in ((caixa.top() + 2, 1), (caixa.bottom() - 2, -1)):
         for deslocamento in (0.0, 3.0 * sentido):
             pintor.drawLine(
                 QPointF(caixa.left() + 12, y + deslocamento),
                 QPointF(caixa.right() - 12, y + deslocamento),
             )
-    pintor.setPen(QPen(_cor(t.primary, 0.7), 1.1))
+    pintor.setPen(QPen(cor_com_alfa(t.primary, 0.7), 1.1))
     for x in (caixa.left() + 6, caixa.right() - 6):
         for y in (caixa.top() + 5.0, caixa.bottom() - 5.0):
             _losango(pintor, QPointF(x, y), 3.8, cheio=False)
@@ -286,7 +287,7 @@ def _ferragens(pintor: QPainter, caixa: QRectF, t: Any) -> None:
         pintor.drawLine(QPointF(x, y), QPointF(x + dx * braco, y))
         pintor.drawLine(QPointF(x, y), QPointF(x, y + dy * braco))
     pintor.setPen(Qt.PenStyle.NoPen)
-    pintor.setBrush(_cor(t.accent, 0.85))
+    pintor.setBrush(cor_com_alfa(t.accent, 0.85))
     for x, y, dx, dy in cantos:
         pintor.drawEllipse(QPointF(x + dx * 4.5, y + dy * 4.5), 1.8, 1.8)
 
@@ -295,14 +296,14 @@ def _cartaz_moldura(pintor: QPainter, caixa: QRectF, t: Any) -> None:
     """Red Dead: a moldura dupla de um cartaz de procurado, com os quatro
     quadrados de tinta dos cantos de dentro."""
     pintor.setBrush(Qt.BrushStyle.NoBrush)
-    pintor.setPen(QPen(_cor(t.primary, 0.42), 1.6))
+    pintor.setPen(QPen(cor_com_alfa(t.primary, 0.42), 1.6))
     pintor.drawRect(caixa.adjusted(2, 2, -2, -2))
-    pintor.setPen(QPen(_cor(t.primary, 0.25), 1.0))
+    pintor.setPen(QPen(cor_com_alfa(t.primary, 0.25), 1.0))
     interna = caixa.adjusted(6, 6, -6, -6)
     pintor.drawRect(interna)
     for x in (interna.left(), interna.right()):
         for y in (interna.top(), interna.bottom()):
-            pintor.fillRect(QRectF(x - 2, y - 2, 4, 4), _cor(t.primary, 0.55))
+            pintor.fillRect(QRectF(x - 2, y - 2, 4, 4), cor_com_alfa(t.primary, 0.55))
 
 
 def _neon_moldura(pintor: QPainter, caixa: QRectF, t: Any) -> None:
@@ -311,23 +312,23 @@ def _neon_moldura(pintor: QPainter, caixa: QRectF, t: Any) -> None:
     y = caixa.bottom() - 2.5
     gradiente = QLinearGradient(QPointF(caixa.left(), y), QPointF(caixa.right(), y))
     for alfa, largura in ((0.10, 7.0), (0.22, 4.0), (0.95, 1.8)):
-        gradiente.setColorAt(0.0, _cor(t.accent, 0.0))
-        gradiente.setColorAt(0.15, _cor(t.accent, alfa))
-        gradiente.setColorAt(0.85, _cor(t.info, alfa))
-        gradiente.setColorAt(1.0, _cor(t.info, 0.0))
+        gradiente.setColorAt(0.0, cor_com_alfa(t.accent, 0.0))
+        gradiente.setColorAt(0.15, cor_com_alfa(t.accent, alfa))
+        gradiente.setColorAt(0.85, cor_com_alfa(t.info, alfa))
+        gradiente.setColorAt(1.0, cor_com_alfa(t.info, 0.0))
         pintor.setPen(
             QPen(QBrush(gradiente), largura, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
         )
         pintor.drawLine(QPointF(caixa.left() + 10, y), QPointF(caixa.right() - 10, y))
-    _fio_que_some(pintor, caixa.center().x(), caixa.left() + 20, caixa.top() + 1.5, t.info, 0.3, 1.0)
-    _fio_que_some(pintor, caixa.center().x(), caixa.right() - 20, caixa.top() + 1.5, t.info, 0.3, 1.0)
+    fio_que_some(pintor, caixa.center().x(), caixa.left() + 20, caixa.top() + 1.5, t.info, 0.3, 1.0)
+    fio_que_some(pintor, caixa.center().x(), caixa.right() - 20, caixa.top() + 1.5, t.info, 0.3, 1.0)
 
 
 def _circuito(pintor: QPainter, caixa: QRectF, t: Any) -> None:
     """Cyberpunk 2077: dois cantos chanfrados em traço de acento, o bloco de
     identificação no alto e o barramento recortado no pé."""
     corte, braco = 12.0, 46.0
-    pintor.setPen(QPen(_cor(t.accent, 0.85), 1.4))
+    pintor.setPen(QPen(cor_com_alfa(t.accent, 0.85), 1.4))
     esquerda, topo = caixa.left() + 1, caixa.top() + 1
     pintor.drawLine(QPointF(esquerda, topo + corte + braco), QPointF(esquerda, topo + corte))
     pintor.drawLine(QPointF(esquerda, topo + corte), QPointF(esquerda + corte, topo))
@@ -337,7 +338,7 @@ def _circuito(pintor: QPainter, caixa: QRectF, t: Any) -> None:
     pintor.drawLine(QPointF(direita, base - corte), QPointF(direita - corte, base))
     pintor.drawLine(QPointF(direita - corte, base), QPointF(direita - corte - braco, base))
     pintor.fillRect(
-        QRectF(esquerda + corte + braco + 8, topo - 1, 18, 3), _cor(t.accent, 0.95)
+        QRectF(esquerda + corte + braco + 8, topo - 1, 18, 3), cor_com_alfa(t.accent, 0.95)
     )
     _segmentada(pintor, QRectF(caixa.left() + 16, base - 6, caixa.width() * 0.45, 6), t)
 
@@ -346,13 +347,13 @@ def _pagina(pintor: QPainter, caixa: QRectF, t: Any) -> None:
     """RPG: página de manuscrito — fio duplo de ouro e um arabesco em cada
     canto, o quarto de círculo das iluminuras."""
     pintor.setBrush(Qt.BrushStyle.NoBrush)
-    pintor.setPen(QPen(_cor(t.accent, 0.38), 1.0))
+    pintor.setPen(QPen(cor_com_alfa(t.accent, 0.38), 1.0))
     externa = caixa.adjusted(3, 3, -3, -3)
     interna = caixa.adjusted(7, 7, -7, -7)
     pintor.drawRect(externa)
     pintor.drawRect(interna)
     raio = 10.0
-    pintor.setPen(QPen(_cor(t.accent, 0.8), 1.2))
+    pintor.setPen(QPen(cor_com_alfa(t.accent, 0.8), 1.2))
     for x, y, inicio in (
         (interna.left(), interna.top(), 270),
         (interna.right(), interna.top(), 180),
@@ -734,14 +735,14 @@ def _brilho_dourado(
     graça."""
     meio = caixa.center().y()
     faixa = QLinearGradient(QPointF(caixa.left(), meio), QPointF(caixa.right(), meio))
-    faixa.setColorAt(0.0, _cor(p.accent, 0.0))
-    faixa.setColorAt(0.35, _cor(p.accent, 0.26))
-    faixa.setColorAt(0.65, _cor(p.accent, 0.26))
-    faixa.setColorAt(1.0, _cor(p.accent, 0.0))
+    faixa.setColorAt(0.0, cor_com_alfa(p.accent, 0.0))
+    faixa.setColorAt(0.35, cor_com_alfa(p.accent, 0.26))
+    faixa.setColorAt(0.65, cor_com_alfa(p.accent, 0.26))
+    faixa.setColorAt(1.0, cor_com_alfa(p.accent, 0.0))
     pintor.fillRect(caixa.adjusted(1, 3, -1, -3), QBrush(faixa))
     for y in (caixa.top() + 2.0, caixa.bottom() - 2.0):
-        _fio_que_some(pintor, caixa.center().x(), caixa.left() + 4, y, p.accent, 0.8, 1.0)
-        _fio_que_some(pintor, caixa.center().x(), caixa.right() - 4, y, p.accent, 0.8, 1.0)
+        fio_que_some(pintor, caixa.center().x(), caixa.left() + 4, y, p.accent, 0.8, 1.0)
+        fio_que_some(pintor, caixa.center().x(), caixa.right() - 4, y, p.accent, 0.8, 1.0)
     return _legivel(p.accent, QColor(design.misturar(p.surface_alta, p.accent, 0.26)))
 
 
@@ -750,11 +751,11 @@ def _losangos(pintor: QPainter, caixa: QRectF, _caminho: QPainterPath, p: _Palet
     clara que se apaga nas pontas, como a pedra polida pelo uso."""
     meio = caixa.center().y()
     faixa = QLinearGradient(QPointF(caixa.left(), meio), QPointF(caixa.right(), meio))
-    faixa.setColorAt(0.0, _cor(p.primary, 0.0))
-    faixa.setColorAt(0.5, _cor(p.primary, 0.16))
-    faixa.setColorAt(1.0, _cor(p.primary, 0.0))
+    faixa.setColorAt(0.0, cor_com_alfa(p.primary, 0.0))
+    faixa.setColorAt(0.5, cor_com_alfa(p.primary, 0.16))
+    faixa.setColorAt(1.0, cor_com_alfa(p.primary, 0.0))
     pintor.fillRect(caixa.adjusted(1, 2, -1, -2), QBrush(faixa))
-    pintor.setPen(QPen(_cor(p.primary, 0.9), 1.2))
+    pintor.setPen(QPen(cor_com_alfa(p.primary, 0.9), 1.2))
     _losango(pintor, QPointF(caixa.left() + 7, meio), 3.4, cheio=False)
     _losango(pintor, QPointF(caixa.right() - 7, meio), 3.4, cheio=False)
     return _legivel(p.primary, QColor(design.misturar(p.surface_alta, p.primary, 0.16)))
@@ -765,9 +766,9 @@ def _brasa(pintor: QPainter, caixa: QRectF, _caminho: QPainterPath, p: _Paleta) 
     com um filete de sangue marcando o item — o realce do bestiário."""
     meio = caixa.center().y()
     faixa = QLinearGradient(QPointF(caixa.left(), meio), QPointF(caixa.right(), meio))
-    faixa.setColorAt(0.0, _cor(p.accent, 0.46))
-    faixa.setColorAt(0.7, _cor(p.accent, 0.08))
-    faixa.setColorAt(1.0, _cor(p.accent, 0.0))
+    faixa.setColorAt(0.0, cor_com_alfa(p.accent, 0.46))
+    faixa.setColorAt(0.7, cor_com_alfa(p.accent, 0.08))
+    faixa.setColorAt(1.0, cor_com_alfa(p.accent, 0.0))
     pintor.fillRect(caixa.adjusted(1, 1, -1, -1), QBrush(faixa))
     pintor.fillRect(
         QRectF(caixa.left() + 1, caixa.top() + 3, 3, caixa.height() - 6), QColor(p.accent)
@@ -783,7 +784,7 @@ def _letreiro(pintor: QPainter, caixa: QRectF, caminho: QPainterPath, p: _Paleta
     y = caixa.bottom() - 3.0
     for alfa, largura in ((0.25, 5.0), (1.0, 1.6)):
         pintor.setPen(
-            QPen(_cor(p.info, alfa), largura, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+            QPen(cor_com_alfa(p.info, alfa), largura, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
         )
         pintor.drawLine(QPointF(caixa.left() + 8, y), QPointF(caixa.right() - 8, y))
     return _legivel(p.on_accent, fundo)
@@ -802,7 +803,7 @@ def _aba(pintor: QPainter, caixa: QRectF, _caminho: QPainterPath, p: _Paleta) ->
     aba.closeSubpath()
     fundo = QColor(design.misturar(p.surface_alta, p.accent, 0.24))
     pintor.fillPath(aba, fundo)
-    pintor.setPen(QPen(_cor(p.accent, 0.95), 1.4))
+    pintor.setPen(QPen(cor_com_alfa(p.accent, 0.95), 1.4))
     pintor.drawLine(
         QPointF(caixa.right() - corte, caixa.top() + 1),
         QPointF(caixa.right() - 1, caixa.top() + corte),
@@ -821,7 +822,7 @@ def _iluminura_selecao(
     fundo = QColor(design.misturar(p.surface_alta, p.accent, 0.14))
     pintor.fillRect(caixa.adjusted(1, 1, -1, -1), fundo)
     y = caixa.bottom() - 4.0
-    pintor.setPen(QPen(_cor(p.accent, 0.85), 1.0))
+    pintor.setPen(QPen(cor_com_alfa(p.accent, 0.85), 1.0))
     pintor.drawLine(QPointF(caixa.left() + 14, y), QPointF(caixa.right() - 14, y))
     _losango(pintor, QPointF(caixa.left() + 10, y), 2.6, cheio=True)
     _losango(pintor, QPointF(caixa.right() - 10, y), 2.6, cheio=True)
