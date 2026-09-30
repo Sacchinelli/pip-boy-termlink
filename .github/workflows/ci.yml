@@ -1,16 +1,36 @@
-# Fiscalização automática: cada push e pull request passa pelos mesmos três
-# verificadores que o desenvolvimento local usa — ruff, mypy e a suíte.
+# Fiscalização automática: cada pull request, e cada push na main, passa
+# pelos mesmos verificadores que o desenvolvimento local usa — ruff, mypy e
+# as suítes.
 # O runner é Windows porque o programa é Windows-primeiro (WASAPI, tasklist,
 # DWM); um verde em Linux não provaria o que importa.
 name: CI
 
 on:
+  # Push só na main: num ramo com PR aberto, o push e o pull_request rodavam
+  # a mesma verificação duas vezes, no mesmo commit.
   push:
+    branches: [main]
   pull_request:
+
+# Um push novo no mesmo PR torna a rodada anterior inútil; ela é cancelada em
+# vez de ocupar um runner Windows até o fim.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   verificar:
     runs-on: windows-latest
+    # A suíte de interface leva uns cinco minutos. Sem teto, um teste de Qt
+    # travado esperaria as seis horas padrão do GitHub.
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # As duas pontas do que o projeto promete: 3.10 é o piso do README e
+        # do pyproject (e nada o testava); 3.14 é a versão em que o programa
+        # é desenvolvido e em que o executável é gerado.
+        python-version: ["3.10", "3.14"]
     steps:
       - uses: actions/checkout@v7
 
@@ -22,19 +42,29 @@ jobs:
 
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
+      # As ferramentas de verificação vêm com versão fixa (requirements-dev.txt):
+      # um lançamento novo do ruff ou do mypy não pode deixar o CI vermelho sem
+      # que o código tenha mudado.
       - name: Instalar dependências
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
-          python -m pip install ruff mypy
+          python -m pip install -r requirements-dev.txt
 
+      # O lint e os tipos olham o código, não o interpretador: rodam uma vez,
+      # na versão de desenvolvimento. O mypy nem poderia rodar na 3.10 — ver
+      # o comentário do [tool.mypy] no pyproject.
       - name: Lint (ruff)
+        if: matrix.python-version == '3.14'
         run: python -m ruff check .
 
       - name: Tipos (mypy estrito)
+        if: matrix.python-version == '3.14'
         run: python -m mypy pipboy pip_boy.py diagnostico.py ferramentas
 
       - name: Testes do núcleo
@@ -51,4 +81,5 @@ jobs:
       # passa feliz, e é por isso que o glifo faltando escapa dela. Se o runner
       # também não tiver fontes, o script avisa e sai limpo em vez de reprovar.
       - name: Glifos existem nas fontes dos temas
+        if: matrix.python-version == '3.14'
         run: python ferramentas/verificar_glifos.py
