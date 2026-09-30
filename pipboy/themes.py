@@ -142,6 +142,12 @@ class GameTheme:
     # de tela lê a frase como ela foi escrita.
     titulos_leves: bool = False
     titulos_em_caixa_alta: bool = False
+    # O nome que o jogo dá ao caderno e ao histórico, no título das janelas
+    # deles: as Palavras de Poder do Skyrim, o Glossário do bruxo, o Diário do
+    # velho oeste. A função continua escrita ao lado ("caderno de
+    # vocabulário") e na barra de título: o nome do jogo é a voz, não a pista.
+    nome_do_caderno: str = "Caderno"
+    nome_do_historico: str = "Histórico"
 
     # --- Cores derivadas -------------------------------------------------
     # Calculadas, nunca declaradas. Duas famílias:
@@ -310,6 +316,8 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         accent="#ffb000",
         alert="#ff5c5c",
         info="#7ad4ff",
+        nome_do_caderno="Holotapes",
+        nome_do_historico="Registros",
         titulos_em_caixa_alta=True,
         interface=("Roboto Condensed",),
     ),
@@ -349,6 +357,8 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         accent="#e0a24a",
         alert="#a33b2a",
         info="#9fb8c8",
+        nome_do_caderno="Tomo de palavras",
+        nome_do_historico="Graças visitadas",
         titulos=("Cinzel",),
     ),
     GameTheme(
@@ -388,6 +398,8 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         accent="#d8c48a",
         alert="#b0483c",
         info="#8fd0b0",
+        nome_do_caderno="Palavras de poder",
+        nome_do_historico="Missões",
         titulos_leves=True,
         titulos_em_caixa_alta=True,
         interface=("Jost",),
@@ -432,6 +444,8 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         accent="#c0392b",
         alert="#e05a3a",
         info="#7fa8c0",
+        nome_do_caderno="Glossário",
+        nome_do_historico="Contratos",
         interface=("D-DIN",),
     ),
     GameTheme(
@@ -469,6 +483,8 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         accent="#d8a13a",
         alert="#c0392b",
         info="#9ec4a0",
+        nome_do_caderno="Diário",
+        nome_do_historico="Trilhas percorridas",
         titulos=("Rye",),
     ),
     GameTheme(
@@ -505,6 +521,8 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         accent="#ff2d95",
         alert="#ff5c5c",
         info="#24d3ff",
+        nome_do_caderno="Agenda",
+        nome_do_historico="Mensagens",
     ),
     GameTheme(
         name="Cyberpunk 2077",
@@ -537,6 +555,8 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         accent="#00f0ff",
         alert="#ff003c",
         info="#ff4fd8",
+        nome_do_caderno="Fragmentos",
+        nome_do_historico="Braindances",
         titulos_em_caixa_alta=True,
         interface=("Rajdhani",),
     ),
@@ -573,6 +593,8 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         accent="#c9a227",
         alert="#d05a5a",
         info="#7fd4c0",
+        nome_do_caderno="Grimório",
+        nome_do_historico="Crônicas",
     ),
     GameTheme(
         name="FPS / Multiplayer",
@@ -622,6 +644,8 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         # no AA por uma casa decimal.
         alert="#d81f28",
         info="#79c7e8",
+        nome_do_caderno="Arsenal",
+        nome_do_historico="Relatórios",
         titulos_em_caixa_alta=True,
         interface=("Barlow Condensed",),
     ),

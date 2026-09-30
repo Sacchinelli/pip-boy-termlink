@@ -122,6 +122,15 @@ class Atmosfera:
     menu: str = ""
     # A mira que persegue o cursor (ver MIRAS); vazio, o anel de sempre.
     mira: str = ""
+    # O conjunto de ícones do caderno e do histórico (ver icones.ICONES);
+    # vazio, os glifos de sempre.
+    icones: str = ""
+    # Como a moldura do painel ENTRA quando o jogo entra (ver
+    # ornamentos.MONTAGENS); vazio, aparece pronta.
+    montagem: str = ""
+    # Como a conversa desenha uma fala (ver componentes.Bolha): vazio, o
+    # balão de sempre.
+    fala: str = ""
     # O ritmo do jogo (ver movimento.definir_ritmo): um fator sobre as
     # durações de ``design`` e o nome de uma curva — a alta fantasia anda
     # devagar e solene, o visor seco e depressa, o GTA passa do ponto, o
@@ -141,6 +150,8 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # Terminal de fósforo: varredura densa, brilho sangrando do centro, tubo
     # abaulado e a tremulação característica de um CRT malcuidado.
     "Fallout": Atmosfera(
+        fala="terminal",
+        icones="terminal",
         mira="colchetes",
         digitais=0.6,
         tempo=0.85, curva="degraus", letras="datilografar",
@@ -153,6 +164,9 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
      brilho_texto=0.6,),
     # Luz dourada baixa e partículas subindo, contra pergaminho.
     "Elden Ring": Atmosfera(
+        fala="legenda",
+        montagem="esmaecer",
+        icones="graca",
         mira="graca",
         tempo=1.7, curva="solene", letras="revelar",
         menu="lista_centrada",
@@ -168,6 +182,9 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # para ver, e o que faltava para esta crônica não ser o tema neutro com
     # neve. O halo do fundo desceu: com a aurora no alto, os dois brigavam.
     "Skyrim": Atmosfera(
+        fala="legenda",
+        montagem="esmaecer",
+        icones="nordico",
         mira="arcos",
         constelacao=0.7,
         tempo=1.4, curva="solene", letras="revelar",
@@ -181,6 +198,9 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     ),
     # Couro e vela: grão grosso, halo quente lateral, brasas lentas.
     "The Witcher 3": Atmosfera(
+        fala="legenda",
+        montagem="cantos",
+        icones="bruxo",
         mira="medalhao",
         tempo=1.15, curva="suave", letras="revelar",
         menu="lista_a_esquerda",
@@ -196,6 +216,9 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # chão quente com Elden Ring e Witcher; o que só o velho oeste tem não é
     # a cor, é o SUPORTE.
     "Red Dead": Atmosfera(
+        fala="legenda",
+        montagem="varredura",
+        icones="oeste",
         mira="olho_morto",
         tempo=1.25, curva="suave", letras="escrever",
         menu="lista_a_esquerda",
@@ -210,6 +233,9 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # o pôr do sol de neon no horizonte — a imagem inteira deste ambiente, e
     # o que ele não tinha. O halo saiu do alto: o brilho agora sobe da linha.
     "GTA": Atmosfera(
+        fala="mensagem",
+        montagem="acender",
+        icones="celular",
         mira="neon",
         tempo=0.8, curva="mola", letras="acender",
         menu="abas",
@@ -223,6 +249,9 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
      brilho_texto=0.32,),
     # Interferência digital, varredura fina e chuva de dados descendo.
     "Cyberpunk 2077": Atmosfera(
+        fala="holo",
+        montagem="tracado",
+        icones="dados",
         mira="chanfro",
         tempo=0.7, curva="seco", letras="decifrar",
         menu="lista_a_esquerda",
@@ -238,6 +267,8 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # ele este ambiente e a rádio pirata eram dois fundos escuros arroxeados,
     # a 4,57 um do outro.
     "RPG / Aventura (geral)": Atmosfera(
+        montagem="esmaecer",
+        icones="grimorio",
         mira="runas",
         tempo=1.3, curva="solene", letras="escrever",
         menu="lista_centrada",
@@ -255,6 +286,8 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # grade volta ao papel de retícula de fundo. O pó é cinza de cinza, e não
     # laranja: partícula na cor do acento vira vaga-lume, e aqui é escombro.
     "FPS / Multiplayer": Atmosfera(
+        fala="radio",
+        icones="tatico",
         mira="cruz",
         estencil=0.6,
         tempo=0.6, curva="seco", letras="varrer",

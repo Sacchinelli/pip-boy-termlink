@@ -49,6 +49,7 @@ from PySide6.QtGui import (
     QEnterEvent,
     QFont,
     QFontMetrics,
+    QFontMetricsF,
     QHoverEvent,
     QLinearGradient,
     QPainter,
@@ -71,6 +72,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import design
+from .icones import pintar_icone
 from .movimento import Transicao, curva_do_ritmo, em_degraus, no_ritmo
 from .ornamentos import (
     ESTILOS_QUE_ENCHEM,
@@ -233,6 +235,8 @@ class Botao(QAbstractButton):
 
     DURACAO_HOVER = 160
     DURACAO_PRESSAO = 90
+    # Entre o ícone e o rótulo.
+    RESPIRO_ICONE = 8.0
     # O botão magnético é desenhado com esta folga em volta do corpo, que é o
     # espaço para onde ele pode ser puxado: um widget não pinta fora de si.
     FOLGA_IMA = 8
@@ -250,11 +254,15 @@ class Botao(QAbstractButton):
         alinhamento_esquerdo: bool = False,
         magnetico: bool = False,
         folga_ima: int | None = None,
+        icone: str = "",
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._halo_suspenso = False
         self.setText(texto)
+        # O ícone desenhado do jogo (ver icones.py), à esquerda do rótulo; sem
+        # rótulo, sozinho no meio do botão.
+        self.icone = icone
         # A folga é o quanto o botão pode ser puxado. O principal ganha a folga
         # inteira; os secundários, uma menor — o ímã deles é um aceno, e uma
         # folga grande em todo botão incharia a janela.
@@ -440,9 +448,14 @@ class Botao(QAbstractButton):
             self._atualizar_halo()
         self.update()
 
+    def _lado_do_icone(self) -> float:
+        return QFontMetricsF(self.font()).height() * 0.95
+
     def sizeHint(self) -> QSize:
         metricas = QFontMetrics(self.font())
         largura = metricas.horizontalAdvance(self.text()) + 46
+        if self.icone and self.text():
+            largura += round(self._lado_do_icone() + self.RESPIRO_ICONE)
         folga = 2 * self._folga
         return QRectF(0, 0, max(self._largura_min, largura) + folga, 38 + folga).size().toSize()
 
@@ -686,7 +699,35 @@ class Botao(QAbstractButton):
         # virou uma caixinha vazia. O recuo nunca pode comer mais que um quarto
         # da largura de cada lado.
         recuo_h = min(14.0, area.width() / 4.0)
-        pintor.drawText(area.adjusted(recuo_h, 0, -recuo_h, 0), int(bandeiras), self.text())
+        if not self.icone:
+            pintor.drawText(area.adjusted(recuo_h, 0, -recuo_h, 0), int(bandeiras), self.text())
+            return
+        texto = self.text()
+        if not texto:
+            # Botão só de ícone, como os do trilho: o desenho no meio, com a
+            # metade do lado menor — o resto é a folga de um alvo de clique.
+            lado = min(area.width(), area.height()) * 0.5
+            pintar_icone(
+                pintor, self.icone,
+                QRectF(area.center().x() - lado / 2, area.center().y() - lado / 2, lado, lado),
+                frente,
+            )
+            return
+        lado = self._lado_do_icone()
+        largura_texto = QFontMetricsF(self.font()).horizontalAdvance(texto)
+        conjunto = lado + self.RESPIRO_ICONE + largura_texto
+        if self._esquerdo:
+            x = area.left() + recuo_h
+        else:
+            x = area.center().x() - conjunto / 2
+        pintar_icone(
+            pintor, self.icone, QRectF(x, area.center().y() - lado / 2, lado, lado), frente
+        )
+        pintor.setPen(frente)
+        pintor.drawText(
+            QRectF(x + lado + self.RESPIRO_ICONE, area.top(), largura_texto + 2, area.height()),
+            int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), texto,
+        )
 
 
 class BotaoDeEstado(Botao):
@@ -1735,9 +1776,19 @@ class Bolha(QFrame):
         acento: str = "",
         perguntavel: bool = False,
         dica_da_palavra: Callable[[str], str] | None = None,
+        estilo: str = "",
+        do_jogador: bool = False,
+        marca: str = "",
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        # Como o jogo desenha uma fala (ver FALAS): o balão de sempre, o
+        # registro de terminal, a legenda de diálogo, a mensagem de celular,
+        # a holochamada, o chat de esquadrão. ``marca`` é a cor do detalhe do
+        # estilo — o prompt, a calha, a aba de canal.
+        self.estilo = estilo
+        self._do_jogador = do_jogador
+        self._marca = QColor(marca or acento or cor_texto)
         self._fundo = QColor(fundo)
         self._contorno = QColor(contorno) if contorno else None
         self._forma = forma
@@ -1789,17 +1840,87 @@ class Bolha(QFrame):
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
+    def _caminho_do_estilo(self, caixa: QRectF) -> QPainterPath:
+        """O contorno da fala no estilo do jogo."""
+        estilo = self.estilo
+        caminho = QPainterPath()
+        if estilo == "mensagem":
+            # O balão do celular: bem redondo, com a ponta do lado de quem fala.
+            corpo = caixa.adjusted(0, 0, 0, -6)
+            caminho.addRoundedRect(corpo, 16.0, 16.0)
+            ponta = QPainterPath()
+            if self._do_jogador:
+                ponta.moveTo(corpo.right() - 18, corpo.bottom() - 2)
+                ponta.lineTo(corpo.right() - 2, caixa.bottom())
+                ponta.lineTo(corpo.right() - 6, corpo.bottom() - 10)
+            else:
+                ponta.moveTo(corpo.left() + 18, corpo.bottom() - 2)
+                ponta.lineTo(corpo.left() + 2, caixa.bottom())
+                ponta.lineTo(corpo.left() + 6, corpo.bottom() - 10)
+            ponta.closeSubpath()
+            return caminho.united(ponta)
+        if estilo == "holo":
+            corte = 12.0
+            caminho.moveTo(caixa.left(), caixa.top())
+            caminho.lineTo(caixa.right() - corte, caixa.top())
+            caminho.lineTo(caixa.right(), caixa.top() + corte)
+            caminho.lineTo(caixa.right(), caixa.bottom())
+            caminho.lineTo(caixa.left(), caixa.bottom())
+            caminho.closeSubpath()
+            return caminho
+        if estilo in ("radio", "terminal", "legenda"):
+            caminho.addRect(caixa)
+            return caminho
+        return caminho_forma(caixa, self._forma, design.RAIO)
+
     def paintEvent(self, _evento: Any) -> None:
         pintor = QPainter(self)
         pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
-        caminho = caminho_forma(
-            QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), self._forma, design.RAIO
-        )
+        caixa = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        caminho = self._caminho_do_estilo(caixa)
+        estilo = self.estilo
         pintor.setPen(Qt.PenStyle.NoPen)
+        if estilo == "terminal":
+            # Um registro de terminal não tem balão: a fala do aparelho corre
+            # ao lado de uma calha de fósforo; a do jogador vem depois do
+            # prompt, como uma linha digitada.
+            if self._do_jogador:
+                pintor.setPen(self._marca)
+                pintor.setFont(self._rotulo.font())
+                pintor.drawText(
+                    QRectF(caixa.left() + 2, caixa.top() + 11, 12, QFontMetricsF(self._rotulo.font()).height()),
+                    int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), ">",
+                )
+            else:
+                calha = QColor(self._marca)
+                calha.setAlphaF(0.7)
+                pintor.fillRect(QRectF(caixa.left() + 4, caixa.top() + 8, 2, caixa.height() - 16), calha)
+            acender_borda(pintor, self, caminho)
+            pintor.end()
+            return
+        if estilo == "legenda":
+            # A legenda de diálogo: sem caixa, sobre uma sombra que nasce do
+            # lado de quem fala e se apaga do outro.
+            gradiente = QLinearGradient(caixa.topLeft(), caixa.topRight())
+            cheio, vazio = QColor(self._fundo), QColor(self._fundo)
+            cheio.setAlphaF(0.78)
+            vazio.setAlphaF(0.0)
+            gradiente.setColorAt(0.0, vazio if self._do_jogador else cheio)
+            gradiente.setColorAt(0.55, cheio)
+            gradiente.setColorAt(1.0, cheio if self._do_jogador else vazio)
+            pintor.fillRect(caixa, QBrush(gradiente))
+            acender_borda(pintor, self, caminho)
+            pintor.end()
+            return
         pintor.setBrush(self._fundo)
         pintor.drawPath(caminho)
+        if estilo in ("holo", "radio"):
+            # A aba de canal na borda de quem fala: a barra da holochamada e a
+            # etiqueta de cor do chat de esquadrão.
+            barra = 3.0 if estilo == "holo" else 4.0
+            pintor.fillRect(QRectF(caixa.left(), caixa.top(), barra, caixa.height()), self._marca)
 
-        if self._contorno is not None:
+        if self._contorno is not None and estilo != "mensagem":
             # O painel da conversa é translúcido de propósito, e por isso a
             # bolha do assistente ficava a 1.27:1 dele — presente na conta,
             # quase nada no olho. Encher mais a bolha mataria a atmosfera que

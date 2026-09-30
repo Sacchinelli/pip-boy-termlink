@@ -51,10 +51,13 @@ from .. import design
 from ..historico import Fala, HistoricoStore, ResumoDeSessao
 from .atmosfera import ATENUACAO_NO_FUNDO_NU, Cenario, so_o_cursor
 from .componentes import Botao, caminho_forma
+from .conversa import quem_fala
 from .cursor import CursorVivo
 from .dialogo import Caixa
+from .icones import IconeDoJogo
 from .moldura import BarraDeTitulo, GripsRedimensionamento, aplicar_cantos_do_sistema
 from .movimento import animar_entrada
+from .ornamentos import FAIXA_MOLDURA, MolduraDoPainel
 
 LARGURA_LISTA = 250
 
@@ -187,9 +190,26 @@ class JanelaHistorico(QDialog):
 
         corpo = QWidget(objectName="historicoCorpo")
         moldura.addWidget(corpo, 1)
-        linha = QHBoxLayout(corpo)
-        linha.setContentsMargins(20, 16, 20, 16)
+        pilha_corpo = QVBoxLayout(corpo)
+        pilha_corpo.setContentsMargins(20, 14, 20, 16)
+        pilha_corpo.setSpacing(12)
+        # O cabeçalho: o objeto do histórico no jogo e o nome que o jogo dá a
+        # ele — o terminal e os Registros, a fogueira e as Trilhas percorridas
+        # —, com a função escrita ao lado, miúda.
+        cabecalho_janela = QHBoxLayout()
+        cabecalho_janela.setSpacing(10)
+        self.icone_titulo = IconeDoJogo(janela, "historico")
+        cabecalho_janela.addWidget(self.icone_titulo, 0, Qt.AlignmentFlag.AlignBottom)
+        self.titulo = QLabel("", objectName="historicoTitulo")
+        cabecalho_janela.addWidget(self.titulo, 0, Qt.AlignmentFlag.AlignBottom)
+        self.subtitulo = QLabel("histórico de sessões", objectName="historicoSubtitulo")
+        cabecalho_janela.addWidget(self.subtitulo, 0, Qt.AlignmentFlag.AlignBottom)
+        cabecalho_janela.addStretch(1)
+        pilha_corpo.addLayout(cabecalho_janela)
+        linha = QHBoxLayout()
+        linha.setContentsMargins(0, 0, 0, 0)
         linha.setSpacing(16)
+        pilha_corpo.addLayout(linha, 1)
 
         # -- coluna das sessões
         coluna_lista = QVBoxLayout()
@@ -284,6 +304,10 @@ class JanelaHistorico(QDialog):
         coluna_falas.addWidget(self._rolagem_falas, 1)
 
         linha.addLayout(coluna_falas, 1)
+        # A moldura do jogo em volta da transcrição, montando ao abrir. Criada
+        # só agora, com a coluna já na janela: antes disso a transcrição não
+        # tem pai, e a moldura nasceria solta, fora da janela.
+        self.moldura_falas = MolduraDoPainel(janela, self._rolagem_falas)
 
         self._grips = GripsRedimensionamento(self)
         self._grips.reposicionar()
@@ -310,6 +334,13 @@ class JanelaHistorico(QDialog):
     def aplicar_tema(self) -> None:
         janela, t = self._janela, self._janela.tema
         self.barra_titulo.aplicar_tema()
+        self.titulo.setFont(janela.fonte("display", ui=False))
+        self.titulo.setText(t.nome_do_historico)
+        self.icone_titulo.definir_lado(QFontMetrics(self.titulo.font()).height())
+        self.subtitulo.setFont(janela.fonte("legenda"))
+        folga = round(FAIXA_MOLDURA) + 2 if janela.atmosfera.moldura else 0
+        self._pilha_falas.setContentsMargins(folga, folga, folga + 12, folga)
+        self.moldura_falas.acompanhar()
         self._cabecalho.setFont(janela.fonte("legenda"))
         self._busca.setFont(janela.fonte("corpo"))
         self._busca_sessoes.setFont(janela.fonte("aux"))
@@ -326,6 +357,8 @@ class JanelaHistorico(QDialog):
         QWidget {{ color: {t.primary}; }}
         #historicoCorpo, #historicoLista, #historicoListaInterno,
         #historicoFalas, #historicoFalasInterno {{ background: transparent; }}
+        #historicoTitulo {{ color: {t.primary}; background: transparent; }}
+        #historicoSubtitulo {{ color: {t.text_muted}; background: transparent; }}
         QLineEdit#historicoBusca {{
             background: {t.surface_alta}; color: {t.primary};
             border: 1px solid {t.border}; border-radius: {raio + 2}px;
@@ -544,6 +577,10 @@ class JanelaHistorico(QDialog):
         # para chegar ao que foi dito. É o mesmo agrupamento da conversa na
         # janela principal — e, como lá, uma anotação quebra o grupo.
         tamanho_legenda = janela.fonte("micro").pointSize()
+        # Quem fala, no formato do jogo (ver conversa.quem_fala): entre
+        # colchetes no terminal, com o canal no visor, em destaque na legenda
+        # de diálogo — o mesmo da conversa, para a transcrição ser a conversa.
+        estilo_fala = str(getattr(janela.atmosfera, "fala", ""))
         anterior = ""
         for posicao, fala in enumerate(visiveis):
             nota = fala.tag in ("vocab", "sistema")
@@ -556,14 +593,22 @@ class JanelaHistorico(QDialog):
                 if posicao == indice_marcado else t.screen
             )
             corpo = html.escape(fala.texto).replace("\n", "<br>")
+            if estilo_fala == "terminal" and fala.tag == "usuario":
+                # No terminal, o que o jogador disse é uma linha digitada.
+                corpo = f"&gt;&nbsp;{corpo}"
             texto = corpo
             if legenda:
                 # Os dois em bloco próprio: texto solto depois de um <div> é
                 # posto pelo Qt no MESMO parágrafo, e a legenda saía colada na
                 # primeira palavra da fala.
+                destaque = estilo_fala == "legenda"
+                cor_legenda = design.garantir_contraste(
+                    t.accent_text if destaque else t.text_muted, fundo
+                )
+                peso = " font-weight:600;" if destaque else ""
                 texto = (
-                    f'<div style="color:{design.garantir_contraste(t.text_muted, fundo)};'
-                    f' font-size:{tamanho_legenda}pt;">{html.escape(legenda)}</div>'
+                    f'<div style="color:{cor_legenda}; font-size:{tamanho_legenda}pt;{peso}">'
+                    f"{html.escape(quem_fala(estilo_fala, legenda))}</div>"
                     f"<div>{corpo}</div>"
                 )
             if posicao == indice_marcado:
@@ -584,7 +629,8 @@ class JanelaHistorico(QDialog):
             bloco.setAccessibleName(f"{quem}: {fala.texto}" if quem else fala.texto)
             bloco.setWordWrap(True)
             bloco.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            bloco.setFont(janela.fonte("corpo"))
+            # A fala do assistente na letra do jogo, como na conversa.
+            bloco.setFont(janela.fonte("corpo", ui=fala.tag != "assistente"))
             self._pilha_falas.insertWidget(self._pilha_falas.count() - 1, bloco)
             blocos.append(bloco)
 
@@ -677,6 +723,7 @@ class JanelaHistorico(QDialog):
     def showEvent(self, evento: Any) -> None:
         super().showEvent(evento)
         aplicar_cantos_do_sistema(self)
+        self.moldura_falas.montar()
         self._cursor_vivo.reposicionar()
 
     def hideEvent(self, evento: Any) -> None:

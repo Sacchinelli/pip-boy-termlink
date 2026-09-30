@@ -70,7 +70,6 @@ if TYPE_CHECKING:  # pragma: no cover
 # de um terminal de fósforo verde denuncia que aquele pixel é de outro desenho.
 GLIFO_MIC_ATIVO = "○"
 GLIFO_MIC_MUDO = "●"
-GLIFO_CADERNO = "◫"
 
 NIVEIS_ATMOSFERA: dict[str, float] = {"Completa": 1.0, "Discreta": 0.45, "Desligada": 0.0}
 
@@ -624,7 +623,7 @@ def _rodape(janela: Janela, alvo: QWidget) -> Rodape:
     portas.setContentsMargins(0, 0, 0, 0)
     portas.setSpacing(8)
     botao_caderno = Botao(
-        f"{GLIFO_CADERNO}  Caderno", variante="sutil",
+        "Caderno", variante="sutil", icone="caderno",
         paleta=janela.paleta, forma=janela.atmosfera.forma, magnetico=True, folga_ima=4,
     )
     botao_caderno.setFont(janela.fonte("corpo_forte"))
@@ -634,7 +633,7 @@ def _rodape(janela: Janela, alvo: QWidget) -> Rodape:
     portas.addWidget(botao_caderno, 1)
 
     botao_historico = Botao(
-        "◷  Histórico", variante="sutil",
+        "Histórico", variante="sutil", icone="historico",
         paleta=janela.paleta, forma=janela.atmosfera.forma, magnetico=True, folga_ima=4,
     )
     botao_historico.setFont(janela.fonte("corpo_forte"))
@@ -675,9 +674,10 @@ def _trilho(janela: Janela, alvo: QWidget) -> Trilho:
     pilha.addWidget(glifo)
     pilha.addStretch(1)
 
-    def porta(texto: str, dica: str, nome: str, acao: Callable[[], object]) -> Botao:
+    def porta(icone: str, dica: str, nome: str, acao: Callable[[], object]) -> Botao:
         botao = Botao(
-            texto, variante="sutil", paleta=janela.paleta, forma=janela.atmosfera.forma,
+            "", variante="sutil", icone=icone,
+            paleta=janela.paleta, forma=janela.atmosfera.forma,
         )
         botao.setFont(janela.fonte("titulo"))
         botao.setFixedSize(LARGURA_TRILHO - 20, LARGURA_TRILHO - 20)
@@ -688,10 +688,10 @@ def _trilho(janela: Janela, alvo: QWidget) -> Trilho:
         return botao
 
     botao_caderno = porta(
-        GLIFO_CADERNO, "Caderno (Ctrl+B)", "Abrir o caderno de vocabulário", janela.abrir_caderno
+        "caderno", "Caderno (Ctrl+B)", "Abrir o caderno de vocabulário", janela.abrir_caderno
     )
     botao_historico = porta(
-        "◷", "Histórico (Ctrl+H)", "Abrir o histórico de sessões", janela.abrir_historico
+        "historico", "Histórico (Ctrl+H)", "Abrir o histórico de sessões", janela.abrir_historico
     )
     return Trilho(glifo=glifo, botao_caderno=botao_caderno, botao_historico=botao_historico)
 

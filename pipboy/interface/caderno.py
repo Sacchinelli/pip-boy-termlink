@@ -39,6 +39,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QEnterEvent,
+    QFontMetrics,
     QHoverEvent,
     QKeySequence,
     QPainter,
@@ -80,12 +81,14 @@ from .componentes import (
 )
 from .cursor import CursorVivo
 from .dialogo import avisar, confirmar_remocao, pedir_correcao
+from .icones import IconeDoJogo
 from .moldura import (
     BarraDeTitulo,
     GripsRedimensionamento,
     aplicar_cantos_do_sistema,
 )
 from .movimento import Transicao, animar_entrada
+from .ornamentos import FAIXA_MOLDURA, MolduraDoPainel
 
 # Rótulo visível -> filtro do banco. A ordem é a da barra de filtros.
 FILTROS_VISIVEIS: dict[str, str] = {
@@ -259,7 +262,7 @@ class CartaoTermo(QFrame):
         # O botão só existe quando há conversa: desabilitado, ele diz por quê,
         # em vez de simplesmente não reagir ao clique.
         self.botao_conversa = conversa = Botao(
-            "◷", variante="sutil", paleta=janela.paleta, forma=self._forma
+            "", variante="sutil", icone="historico", paleta=janela.paleta, forma=self._forma
         )
         conversa.setFont(janela.fonte("corpo_forte"))
         conversa.setEnabled(sessao is not None)
@@ -538,6 +541,11 @@ class JanelaCaderno(QDialog):
         # PROGRESSO; os números vão ao lado dela, alinhados pela base.
         cabecalho = QHBoxLayout()
         cabecalho.setSpacing(16)
+        # O objeto do caderno no jogo, e o nome que o jogo dá a ele: a
+        # holotape e as Holotapes, o tomo e as Palavras de poder.
+        self.icone_titulo = IconeDoJogo(self._janela, "caderno")
+        cabecalho.addWidget(self.icone_titulo, 0, Qt.AlignmentFlag.AlignBottom)
+        cabecalho.addSpacing(-6)
         self.titulo = QLabel("CADERNO", objectName="cadernoTitulo")
         cabecalho.addWidget(self.titulo, 0, Qt.AlignmentFlag.AlignBottom)
         self.resumo = QLabel("", objectName="cadernoResumo")
@@ -599,6 +607,9 @@ class JanelaCaderno(QDialog):
         self._fluxo.addStretch(1)
         self.rolagem.setWidget(self._interno)
         coluna.addWidget(self.rolagem, 1)
+        # A moldura do jogo em volta da lista, como em volta da conversa — e
+        # montando quando a janela abre (ver ornamentos.MolduraDoPainel).
+        self.moldura_lista = MolduraDoPainel(self._janela, self.rolagem)
 
         # Mesmo véu da coluna de ajustes: a lista de termos também é uma
         # área rolável cujo corte, sem aviso, parece um cartão truncado.
@@ -693,7 +704,14 @@ class JanelaCaderno(QDialog):
         self._raio_busca = float(raio + 2)
         self.barra_titulo.aplicar_tema()
         self.titulo.setFont(janela.fonte("display", ui=False))
+        self.titulo.setText(t.nome_do_caderno)
+        self.icone_titulo.definir_lado(QFontMetrics(self.titulo.font()).height())
         self.resumo.setFont(janela.fonte("legenda"))
+        # Com moldura, os cartões se afastam da borda o bastante para os
+        # ornamentos dela não passarem por cima de nenhum.
+        folga = round(FAIXA_MOLDURA) + 2 if janela.atmosfera.moldura else 4
+        self._fluxo.setContentsMargins(folga, folga, folga + 8, folga)
+        self.moldura_lista.acompanhar()
         self.busca.setFont(janela.fonte("corpo"))
         self.contagem.setFont(janela.fonte("micro"))
         self.vazio.setFont(janela.fonte("corpo"))
@@ -759,6 +777,7 @@ class JanelaCaderno(QDialog):
         # caderno é uma troca de lugar, e a cascata diz de onde para onde.
         # Reabrir anima de novo; um Ctrl+B com ele já aberto, não.
         animar_entrada(self._cartoes[:CASCATA_MAXIMA], reduzir=self._movimento_reduzido())
+        self.moldura_lista.montar()
         self._cursor_vivo.reposicionar()
 
     def hideEvent(self, evento: Any) -> None:
@@ -879,6 +898,7 @@ class JanelaCaderno(QDialog):
         else:
             aproveitamento = ""
         self.resumo.setText(
+            "caderno de vocabulário   ·   "
             f"{_plural(estatisticas.total, 'termo', 'termos')}"
             f"   ·   {estatisticas.vencidas} para revisar"
             f"   ·   {_plural(estatisticas.dominadas, 'dominada', 'dominadas')}"

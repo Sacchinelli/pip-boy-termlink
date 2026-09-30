@@ -23,7 +23,7 @@ import random
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, Qt
+from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QVariantAnimation
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -36,6 +36,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from .. import design
+from .movimento import no_ritmo
 
 # Altura da faixa em que uma divisória se desenha: o fio fica no meio, e os
 # ornamentos — losango, argola, tiques — cabem nela sem cortar.
@@ -386,6 +387,114 @@ def pintar_moldura(pintor: QPainter, caixa: QRectF, estilo: str, tema: Any) -> N
     pintor.restore()
 
 
+
+# ------------------------------------------------------------------ Montagem
+# A moldura aparecia pronta. Nos menus de jogo, a moldura ENTRA: os menus de
+# ficção científica desenham as linhas antes de acender o resto (é o
+# princípio das molduras do ARWES, que se "montam" em fases), o neon falha
+# antes de firmar, o cartaz desenrola. Cada jogo declara como a moldura dele
+# se monta (``Atmosfera.montagem``), e ela se monta quando o jogo entra — na
+# primeira vez que a janela aparece e a cada troca de jogo. Com a atmosfera
+# desligada, aparece pronta, como antes.
+#
+# * "tracado": as linhas correm pela borda a partir de dois cantos opostos
+#   (a Night City);
+# * "cantos": as quinas chegam uma a uma, no sentido horário, e os lados
+#   crescem delas até se encontrarem no meio (as ferragens do bruxo);
+# * "varredura": da esquerda para a direita, como um cartaz desenrolado;
+# * "acender": o tubo de neon que falha antes de firmar;
+# * "esmaecer": surge devagar, sem pressa (a alta fantasia, o grimório).
+MONTAGENS = ("tracado", "cantos", "varredura", "acender", "esmaecer")
+# Quanto dura cada montagem, antes do ritmo do jogo.
+DURACOES_DA_MONTAGEM = {"tracado": 700, "cantos": 700, "varredura": 700, "acender": 700,
+                        "esmaecer": 700}
+# A faixa em que a moldura mora: é ela que o traçado percorre.
+_FAIXA_DA_MONTAGEM = FAIXA_MOLDURA + 6.0
+# O tubo parte apagado e falha antes de firmar. O que falha é o letreiro fino
+# no pé do painel, e não a tela; e a montagem inteira dura menos de um segundo.
+_FALHAS_DO_NEON = ((0.06, 0.0), (0.14, 0.25), (0.2, 0.9), (0.32, 0.3), (0.44, 1.0), (0.52, 0.5))
+
+
+def _trecho_do_perimetro(caixa: QRectF, inicio: float, comprimento: float) -> QPainterPath:
+    """A faixa da borda de ``inicio`` até ``inicio + comprimento``, no perímetro.
+
+    O perímetro é percorrido no sentido horário a partir do canto de cima à
+    esquerda; as distâncias são em pixels ao longo dele.
+    """
+    largura, altura, f = caixa.width(), caixa.height(), _FAIXA_DA_MONTAGEM
+
+    def faixa(lado: int, a: float, b: float) -> QRectF:
+        """O pedaço [a, b] do lado ``lado`` (0 = cima, e no sentido horário)."""
+        if lado == 0:
+            return QRectF(caixa.left() + a, caixa.top(), b - a, f)
+        if lado == 1:
+            return QRectF(caixa.right() - f, caixa.top() + a, f, b - a)
+        if lado == 2:
+            return QRectF(caixa.right() - b, caixa.bottom() - f, b - a, f)
+        return QRectF(caixa.left(), caixa.bottom() - b, f, b - a)
+
+    lados = (largura, altura, largura, altura)
+    caminho = QPainterPath()
+    caminho.setFillRule(Qt.FillRule.WindingFill)
+    perimetro = 2 * (largura + altura)
+    restante, posicao = comprimento, inicio % perimetro
+    for _ in range(8):
+        if restante <= 0.5:
+            break
+        acumulado = 0.0
+        for indice, tamanho in enumerate(lados):
+            if posicao < acumulado + tamanho:
+                de = posicao - acumulado
+                ate = min(tamanho, de + restante)
+                caminho.addRect(faixa(indice, de, ate))
+                restante -= ate - de
+                posicao = (acumulado + ate) % perimetro
+                break
+            acumulado += tamanho
+    return caminho
+
+
+def aplicar_montagem(pintor: QPainter, caixa: QRectF, estilo: str, progresso: float) -> None:
+    """Recorta ou esmaece o pintor para o quadro ``progresso`` da montagem."""
+    if progresso >= 1.0 or estilo not in MONTAGENS:
+        return
+    p = max(0.0, progresso)
+    if estilo == "esmaecer":
+        pintor.setOpacity(p * p * (3 - 2 * p))
+    elif estilo == "acender":
+        pintor.setOpacity(next((alfa for limite, alfa in _FALHAS_DO_NEON if p < limite), 1.0))
+    elif estilo == "varredura":
+        pintor.setClipRect(QRectF(caixa.left(), caixa.top(), caixa.width() * p, caixa.height()))
+    elif estilo == "cantos":
+        f = _FAIXA_DA_MONTAGEM
+        # Enrolamento, e não par-ímpar: os dois braços de cada quina se
+        # sobrepõem nela, e pela regra par-ímpar a sobreposição vira buraco —
+        # justamente onde moram as ferragens do bruxo.
+        recorte = QPainterPath()
+        recorte.setFillRule(Qt.FillRule.WindingFill)
+        # Uma quina de cada vez, no sentido horário, como ferragens sendo
+        # cravadas; os braços de cada uma crescem até o meio dos lados.
+        for ordem, (x, y, sx, sy) in enumerate((
+            (caixa.left(), caixa.top(), 1, 1), (caixa.right(), caixa.top(), -1, 1),
+            (caixa.right(), caixa.bottom(), -1, -1), (caixa.left(), caixa.bottom(), 1, -1),
+        )):
+            q = max(0.0, min(1.0, p * 4 - ordem))
+            if q <= 0.0:
+                continue
+            braco_x = max(f * 2.5, caixa.width() / 2 * q)
+            braco_y = max(f * 2.5, caixa.height() / 2 * q)
+            recorte.addRect(QRectF(x, y, sx * braco_x, sy * f).normalized())
+            recorte.addRect(QRectF(x, y, sx * f, sy * braco_y).normalized())
+        pintor.setClipPath(recorte)
+    else:  # tracado
+        perimetro = 2 * (caixa.width() + caixa.height())
+        metade = perimetro / 2 * p
+        recorte = _trecho_do_perimetro(caixa, 0.0, metade)
+        recorte.addPath(_trecho_do_perimetro(caixa, perimetro / 2, metade))
+        recorte.setFillRule(Qt.FillRule.WindingFill)
+        pintor.setClipPath(recorte)
+
+
 class MolduraDoPainel(QWidget):
     """A moldura do jogo em volta de um painel, por cima dele e sem tocá-lo.
 
@@ -410,6 +519,13 @@ class MolduraDoPainel(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        # A montagem em curso: o jeito dela e onde está, de 0 a 1.
+        self._montagem = ""
+        self.progresso_da_montagem = 1.0
+        self._animacao = QVariantAnimation(self)
+        self._animacao.setStartValue(0.0)
+        self._animacao.setEndValue(1.0)
+        self._animacao.valueChanged.connect(self._avancar_montagem)
         painel.installEventFilter(self)
         self.acompanhar()
 
@@ -419,9 +535,35 @@ class MolduraDoPainel(QWidget):
 
     def acompanhar(self) -> None:
         """Cobre o painel de novo, por cima dele."""
+        # Mora sempre no mesmo pai que o painel: se ele mudou de pai — ou só
+        # ganhou um depois de a moldura nascer —, a moldura vai atrás.
+        pai = self._painel.parentWidget()
+        if pai is not None and self.parentWidget() is not pai:
+            self.setParent(pai)
         self.setGeometry(self._painel.geometry())
         self.setVisible(self._painel.isVisible() and bool(self.estilo))
         self.raise_()
+        self.update()
+
+    def montar(self) -> None:
+        """Faz a moldura do jogo em vigor ENTRAR, do jeito dele (ver MONTAGENS).
+
+        Pronta na hora quando não há o que ver — atmosfera desligada, moldura
+        vazia, painel escondido: montar o invisível é gastar quadro à toa.
+        """
+        self._animacao.stop()
+        self._montagem = str(getattr(self._provedor.atmosfera, "montagem", ""))
+        desligada = float(getattr(self._provedor, "intensidade_atmosfera", 1.0)) <= 0.0
+        if not self._montagem or not self.estilo or desligada or not self._painel.isVisible():
+            self.progresso_da_montagem = 1.0
+            self.update()
+            return
+        self.progresso_da_montagem = 0.0
+        self._animacao.setDuration(no_ritmo(DURACOES_DA_MONTAGEM.get(self._montagem, 700)))
+        self._animacao.start()
+
+    def _avancar_montagem(self, valor: Any) -> None:
+        self.progresso_da_montagem = float(valor)
         self.update()
 
     def eventFilter(self, alvo: Any, evento: Any) -> bool:
@@ -446,6 +588,7 @@ class MolduraDoPainel(QWidget):
             pintor_retrato.end()
             self._retrato, self._chave = retrato, chave
         pintor = QPainter(self)
+        aplicar_montagem(pintor, QRectF(self.rect()), self._montagem, self.progresso_da_montagem)
         pintor.drawPixmap(0, 0, self._retrato)
         pintor.end()
 

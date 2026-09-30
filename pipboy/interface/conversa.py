@@ -17,6 +17,7 @@ lista inteira a cada mensagem faria a janela piscar a cada frase do assistente.
 
 from __future__ import annotations
 
+import html
 import time
 from typing import Any
 
@@ -47,6 +48,44 @@ RECUO_ANOTACAO = 16
 
 # Anotações não são conversa: a tela inicial convive com elas.
 _ANOTACOES = (Tag.SISTEMA, Tag.VOCAB)
+
+
+
+def quem_fala(estilo: str, autor: str) -> str:
+    """O nome de quem fala no formato do jogo, sem a hora (ver cabecalho_da_fala)."""
+    if estilo == "terminal":
+        return f"[{autor}]"
+    if estilo == "holo":
+        return f"// {autor}"
+    if estilo == "radio":
+        return f"[ESQUADRÃO] {autor}"
+    return autor
+
+
+def cabecalho_da_fala(estilo: str, autor: str, hora: str, tema: Any) -> str:
+    """Quem fala e quando, do jeito que o jogo escreve isso.
+
+    O terminal carimba entre colchetes; a legenda de diálogo põe o nome de
+    quem fala na cor de destaque, como os jogos põem; a holochamada, com as
+    barras de comentário da Night City; o chat de esquadrão, com o canal na
+    frente, como o chat de uma partida. Sem autor — os erros, que são o
+    programa falando —, só a hora.
+    """
+    if not autor:
+        return f"[{hora}]" if estilo == "terminal" else hora
+    if estilo == "terminal":
+        return f"[{autor} {hora}]"
+    if estilo == "holo":
+        return f"// {autor}  ·  {hora}"
+    if estilo == "radio":
+        return f"[ESQUADRÃO] {autor}  ·  {hora}"
+    if estilo == "legenda":
+        nome = design.garantir_contraste(tema.accent_text, tema.surface)
+        return (
+            f'<span style="color:{nome}; font-weight:600;">{html.escape(autor)}</span>'
+            f"&nbsp;&nbsp;·&nbsp;&nbsp;{html.escape(hora)}"
+        )
+    return f"{autor}  ·  {hora}"
 
 
 class Conversa(QScrollArea):
@@ -198,14 +237,33 @@ class Conversa(QScrollArea):
         self, texto: str, tag: Tag, autor: str, tema: Any, atmosfera: Any
     ) -> QWidget:
         do_jogador = tag is Tag.USUARIO
+        estilo = "" if tag is Tag.ERRO else str(getattr(atmosfera, "fala", ""))
+        marca = tema.accent
         if tag is Tag.ERRO:
             fundo = design.misturar(tema.surface, tema.alert, 0.20)
             cor = design.garantir_contraste(tema.alert, fundo)
             contorno = design.misturar(fundo, tema.alert, 0.45)
+        elif estilo in ("terminal", "legenda"):
+            # Sem balão: a letra fica sobre o painel (terminal) ou sobre a
+            # sombra da legenda, que é a tela do jogo escurecida. Garante-se
+            # contra os dois — a sombra se apaga do outro lado da fala.
+            fundo = design.misturar(tema.screen, "#000000", 0.25)
+            cor = design.garantir_contraste(
+                design.garantir_contraste(tema.primary, tema.surface), fundo
+            )
+            contorno = ""
+            marca = tema.accent_text if do_jogador else tema.primary
+        elif estilo == "mensagem" and do_jogador:
+            # A mensagem enviada, na cor do outro lado do neon: é o balão
+            # "meu" de todo celular.
+            fundo = design.misturar(tema.screen, tema.info, 0.42)
+            cor = design.garantir_contraste(tema.primary, fundo)
+            contorno = ""
         elif do_jogador:
             fundo = design.misturar(tema.surface, tema.accent, 0.22)
             cor = design.garantir_contraste(tema.primary, fundo)
             contorno = design.misturar(fundo, tema.accent, 0.35)
+            marca = tema.info
         else:
             fundo = tema.surface_alta
             cor = design.garantir_contraste(tema.primary, fundo)
@@ -226,6 +284,9 @@ class Conversa(QScrollArea):
             # Só a fala do tutor: é dela que vem a palavra que não se conhece.
             perguntavel=not do_jogador and tag is not Tag.ERRO,
             dica_da_palavra=self._janela.dica_do_caderno,
+            estilo=estilo,
+            do_jogador=do_jogador,
+            marca=marca,
         )
         bolha.palavra_tocada.connect(self._janela.perguntar_sobre)
         # O separador só existe se houver os dois lados. A sessão publica TODOS
@@ -235,7 +296,7 @@ class Conversa(QScrollArea):
         # hora tanto quanto uma fala.
         mesmo_autor = bool(autor) and autor == self._autor_anterior
         hora = time.strftime("%H:%M")
-        cabecalho = None if mesmo_autor else (f"{autor}  ·  {hora}" if autor else hora)
+        cabecalho = None if mesmo_autor else cabecalho_da_fala(estilo, autor, hora, tema)
         linha = LinhaFala(
             bolha,
             cabecalho=cabecalho,

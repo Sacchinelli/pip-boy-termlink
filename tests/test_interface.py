@@ -969,6 +969,47 @@ def main() -> int:
     janela.campo_jogo.setCurrentText(jogo_letra)
     aplicacao.processEvents()
 
+    print("a tela inicial traz a dica do jogo")
+    from datetime import date as DiaDica
+
+    from pipboy.dicas import DICAS as DICAS_TELA
+    from pipboy.dicas import dica_do_dia as dica_do_dia_tela
+
+    tela_dica = janela.conversa.tela_inicial
+    jogo_dica = janela.campo_jogo.currentText()
+    janela.campo_jogo.setCurrentText("Elden Ring")
+    aplicacao.processEvents()
+    janela.conversa.atualizar_inicial()
+    resumo_dica = janela.resumo_inicial()
+    checar(
+        "MENSAGEM DEIXADA" in tela_dica.dica.text() and not tela_dica.dica.isHidden(),
+        "no Elden Ring, a dica chega como mensagem deixada no chão",
+    )
+    _, frase_esperada = dica_do_dia_tela(
+        "Elden Ring", janela.tema.assistant_name,
+        {
+            {"iniciar/parar": "iniciar", "mudo": "mudo", "áudio do jogo": "audio"}[acao]:
+            tecla_legivel(tecla)
+            for tecla, acao in resumo_dica.atalhos
+        },
+        DiaDica.today(),
+    )
+    import html as html_dica
+
+    checar(
+        html_dica.escape(frase_esperada) in tela_dica.dica.text(),
+        "e é a dica do dia, com as teclas desta máquina",
+    )
+    janela.campo_jogo.setCurrentText("Red Dead")
+    aplicacao.processEvents()
+    checar(
+        DICAS_TELA["Red Dead"].rotulo in tela_dica.dica.text()
+        and bool(tela_dica.dica.alignment() & Qt.AlignmentFlag.AlignLeft),
+        "trocar de jogo troca a voz, e a dica encosta à esquerda com a coluna de pausa",
+    )
+    janela.campo_jogo.setCurrentText(jogo_dica)
+    aplicacao.processEvents()
+
     print("a tela inicial é o menu do jogo")
     from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_MENU
 
@@ -3837,6 +3878,412 @@ def main() -> int:
         "e a 'Desligada' o apaga",
     )
 
+    print("cada jogo tem os seus ícones")
+    from PySide6.QtCore import QRectF as CaixaIcone
+    from PySide6.QtGui import QColor as CorIcone
+
+    from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_ICONE
+    from pipboy.interface.icones import ICONES, estilo_de_icone, pintar_icone
+
+    conjuntos = {nome: r.icones for nome, r in RECEITAS_ICONE.items()}
+    checar(all(c == "" or c in ICONES for c in conjuntos.values()), "todo jogo pede um conjunto que existe")
+    proprios_icone = [c for c in conjuntos.values() if c]
+    checar(
+        len(proprios_icone) == len(set(proprios_icone)) == 9 and conjuntos["Genérico / Outro"] == "",
+        "nove jogos com os seus ícones, nenhum copiado, e o neutro com os glifos de sempre",
+    )
+    checar(
+        all(set(desenhos) == {"caderno", "historico"} for desenhos in ICONES.values()),
+        "cada conjunto desenha o caderno e o histórico",
+    )
+
+    def retrato_do_icone(nome: str, estilo: str, lado: int = 24) -> QImage:
+        imagem_icone = QImage(60, 60, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem_icone.fill(0)
+        pintor_icone = QPainter(imagem_icone)
+        pintar_icone(
+            pintor_icone, nome, CaixaIcone(18, 18, lado, lado), CorIcone("#ffffff"), estilo=estilo
+        )
+        pintor_icone.end()
+        return imagem_icone
+
+    fora_icone, vazios_icone = [], []
+    for estilo_icone in ICONES:
+        for nome_icone in ("caderno", "historico"):
+            imagem_icone = retrato_do_icone(nome_icone, estilo_icone)
+            tinta_icone = [
+                (x, y) for y in range(60) for x in range(60) if imagem_icone.pixelColor(x, y).alpha()
+            ]
+            if not tinta_icone:
+                vazios_icone.append(f"{estilo_icone}/{nome_icone}")
+            elif any(not (16 <= x <= 44 and 16 <= y <= 44) for x, y in tinta_icone):
+                fora_icone.append(f"{estilo_icone}/{nome_icone}")
+    checar(not vazios_icone, f"todo ícone desenha alguma coisa ({vazios_icone})")
+    checar(not fora_icone, f"e fica dentro da caixa que lhe deram ({fora_icone})")
+    retratos_icone = {
+        (e, n): retrato_do_icone(n, e) for e in ICONES for n in ("caderno", "historico")
+    }
+    iguais_icone = sorted(
+        (a, b) for a in retratos_icone for b in retratos_icone
+        if a < b and retratos_icone[a] == retratos_icone[b]
+    )
+    checar(not iguais_icone, f"e nenhum ícone repete outro, de jogo nenhum ({iguais_icone})")
+    checar(
+        retrato_do_icone("caderno", "desconhecido") == retrato_do_icone("caderno", ""),
+        "estilo desconhecido cai nos glifos de sempre, como o tema neutro",
+    )
+
+    # Na janela: as portas e o trilho desenham o ícone do jogo em vigor.
+    jogo_icone = janela.campo_jogo.currentText()
+    janela.campo_jogo.setCurrentText("Red Dead")
+    aplicacao.processEvents()
+    checar(estilo_de_icone() == "oeste", "no Red Dead, o conjunto em vigor é o do oeste")
+    checar(
+        janela.botao_caderno.icone == "caderno" and janela.botao_caderno.text() == "Caderno"
+        and janela.botao_historico.icone == "historico"
+        and janela.trilho_caderno.icone == "caderno" and janela.trilho_caderno.text() == ""
+        and janela.trilho_caderno.accessibleName() == "Abrir o caderno de vocabulário",
+        "as portas trazem o ícone ao lado do nome; o trilho, só o ícone — com o nome para o leitor de tela",
+    )
+    porta_oeste = janela.botao_caderno.grab().toImage()
+    janela.botao_caderno.icone = ""
+    porta_sem_icone = janela.botao_caderno.grab().toImage()
+    janela.botao_caderno.icone = "caderno"
+    checar(porta_oeste != porta_sem_icone, "a porta desenha o ícone do jogo ao lado do nome")
+    janela.campo_jogo.setCurrentText("Cyberpunk 2077")
+    aplicacao.processEvents()
+    porta_dados = janela.botao_caderno.grab().toImage()
+    checar(porta_oeste != porta_dados, "trocar de jogo troca o desenho da porta")
+    from pipboy.interface.componentes import Botao as BotaoIcone
+
+    com_icone = BotaoIcone("Caderno", icone="caderno")
+    sem_icone = BotaoIcone("Caderno")
+    checar(
+        com_icone.sizeHint().width() > sem_icone.sizeHint().width(),
+        "o botão com ícone pede a largura do ícone, e o rótulo não é cortado",
+    )
+    janela.campo_jogo.setCurrentText(jogo_icone)
+    aplicacao.processEvents()
+
+    print("a moldura do jogo se monta")
+    from PySide6.QtCore import QRectF as CaixaMontagem
+
+    from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_MONTAGEM
+    from pipboy.interface.ornamentos import MONTAGENS, aplicar_montagem
+    from pipboy.interface.ornamentos import pintar_moldura as pintar_moldura_montada
+    from pipboy.themes import TEMAS as TEMAS_MONTAGEM
+
+    montagens = {nome: (r.montagem, r.moldura) for nome, r in RECEITAS_MONTAGEM.items()}
+    checar(
+        all(m in MONTAGENS for m, moldura in montagens.values() if moldura)
+        and all(not m for m, moldura in montagens.values() if not moldura),
+        "todo jogo com moldura diz como ela se monta; sem moldura, não há o que montar",
+    )
+
+    def tinta_montada(jogo: str, progresso: float) -> QImage:
+        montagem, moldura = montagens[jogo]
+        imagem_m = QImage(800, 500, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem_m.fill(0)
+        pintor_m = QPainter(imagem_m)
+        aplicar_montagem(pintor_m, CaixaMontagem(0, 0, 800, 500), montagem, progresso)
+        pintar_moldura_montada(pintor_m, CaixaMontagem(0, 0, 800, 500), moldura, TEMAS_MONTAGEM[jogo])
+        pintor_m.end()
+        return imagem_m
+
+    def soma(imagem_m: QImage, x0: int = 0, y0: int = 0, x1: int = 800, y1: int = 500) -> int:
+        return sum(
+            imagem_m.pixelColor(x, y).alpha()
+            for y in range(y0, y1, 2) for x in range(x0, x1, 2)
+        )
+
+    crescimento = []
+    for jogo_m, (_, moldura_m) in montagens.items():
+        if not moldura_m:
+            continue
+        passos = [soma(tinta_montada(jogo_m, p)) for p in (0.0, 0.3, 0.6, 1.0)]
+        if not (passos[0] < passos[1] <= passos[2] <= passos[3] and passos[0] < passos[3] * 0.2):
+            crescimento.append(f"{jogo_m}: {passos}")
+    checar(
+        not crescimento,
+        f"toda moldura entra do quase nada até inteira, sem voltar atrás ({crescimento})",
+    )
+    cantos_m = tinta_montada("The Witcher 3", 0.2)
+    checar(
+        soma(cantos_m, 0, 0, 60, 60) > 0 and soma(cantos_m, 740, 440, 800, 500) == 0,
+        "as ferragens do bruxo chegam quina por quina, no sentido horário",
+    )
+    tracado_m = tinta_montada("Cyberpunk 2077", 0.25)
+    checar(
+        soma(tracado_m, 0, 0, 120, 40) > 0 and soma(tracado_m, 740, 0, 800, 60) == 0,
+        "o circuito da Night City corre pela borda a partir de um canto",
+    )
+    varredura_m = tinta_montada("Red Dead", 0.4)
+    checar(
+        soma(varredura_m, 0, 0, 300, 500) > 0 and soma(varredura_m, 340, 0, 800, 500) == 0,
+        "o cartaz do velho oeste desenrola da esquerda para a direita",
+    )
+
+    # Na janela: trocar de jogo monta a moldura do jogo novo; desligada, ela
+    # aparece pronta.
+    jogo_montagem = janela.campo_jogo.currentText()
+    atmosfera_montagem = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    janela.campo_jogo.setCurrentText("Cyberpunk 2077")
+    aplicacao.processEvents()
+    moldura_janela = janela.moldura_painel
+    checar(
+        moldura_janela.progresso_da_montagem < 1.0 or not janela.conversa.isVisible(),
+        "trocar de jogo faz a moldura do jogo novo entrar montando",
+    )
+    checar(
+        aguardar(lambda: moldura_janela.progresso_da_montagem >= 1.0, 3000),
+        "e ela termina inteira",
+    )
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QRegion
+    from PySide6.QtWidgets import QWidget as WidgetMontagem
+
+    def tinta_da_moldura_real() -> int:
+        imagem_real = QImage(moldura_janela.size(), QImage.Format.Format_ARGB32_Premultiplied)
+        imagem_real.fill(0)
+        moldura_janela.render(
+            imagem_real, QPoint(), QRegion(), WidgetMontagem.RenderFlag.DrawChildren
+        )
+        alfas_real = bytes(imagem_real.constBits())[3::4]
+        return len(alfas_real) - alfas_real.count(0)
+
+    inteira_real = tinta_da_moldura_real()
+    moldura_janela.montar()
+    moldura_janela._animacao.pause()
+    moldura_janela._animacao.setCurrentTime(moldura_janela._animacao.duration() // 4)
+    no_meio_real = tinta_da_moldura_real()
+    moldura_janela._animacao.stop()
+    moldura_janela.progresso_da_montagem = 1.0
+    checar(
+        0 <= no_meio_real < inteira_real * 0.7,
+        f"e a moldura da janela é de fato pintada montando ({no_meio_real} de {inteira_real} pixels)",
+    )
+    janela.campo_atmosfera.setCurrentText("Desligada")
+    janela.campo_jogo.setCurrentText("The Witcher 3")
+    aplicacao.processEvents()
+    checar(
+        moldura_janela.progresso_da_montagem == 1.0,
+        "com a atmosfera desligada, a moldura aparece pronta",
+    )
+    janela.campo_atmosfera.setCurrentText(atmosfera_montagem)
+    janela.campo_jogo.setCurrentText(jogo_montagem)
+    aplicacao.processEvents()
+
+    print("cada jogo fala do seu jeito na conversa")
+    from pipboy import design as design_fala
+    from pipboy.events import Tag as TagFala
+    from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_FALA
+    from pipboy.interface.componentes import Bolha as BolhaFala
+    from pipboy.interface.conversa import cabecalho_da_fala
+    from pipboy.themes import TEMAS as TEMAS_FALA
+
+    estilos_fala = {nome: r.fala for nome, r in RECEITAS_FALA.items()}
+    checar(
+        set(estilos_fala.values()) <= {"", "terminal", "legenda", "mensagem", "holo", "radio"}
+        and estilos_fala["Fallout"] == "terminal" and estilos_fala["GTA"] == "mensagem"
+        and estilos_fala["FPS / Multiplayer"] == "radio" and estilos_fala["Genérico / Outro"] == "",
+        "o terminal loga, o GTA manda mensagem, o visor fala no canal e o neutro usa o balão",
+    )
+    tema_legenda = TEMAS_FALA["Elden Ring"]
+    checar(
+        cabecalho_da_fala("terminal", "PIP-BOY", "17:43", tema_legenda) == "[PIP-BOY 17:43]"
+        and cabecalho_da_fala("terminal", "", "17:43", tema_legenda) == "[17:43]"
+        and cabecalho_da_fala("radio", "COMANDO", "17:43", tema_legenda).startswith("[ESQUADRÃO] COMANDO")
+        and cabecalho_da_fala("holo", "RELIC", "17:43", tema_legenda).startswith("// RELIC")
+        and cabecalho_da_fala("", "TUTOR", "17:43", tema_legenda) == "TUTOR  ·  17:43"
+        and cabecalho_da_fala("mensagem", "", "17:43", tema_legenda) == "17:43",
+        "o cabeçalho de quem fala segue o jogo: colchetes, canal, barras de comentário",
+    )
+    legenda_html = cabecalho_da_fala("legenda", "DEDO <x>", "17:43", tema_legenda)
+    checar(
+        "font-weight:600" in legenda_html and "&lt;x&gt;" in legenda_html,
+        "a legenda põe o nome de quem fala em destaque — escapado, que nome não é HTML",
+    )
+
+    def bolha_no_estilo(estilo: str, do_jogador: bool) -> BolhaFala:
+        bolha_f = BolhaFala(
+            "Say it again, please — slower.", fundo="#202020", cor_texto="#e0e0e0",
+            fonte=janela.fonte("corpo"), largura_max=420, acento="#ff9900",
+            estilo=estilo, do_jogador=do_jogador, marca="#33ccff",
+            contorno="" if estilo in ("terminal", "legenda") else "#555555",
+        )
+        bolha_f.resize(bolha_f.sizeHint())
+        return bolha_f
+
+    retratos_fala = {
+        (e, j): bolha_no_estilo(e, j).grab().toImage()
+        for e in ("", "terminal", "legenda", "mensagem", "holo", "radio") for j in (False, True)
+    }
+    iguais_fala = sorted(
+        (a, b) for a in retratos_fala for b in retratos_fala
+        if a < b and a[1] == b[1] and retratos_fala[a] == retratos_fala[b]
+    )
+    checar(not iguais_fala, f"cada estilo desenha a fala de um jeito ({iguais_fala})")
+
+    def azul(imagem_f: QImage, x0: int, x1: int) -> int:
+        return sum(
+            1 for y in range(imagem_f.height()) for x in range(x0, x1)
+            if (c := imagem_f.pixelColor(x, y)).blue() > 150 and c.red() < 120
+        )
+
+    checar(
+        azul(retratos_fala[("terminal", True)], 0, 14) > 0
+        and azul(retratos_fala[("terminal", False)], 3, 7) > 0,
+        "no terminal, o jogador escreve depois do prompt e o aparelho ao lado da calha",
+    )
+    legenda_f = retratos_fala[("legenda", False)]
+    meio_f = legenda_f.height() // 2
+    checar(
+        legenda_f.pixelColor(3, 2).alpha() > legenda_f.pixelColor(legenda_f.width() - 3, 2).alpha(),
+        "a legenda nasce escura do lado de quem fala e se apaga do outro",
+    )
+    mensagem_f = retratos_fala[("mensagem", True)]
+    checar(
+        mensagem_f.pixelColor(mensagem_f.width() - 4, mensagem_f.height() - 2).alpha() > 0
+        and mensagem_f.pixelColor(4, mensagem_f.height() - 2).alpha() == 0,
+        "a mensagem enviada tem a ponta do lado de quem mandou",
+    )
+    checar(meio_f > 0, "a bolha tem altura")
+
+    # Na janela: toda fala de todo jogo lê em AA contra o que fica atrás da
+    # letra — o balão, a sombra da legenda ou o próprio painel.
+    jogo_fala = janela.campo_jogo.currentText()
+    ilegiveis_fala = []
+    for nome_fala in TEMAS_FALA:
+        janela.campo_jogo.setCurrentText(nome_fala)
+        aplicacao.processEvents()
+        tema_fala = janela.tema
+        for tag_fala, autor_fala in ((TagFala.ASSISTENTE, tema_fala.assistant_name), (TagFala.USUARIO, "VOCÊ")):
+            janela.conversa.adicionar("Try saying it out loud.", tag_fala, autor_fala)
+            aplicacao.processEvents()
+            bolha_j = janela.conversa._itens[-1].findChildren(BolhaFala)[0]
+            cor_f = bolha_j._cor_texto
+            fundos_f = [bolha_j._fundo.name()]
+            if bolha_j.estilo in ("terminal", "legenda"):
+                fundos_f.append(tema_fala.surface)
+            pior_f = min(design_fala.contraste(cor_f, f) for f in fundos_f)
+            if pior_f < 4.5:
+                ilegiveis_fala.append(f"{nome_fala}/{tag_fala.value}: {pior_f:.2f}")
+            if tag_fala is TagFala.ASSISTENTE and 'href="' not in bolha_j._rotulo.text():
+                ilegiveis_fala.append(f"{nome_fala}: fala sem palavras tocáveis")
+        janela.conversa.limpar()
+    checar(
+        not ilegiveis_fala,
+        f"toda fala lê em AA no estilo do jogo, e as palavras do tutor continuam tocáveis ({ilegiveis_fala})",
+    )
+    janela.campo_jogo.setCurrentText(jogo_fala)
+    aplicacao.processEvents()
+
+    print("o caderno e o histórico vestem o jogo")
+    from pipboy.interface.icones import IconeDoJogo
+    from pipboy.interface.ornamentos import FAIXA_MOLDURA as FAIXA_JANELAS
+
+    jogo_janelas = janela.campo_jogo.currentText()
+    atmosfera_janelas = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    janela.campo_jogo.setCurrentText("Red Dead")
+    aplicacao.processEvents()
+    janela.abrir_caderno()
+    aplicacao.processEvents()
+    caderno_j = janela._caderno
+    checar(
+        caderno_j.titulo.text() == "Diário" == janela.tema.nome_do_caderno
+        and "caderno de vocabulário" in caderno_j.resumo.text()
+        and caderno_j.windowTitle() == "Caderno de vocabulário",
+        "no velho oeste, o caderno é o Diário — com a função escrita ao lado e na barra",
+    )
+    checar(
+        isinstance(caderno_j.icone_titulo, IconeDoJogo) and caderno_j.icone_titulo.nome == "caderno"
+        and caderno_j.icone_titulo.width() == QFontMetrics(caderno_j.titulo.font()).height(),
+        "e o diário de correia ao lado do título, na altura da letra dele",
+    )
+    moldura_cad = caderno_j.moldura_lista
+    checar(
+        moldura_cad.parentWidget() is caderno_j.rolagem.parentWidget()
+        and moldura_cad.isVisible() and moldura_cad.geometry() == caderno_j.rolagem.geometry(),
+        "a moldura do cartaz contorna a lista, por cima dela e do tamanho dela",
+    )
+    margens_cad = caderno_j._fluxo.contentsMargins()
+    checar(
+        margens_cad.left() >= FAIXA_JANELAS and margens_cad.top() >= FAIXA_JANELAS,
+        "e os cartões se afastam da borda, para o ornamento não passar por cima de nenhum",
+    )
+    caderno_j.close()
+    caderno_j.show()
+    checar(
+        moldura_cad.progresso_da_montagem < 1.0,
+        "reaberto, o caderno monta a moldura do jogo de novo",
+    )
+    aguardar(lambda: moldura_cad.progresso_da_montagem >= 1.0, 3000)
+    caderno_j.close()
+
+    janela.abrir_historico()
+    aplicacao.processEvents()
+    visor_j = janela._visor_historico
+    moldura_hist = visor_j.moldura_falas
+    checar(
+        visor_j.titulo.text() == "Trilhas percorridas" and visor_j.subtitulo.text() == "histórico de sessões"
+        and visor_j.icone_titulo.nome == "historico",
+        "o histórico é o das trilhas percorridas, com a fogueira ao lado",
+    )
+    checar(
+        moldura_hist.parentWidget() is visor_j._rolagem_falas.parentWidget()
+        and moldura_hist.parentWidget() is not None and moldura_hist.isVisible(),
+        "a moldura contorna a transcrição, dentro da janela — e não solta fora dela",
+    )
+    visor_j.close()
+
+    # A transcrição fala no formato do jogo, como a conversa.
+    import html as html_janelas
+
+    historico_j = janela._historico
+    sessao_j = historico_j.iniciar_sessao(jogo="Fallout", modo="Tutor", nivel="B1")
+    historico_j.registrar_fala(sessao_j, autor="VOCÊ", tag="usuario", texto="What's a bounty?")
+    historico_j.registrar_fala(sessao_j, autor="COMANDO", tag="assistente", texto="A reward, soldier.")
+    textos_por_jogo = {}
+    for jogo_j in ("Fallout", "FPS / Multiplayer", "Red Dead"):
+        janela.campo_jogo.setCurrentText(jogo_j)
+        aplicacao.processEvents()
+        janela.abrir_conversa(sessao_j)
+        aplicacao.processEvents()
+        visor_t = janela._visor_historico
+        textos_por_jogo[jogo_j] = [
+            html_janelas.unescape(b.text()) for b in visor_t._interno_falas.findChildren(QLabel)
+        ]
+        visor_t.close()
+    checar(
+        any("[COMANDO]" in t for t in textos_por_jogo["Fallout"])
+        and any("> What" in t or "&gt;" in t or ">\xa0What" in t for t in textos_por_jogo["Fallout"]),
+        "no terminal, quem fala vem entre colchetes, e o jogador depois do prompt",
+    )
+    checar(
+        any("[ESQUADRÃO] COMANDO" in t for t in textos_por_jogo["FPS / Multiplayer"]),
+        "no visor, com o canal na frente do nome",
+    )
+    checar(
+        any("font-weight:600" in t and "COMANDO" in t for t in textos_por_jogo["Red Dead"]),
+        "e na legenda do velho oeste, o nome em destaque",
+    )
+    historico_j.remover_sessao(sessao_j)
+    janela.campo_jogo.setCurrentText("FPS / Multiplayer")
+    aplicacao.processEvents()
+    janela.abrir_caderno()
+    aplicacao.processEvents()
+    checar(
+        not janela._caderno.moldura_lista.isVisible()
+        and janela._caderno._fluxo.contentsMargins().left() < FAIXA_JANELAS,
+        "o visor não tem moldura de painel: a lista fica sem ela, e sem folga à toa",
+    )
+    janela._caderno.close()
+    janela.campo_jogo.setCurrentText(jogo_janelas)
+    janela.campo_atmosfera.setCurrentText(atmosfera_janelas)
+    aplicacao.processEvents()
+
     print("cada jogo mira do seu jeito")
     from PySide6.QtGui import QColor as CorMira
 
@@ -4364,7 +4811,8 @@ def main() -> int:
     )
     titulo_cab, resumo_cab = caderno_pares.titulo, caderno_pares.resumo
     checar(
-        titulo_cab.text() == "CADERNO"
+        titulo_cab.text() == janela.tema.nome_do_caderno
+        and "vocabulário" not in titulo_cab.text().lower()
         and titulo_cab.geometry().bottom() >= resumo_cab.geometry().top()
         and resumo_cab.x() > titulo_cab.x(),
         "o título não repete a barra de título, e os números moram na linha dele",

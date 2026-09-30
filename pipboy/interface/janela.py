@@ -90,6 +90,7 @@ from .cursor import CampoMagnetico, RastreadorDeCursor, abraco_de, centro_de
 from .dialogo import avisar
 from .estilo import RAIO_PADRAO, RAIO_POR_FORMA, folha_da_janela
 from .fontes import ajuste_optico, compor_titulo, registrar_fontes, tem_negrito
+from .icones import definir_estilo_de_icone
 from .moldura import (
     GripsRedimensionamento,
     aplicar_cantos_do_sistema,
@@ -644,6 +645,7 @@ class Janela(QWidget):
         # O jeito de o jogo marcar o que está escolhido vale no programa
         # inteiro — chaves, filtros do caderno, lista do histórico, paleta.
         definir_estilo_de_selecao(self._atmosfera.selecao)
+        definir_estilo_de_icone(self._atmosfera.icones)
         definir_estilo_do_principal(self._atmosfera.botao_principal)
         # E o ritmo dele, e o jeito de as letras de um título chegarem —
         # antes de qualquer título se decifrar com o nome do jogo novo.
@@ -675,6 +677,8 @@ class Janela(QWidget):
         self._atualizar_pilula()
         # A moldura do painel troca de traço — ou some — com o jogo.
         self.moldura_painel.acompanhar()
+        # A moldura do jogo novo entra do jeito dele (ver ornamentos.MONTAGENS).
+        self.moldura_painel.montar()
         self.aviso_de_palavra.recolher()
         self._campainha.aplicar_tema()
         if self._capsula is not None:
@@ -814,8 +818,9 @@ class Janela(QWidget):
         if not self._ja_apareceu:
             self._ja_apareceu = True
             # O aparelho liga: o nome dele se decifra na primeira vez que a
-            # janela aparece.
+            # janela aparece, e a moldura do painel se monta.
             self.marca.decifrar()
+            self.moldura_painel.montar()
             # O aparecimento tem a mesma cortesia do resto: um fade curto em
             # vez de um estalo — a menos que a atmosfera esteja desligada.
             if self._intensidade_atmosfera > 0.0:
