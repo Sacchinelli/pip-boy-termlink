@@ -192,6 +192,48 @@ def main() -> int:
     janela.campo_atmosfera.setCurrentText(atmosfera_anterior)
     aplicacao.processEvents()
 
+    print("um caderno danificado não impede a janela de abrir")
+    from pipboy.events import Tag as TagResgate
+
+    pasta_resgate = Path(tempfile.mkdtemp())
+    dados_resgate = pasta_resgate / "PipBoyTermLink"
+    (dados_resgate / "backups").mkdir(parents=True)
+    copia_resgate = VocabularyStore(dados_resgate / "backups" / "vocabulario-2026-09-28.sqlite3")
+    copia_resgate.registrar("bounty", "recompensa")
+    copia_resgate.registrar("outlaw", "fora da lei")
+    copia_resgate.close()
+    (dados_resgate / "vocabulario.sqlite3").write_bytes(b"isto nao e um banco " * 200)
+    avisos_resgate: list[tuple[str, object]] = []
+    registrar_original = Janela._registrar
+
+    def anotar_registro(self_j, texto, tag=TagResgate.ASSISTENTE, autor=""):  # type: ignore[no-untyped-def]
+        avisos_resgate.append((texto, tag))
+        registrar_original(self_j, texto, tag, autor)
+
+    dados_originais = os.environ["LOCALAPPDATA"]
+    os.environ["LOCALAPPDATA"] = str(pasta_resgate)
+    Janela._registrar = anotar_registro  # type: ignore[method-assign]
+    try:
+        janela_resgate = Janela(AppConfiguration.load(pasta_resgate))
+        checar(
+            janela_resgate._store.total() == 2,
+            f"a janela abre com o caderno restaurado da cópia ({janela_resgate._store.total()} palavras)",
+        )
+        checar(
+            any("restaurado da cópia de 28/09" in texto and tag is TagResgate.ERRO for texto, tag in avisos_resgate),
+            "e avisa na conversa o que houve e onde ficou o arquivo danificado",
+        )
+        janela_resgate.close()
+        janela_resgate.deleteLater()
+    finally:
+        Janela._registrar = registrar_original  # type: ignore[method-assign]
+        os.environ["LOCALAPPDATA"] = dados_originais
+        # A janela de teste instalou as regras do processo e o estilo do jogo
+        # dela; a principal as retoma.
+        janela.assumir_regras_globais()
+        janela._aplicar_tema()
+    aplicacao.processEvents()
+
     print("os dez temas")
     for nome in TEMAS:
         janela._trocar_jogo(nome)

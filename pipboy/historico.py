@@ -164,23 +164,30 @@ class HistoricoStore:
         self.path = path
         self._lock = threading.Lock()
         self._connection = conectar(path)
-        with self._lock:
-            self._connection.execute("PRAGMA foreign_keys = ON")
-            self._connection.executescript(_SCHEMA)
-            self._connection.commit()
-            for tabela, coluna, definicao in _MIGRACOES:
-                existentes = {
-                    linha[1]
-                    for linha in self._connection.execute(f"PRAGMA table_info({tabela})")
-                }
-                if coluna not in existentes:
-                    self._connection.execute(
-                        f"ALTER TABLE {tabela} ADD COLUMN {coluna} {definicao}"
-                    )
-                    self._connection.commit()
-                    if (tabela, coluna) == ("falas", "busca"):
-                        self._recarregar_busca()
-            migrar_para_utc(self._connection, CARIMBOS)
+        try:
+            with self._lock:
+                self._connection.execute("PRAGMA foreign_keys = ON")
+                self._connection.executescript(_SCHEMA)
+                self._connection.commit()
+                for tabela, coluna, definicao in _MIGRACOES:
+                    existentes = {
+                        linha[1]
+                        for linha in self._connection.execute(f"PRAGMA table_info({tabela})")
+                    }
+                    if coluna not in existentes:
+                        self._connection.execute(
+                            f"ALTER TABLE {tabela} ADD COLUMN {coluna} {definicao}"
+                        )
+                        self._connection.commit()
+                        if (tabela, coluna) == ("falas", "busca"):
+                            self._recarregar_busca()
+                migrar_para_utc(self._connection, CARIMBOS)
+        except BaseException:
+            # Quem não termina de abrir fecha a conexão: aberta, ela segura o
+            # arquivo no Windows, e um banco danificado não poderia ser
+            # guardado de lado (ver banco.abrir_com_resgate).
+            self._connection.close()
+            raise
 
     def _recarregar_busca(self) -> None:
         """Dobra as falas de um histórico gravado antes da coluna de busca existir.

@@ -47,6 +47,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import design
+from ..banco import abrir_com_resgate, aviso_de_resgate
 from ..config import (
     AppConfiguration,
     Preferences,
@@ -168,14 +169,21 @@ class Janela(QWidget):
         super().__init__()
         self._configuration = configuration
         self._prefs = Preferences.load()
-        self._store = VocabularyStore(data_directory() / "vocabulario.sqlite3")
+        # Um banco danificado não impede o programa de abrir: ele é guardado
+        # ao lado e o caderno volta da cópia diária (ver banco.abrir_com_resgate).
+        self._store, self._resgate_caderno = abrir_com_resgate(
+            VocabularyStore, data_directory() / "vocabulario.sqlite3",
+            copias=data_directory() / "backups",
+        )
         try:
             copia = self._store.criar_backup(data_directory() / "backups")
             if copia is not None:
                 LOGGER.info("Backup diário do caderno: %s", copia.name)
         except Exception:
             LOGGER.exception("Backup do caderno falhou — o programa segue sem ele.")
-        self._historico = HistoricoStore(data_directory() / "historico.sqlite3")
+        self._historico, self._resgate_historico = abrir_com_resgate(
+            HistoricoStore, data_directory() / "historico.sqlite3"
+        )
         try:
             podadas = self._historico.podar_antigas()
             if podadas:
@@ -205,10 +213,7 @@ class Janela(QWidget):
         # meia dúzia de leitores usavam getattr com padrão para contornar a
         # janela em que ela não existia.
         self._intensidade_atmosfera = 1.0
-        # A mesma régua para os botões de todas as janelas: sem atmosfera, a luz
-        # dentro deles fica parada e nenhum é puxado pelo cursor.
-        definir_movimento_reduzido(lambda: self._intensidade_atmosfera <= 0.0)
-        definir_fonte_da_luz(self, self._luz_do_cursor)
+        self.assumir_regras_globais()
         # O total que a lateral mostra agora. É contra ele que uma palavra
         # salva pela sessão se mede, para o sinal dizer QUANTAS entraram.
         self._total_no_caderno = 0
@@ -281,6 +286,12 @@ class Janela(QWidget):
         # anotações da conversa, sozinhas no pé de um painel vazio. Moram agora
         # no rodapé da tela inicial (ver resumo_inicial). Este aviso continua
         # sendo anotação: é notícia de uma vez, não apresentação.
+        for o_que, resgate in (
+            ("O caderno de vocabulário", self._resgate_caderno),
+            ("O histórico de conversas", self._resgate_historico),
+        ):
+            if resgate is not None:
+                self._registrar(aviso_de_resgate(o_que, resgate), Tag.ERRO)
         if self._atmosfera_veio_do_sistema:
             # Sem este aviso, a primeira execução numa máquina com animação
             # desligada parece um programa sem a aparência que ele anuncia —
@@ -408,6 +419,18 @@ class Janela(QWidget):
         janela — e reabrir ali desfaria a saída.
         """
         return self._encerrando
+
+    def assumir_regras_globais(self) -> None:
+        """Instala, a partir desta janela, as regras que valem para o programa inteiro.
+
+        A régua de movimento dos botões — sem atmosfera, a luz dentro deles
+        fica parada e nenhum é puxado pelo cursor — e a fonte da luz do cursor
+        são do processo, e não de uma janela: quem as instala é a janela
+        principal, ao nascer. Com mais de uma construída (só a suíte faz isso),
+        a última manda; esta é a porta para a principal retomá-las.
+        """
+        definir_movimento_reduzido(lambda: self._intensidade_atmosfera <= 0.0)
+        definir_fonte_da_luz(self, self._luz_do_cursor)
 
     def paleta(self) -> dict[str, str]:
         """Cores do tema num dicionário simples, para os componentes pintados."""

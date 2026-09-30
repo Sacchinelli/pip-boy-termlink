@@ -1844,6 +1844,108 @@ def teste_dados_de_fora() -> None:
     )
     store.close()
 
+def teste_resgate_dos_bancos() -> None:
+    """Um banco danificado não impede o programa de abrir, e nada é apagado.
+
+    O contrato: só corrupção de verdade dispara o resgate (banco travado ou
+    sem permissão, não); o arquivo danificado é guardado ao lado, com o
+    diário; o caderno volta da cópia mais recente que abrir, pulando cópia
+    danificada; sem cópia, começa vazio; e o banco que não termina de abrir
+    solta o arquivo — senão, no Windows, ele nem poderia ser guardado.
+    """
+    print("resgate dos bancos")
+    import sqlite3
+
+    from pipboy.banco import Resgate, abrir_com_resgate, aviso_de_resgate, e_corrupcao
+    from pipboy.historico import HistoricoStore
+
+    lixo = b"isto nao e um banco " * 200
+    pasta = Path(tempfile.mkdtemp())
+    (pasta / "vocabulario.sqlite3").write_bytes(lixo)
+    try:
+        VocabularyStore(pasta / "vocabulario.sqlite3")
+        checar(False, "um caderno danificado não abre")
+    except sqlite3.DatabaseError as erro:
+        checar(e_corrupcao(erro), "o erro de um arquivo que não é banco conta como corrupção")
+    try:
+        (pasta / "vocabulario.sqlite3").rename(pasta / "movido.sqlite3")
+        checar(True, "o caderno que não terminou de abrir soltou o arquivo")
+        (pasta / "movido.sqlite3").rename(pasta / "vocabulario.sqlite3")
+    except OSError as erro:
+        checar(False, f"o caderno que não terminou de abrir soltou o arquivo ({erro})")
+    checar(
+        not e_corrupcao(sqlite3.OperationalError("database is locked"))
+        and not e_corrupcao(ValueError("file is not a database")),
+        "banco travado não é corrupção — e nem o que não é erro do SQLite",
+    )
+
+    copias = pasta / "backups"
+    copias.mkdir()
+    boa = VocabularyStore(copias / "vocabulario-2026-09-28.sqlite3")
+    boa.registrar("bounty", "recompensa")
+    boa.close()
+    (copias / "vocabulario-2026-09-29.sqlite3").write_bytes(lixo)
+    # Uma cópia boa MAIS VELHA, com outro conteúdo: a escolha tem de ser a
+    # mais recente que abre, e não a primeira que abre.
+    velha = VocabularyStore(copias / "vocabulario-2026-09-20.sqlite3")
+    for termo_velho in ("um", "dois", "tres"):
+        velha.registrar(termo_velho, "x")
+    velha.close()
+    store, resgate = abrir_com_resgate(VocabularyStore, pasta / "vocabulario.sqlite3", copias=copias)
+    checar(
+        store.total() == 1 and resgate is not None and resgate.restaurado_de is not None
+        and resgate.restaurado_de.name == "vocabulario-2026-09-28.sqlite3",
+        "o caderno volta da cópia mais recente que abre, pulando a danificada",
+    )
+    assert resgate is not None
+    checar(
+        resgate.guardado_como.exists() and resgate.guardado_como.read_bytes() == lixo
+        and resgate.guardado_como.name.startswith("vocabulario.danificado-"),
+        f"e o arquivo danificado é guardado ao lado, intacto ({resgate.guardado_como.name})",
+    )
+    aviso = aviso_de_resgate("O caderno de vocabulário", resgate)
+    checar(
+        "restaurado da cópia de 28/09" in aviso and resgate.guardado_como.name in aviso
+        and "Nada foi apagado" in aviso,
+        "o aviso diz de que dia é a cópia e onde ficou o arquivo danificado",
+    )
+    store.close()
+
+    sem_copia = Path(tempfile.mkdtemp())
+    (sem_copia / "historico.sqlite3").write_bytes(lixo)
+    historico, resgate_h = abrir_com_resgate(HistoricoStore, sem_copia / "historico.sqlite3")
+    checar(
+        historico.total_sessoes() == 0 and resgate_h is not None and resgate_h.restaurado_de is None
+        and "recomeçou vazio" in aviso_de_resgate("O histórico de conversas", resgate_h),
+        "sem cópia, o banco recomeça vazio — e o aviso diz isso",
+    )
+    historico.close()
+    checar(
+        "começou um caderno novo" in aviso_de_resgate("O caderno de vocabulário", Resgate(Path("x.sqlite3"))),
+        "o caderno sem cópia avisa que começou um novo",
+    )
+
+    saudavel = Path(tempfile.mkdtemp())
+    inteiro, nenhum = abrir_com_resgate(VocabularyStore, saudavel / "vocabulario.sqlite3")
+    checar(nenhum is None and sorted(p.name for p in saudavel.iterdir())[0] == "vocabulario.sqlite3",
+           "um banco saudável abre direto, sem resgate nenhum")
+    inteiro.close()
+
+    travado = Path(tempfile.mkdtemp())
+    (travado / "vocabulario.sqlite3").write_bytes(lixo)
+
+    def abrir_travado(_caminho: Path) -> VocabularyStore:
+        raise sqlite3.OperationalError("database is locked")
+
+    try:
+        abrir_com_resgate(abrir_travado, travado / "vocabulario.sqlite3")
+        checar(False, "um banco travado não é mexido: o erro sobe e o arquivo fica")
+    except sqlite3.OperationalError:
+        checar(
+            [p.name for p in travado.iterdir()] == ["vocabulario.sqlite3"],
+            "um banco travado não é mexido: o erro sobe e o arquivo fica",
+        )
+
 
 def teste_backup() -> None:
     """Cópia diária do caderno com rotação.
@@ -3469,6 +3571,7 @@ def main() -> int:
         teste_ferramenta_de_mutantes,
         teste_temporarios_da_suite,
         teste_dados_de_fora,
+        teste_resgate_dos_bancos,
     ):
         try:
             teste()

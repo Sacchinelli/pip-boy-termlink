@@ -310,25 +310,32 @@ class VocabularyStore:
         self.path = path
         self._lock = threading.Lock()
         self._connection = conectar(path)
-        with self._lock:
-            self._connection.executescript(_SCHEMA)
-            existentes = {
-                linha[1]
-                for linha in self._connection.execute("PRAGMA table_info(vocabulario)")
-            }
-            nasceram = []
-            for coluna, definicao in _MIGRACOES:
-                if coluna not in existentes:
-                    self._connection.execute(
-                        f"ALTER TABLE vocabulario ADD COLUMN {coluna} {definicao}"
-                    )
-                    nasceram.append(coluna)
-            self._connection.executescript(_INDICES)
-            self._connection.commit()
-            if "busca" in nasceram:
-                self._recarregar_busca()
-            migrar_para_utc(self._connection, CARIMBOS)
-            self._limitar_intervalos()
+        try:
+            with self._lock:
+                self._connection.executescript(_SCHEMA)
+                existentes = {
+                    linha[1]
+                    for linha in self._connection.execute("PRAGMA table_info(vocabulario)")
+                }
+                nasceram = []
+                for coluna, definicao in _MIGRACOES:
+                    if coluna not in existentes:
+                        self._connection.execute(
+                            f"ALTER TABLE vocabulario ADD COLUMN {coluna} {definicao}"
+                        )
+                        nasceram.append(coluna)
+                self._connection.executescript(_INDICES)
+                self._connection.commit()
+                if "busca" in nasceram:
+                    self._recarregar_busca()
+                migrar_para_utc(self._connection, CARIMBOS)
+                self._limitar_intervalos()
+        except BaseException:
+            # Quem não termina de abrir fecha a conexão: aberta, ela segura o
+            # arquivo no Windows, e um banco danificado não poderia ser
+            # guardado de lado (ver banco.abrir_com_resgate).
+            self._connection.close()
+            raise
 
     def _limitar_intervalos(self) -> None:
         """Traz de volta as palavras agendadas além do teto (ver MAX_INTERVALO_DIAS).

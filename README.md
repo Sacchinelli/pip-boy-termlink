@@ -414,6 +414,7 @@ As respostas de ferramenta também emagreceram: `consultar_vocabulario` devolvia
 
 ## Problemas comuns
 
+- **O programa avisou que o caderno estava danificado:** um arquivo de banco corrompido (queda de energia no meio de uma gravação, disco com defeito) não impede mais o programa de abrir. O arquivo danificado é guardado ao lado, como `vocabulario.danificado-AAAAMMDD-HHMMSS.sqlite3` na pasta de dados — nada é apagado —, e o caderno volta da cópia diária mais recente que abrir (as cópias ficam em `backups/`, uma por dia, as sete últimas). Sem cópia, começa um caderno novo. O histórico de conversas recomeça vazio, porque não tem cópia por projeto. Travamento e falta de permissão não disparam nada disso: o resgate é só para arquivo que deixou de ser um banco legível.
 - **`py` não é reconhecido:** instale o Python 3.10+ marcando "Add to PATH".
 - **A barra de tarefas mostra o ícone do Python:** era assim até a identidade do processo (AppUserModelID) ser declarada no arranque. Se ainda acontecer, o Windows está com o ícone em cache: feche o programa, aguarde alguns segundos e abra de novo.
 - **A janela não abre e o console fala em `PySide6`:** rode `py -m pip install -r requirements.txt`. A interface depende do Qt.
