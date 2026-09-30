@@ -55,7 +55,8 @@ RECEITAS: dict[str, ReceitaSonora] = {
     "Red Dead": ReceitaSonora("triangular", 247.0, 494.0),
     "GTA": ReceitaSonora("senoide", 440.0, 880.0),
     "Cyberpunk 2077": ReceitaSonora("quadrada", 523.0, 1046.0),  # netrunner
-    "FPS / Multiplayer": ReceitaSonora("senoide", 494.0, 988.0),
+    # Rádio de esquadrão: quadrada e grave, o estalo de um canal abrindo.
+    "FPS / Multiplayer": ReceitaSonora("quadrada", 311.0, 622.0),
 }
 RECEITA_PADRAO = ReceitaSonora()
 

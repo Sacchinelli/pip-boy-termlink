@@ -151,7 +151,7 @@ class CartaoTermo(QFrame):
     INTENCAO_MS = 70
     DESLIZE = 10.0
     TAMANHO_ACAO = 28
-    MARGENS = (16, 13, 13, 13)  # esquerda, topo, direita, base
+    MARGENS = (16, 11, 12, 10)  # esquerda, topo, direita, base
 
     def __init__(
         self,
@@ -189,10 +189,16 @@ class CartaoTermo(QFrame):
 
         coluna = QVBoxLayout(self)
         coluna.setContentsMargins(*self.MARGENS)
-        coluna.setSpacing(5)
+        coluna.setSpacing(4)
 
+        # Termo e tradução na MESMA linha: são um par, e é como par que se lê
+        # um caderno de vocabulário — "wasteland  terra devastada". Empilhados,
+        # cada palavra gastava uma linha a mais, e a janela mostrava duas
+        # palavras e meia de uma lista que se consulta de relance. O contraste
+        # entre os dois é tipográfico (a fonte do jogo, em negrito, contra a
+        # neutra), e não um travessão a mais entre eles.
         topo = QHBoxLayout()
-        topo.setSpacing(10)
+        topo.setSpacing(14)
         # O termo usa a fonte do TEMA: é a palavra do jogo, a única coisa nesta
         # janela que veio de lá. Tradução e metadados ficam na fonte neutra.
         termo = QLabel(entrada.termo)
@@ -202,8 +208,17 @@ class CartaoTermo(QFrame):
             f" background: transparent; {self._realce(tema, tema.primary)}"
         )
         termo.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        topo.addWidget(termo)
-        topo.addStretch(1)
+        topo.addWidget(termo, 0, Qt.AlignmentFlag.AlignTop)
+
+        traducao = QLabel(entrada.traducao)
+        traducao.setWordWrap(True)
+        traducao.setFont(janela.fonte("corpo"))
+        traducao.setStyleSheet(
+            f"color: {design.garantir_contraste(tema.primary, self._fundo)};"
+            f" background: transparent; padding-top: 1px; {self._realce(tema, tema.primary)}"
+        )
+        traducao.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        topo.addWidget(traducao, 1, Qt.AlignmentFlag.AlignTop)
 
         texto_selo, papel_selo = _selo(entrada)
         selo = QLabel(texto_selo)
@@ -212,18 +227,8 @@ class CartaoTermo(QFrame):
             f"color: {design.garantir_contraste(getattr(tema, papel_selo), self._fundo)};"
             " background: transparent;"
         )
-        topo.addWidget(selo)
+        topo.addWidget(selo, 0, Qt.AlignmentFlag.AlignTop)
         coluna.addLayout(topo)
-
-        traducao = QLabel(entrada.traducao)
-        traducao.setWordWrap(True)
-        traducao.setFont(janela.fonte("corpo"))
-        traducao.setStyleSheet(
-            f"color: {design.garantir_contraste(tema.primary, self._fundo)};"
-            f" background: transparent; {self._realce(tema, tema.primary)}"
-        )
-        traducao.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        coluna.addWidget(traducao)
 
         if entrada.exemplo:
             exemplo = QLabel(entrada.exemplo)
@@ -522,14 +527,24 @@ class JanelaCaderno(QDialog):
         moldura.addWidget(corpo, 1)
 
         coluna = QVBoxLayout(corpo)
-        coluna.setContentsMargins(24, 22, 24, 20)
+        coluna.setContentsMargins(24, 16, 24, 20)
         coluna.setSpacing(14)
 
-        self.titulo = QLabel("CADERNO DE VOCABULÁRIO", objectName="cadernoTitulo")
-        coluna.addWidget(self.titulo)
+        # Título e números numa linha só. O título era "CADERNO DE VOCABULÁRIO"
+        # em corpo de exibição, logo abaixo de uma barra de título que já diz
+        # "Caderno de vocabulário" — e com os números numa linha própria por
+        # baixo, o cabeçalho gastava mais de um terço da janela antes da
+        # primeira palavra. Uma palavra basta na fonte do jogo, como em
+        # PROGRESSO; os números vão ao lado dela, alinhados pela base.
+        cabecalho = QHBoxLayout()
+        cabecalho.setSpacing(16)
+        self.titulo = QLabel("CADERNO", objectName="cadernoTitulo")
+        cabecalho.addWidget(self.titulo, 0, Qt.AlignmentFlag.AlignBottom)
         self.resumo = QLabel("", objectName="cadernoResumo")
         self.resumo.setWordWrap(True)
-        coluna.addWidget(self.resumo)
+        self.resumo.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
+        cabecalho.addWidget(self.resumo, 1, Qt.AlignmentFlag.AlignBottom)
+        coluna.addLayout(cabecalho)
 
         self.busca = QLineEdit(objectName="cadernoBusca")
         self.busca.setPlaceholderText("Buscar por termo, tradução ou exemplo…")
@@ -603,19 +618,22 @@ class JanelaCaderno(QDialog):
         self.contagem = QLabel("", objectName="cadernoContagem")
         rodape.addWidget(self.contagem)
         rodape.addStretch(1)
-        # A revisão offline mora aqui, ao lado do dado que ela consome: cobra
-        # as vencidas com a mesma repetição espaçada do Quiz, mas sem sessão,
-        # sem rede e sem gastar um token.
+        # A ordem é a da hierarquia: as ações de arquivo e o painel de números
+        # primeiro, discretas, e a revisão por ÚLTIMO, à direita, onde o olho
+        # procura a ação principal. Um "Fechar" em cor de acento disputava
+        # esse lugar com ela — e fechar já tinha o × da barra de título e o
+        # Esc, como em toda janela do sistema. Saiu.
         self.botao_progresso = Botao("◔   Progresso", variante="sutil", paleta=self._janela.paleta)
         self.botao_progresso.setToolTip("O caderno em números: ritmo, domínio e jogos")
         self.botao_progresso.clicked.connect(self._abrir_progresso)
-        rodape.addWidget(self.botao_progresso)
+        # A revisão offline mora aqui, ao lado do dado que ela consome: cobra
+        # as vencidas com a mesma repetição espaçada do Quiz, mas sem sessão,
+        # sem rede e sem gastar um token.
         self.botao_revisar = Botao("▶   Revisar", variante="primario", paleta=self._janela.paleta)
         self.botao_revisar.setToolTip(
             "Cartões das palavras vencidas — funciona offline, sem gastar tokens"
         )
         self.botao_revisar.clicked.connect(self._abrir_revisao)
-        rodape.addWidget(self.botao_revisar)
         # O resultado da exportação ia só para o registro da janela principal,
         # que fica ATRÁS deste caderno: o seletor de arquivo fechava e nada mais
         # acontecia. A confirmação agora aparece no botão que foi clicado.
@@ -633,16 +651,16 @@ class JanelaCaderno(QDialog):
         )
         self.botao_importar.clicked.connect(self._janela.importar_vocabulario)
         rodape.addWidget(self.botao_importar)
-        self.botao_fechar = Botao("Fechar", variante="acento", paleta=self._janela.paleta)
-        self.botao_fechar.clicked.connect(self.close)
-        rodape.addWidget(self.botao_fechar)
+        rodape.addWidget(self.botao_progresso)
+        rodape.addSpacing(8)
+        rodape.addWidget(self.botao_revisar)
         coluna.addLayout(rodape)
 
         # O rodapé responde ao cursor como os botões da janela principal: cada
         # um é puxado de leve pelo mouse que se aproxima e acende antes do toque.
         for botao in (
             self.botao_progresso, self.botao_revisar, self.botao_exportar,
-            self.botao_importar, self.botao_fechar,
+            self.botao_importar,
         ):
             botao.tornar_magnetico(4)
         # A mesma resposta ao cursor da janela principal, com o cenário daqui:
@@ -687,7 +705,7 @@ class JanelaCaderno(QDialog):
         self.campo_jogo.definir_cor_luz(t.primary, raio_borda=raio)
         for botao in (
             self.botao_progresso, self.botao_revisar, self.botao_exportar,
-            self.botao_importar, self.botao_fechar,
+            self.botao_importar,
         ):
             botao.setFont(janela.fonte("corpo_forte"))
             botao.forma = forma
@@ -787,6 +805,28 @@ class JanelaCaderno(QDialog):
     # -------------------------------------------------------------- conteúdo
     def _agendar_busca(self, _texto: str) -> None:
         self._espera.start()
+
+    def procurar(self, termo: str) -> None:
+        """Mostra ``termo`` na lista, venha ele de onde vier.
+
+        Escrever na busca não basta: o caderno guarda o filtro e o jogo da
+        última visita, e uma palavra dominada procurada com "Para revisar"
+        ligado daria lista vazia — quem pediu a palavra pediu a palavra, e não
+        a interseção dela com o que estava marcado da visita passada.
+
+        A busca acontece agora, sem os 180 ms do amortecedor: ele existe para
+        quem digita letra a letra, e aqui o termo chega inteiro de uma vez.
+        """
+        self.campo_jogo.blockSignals(True)
+        self.campo_jogo.setCurrentText(TODOS_OS_JOGOS)
+        self.campo_jogo.blockSignals(False)
+        self._filtro = FILTRO_TODAS
+        for chave, chip in self.chips.items():
+            chip.setChecked(chave == FILTRO_TODAS)
+        self.busca.setText(termo)
+        self._espera.stop()
+        self.busca.setFocus()
+        self.atualizar(animar=True)
 
     def _escolher_filtro(self, valor: str) -> None:
         self._filtro = valor

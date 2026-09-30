@@ -100,6 +100,19 @@ class ResumoDeSessao:
     modo: str
     nivel: str
     falas: int
+    # A primeira coisa que o jogador perguntou. É o que distingue uma conversa
+    # da outra numa lista — a data, o jogo e o modo se repetem a semana
+    # inteira; a pergunta não. Vazia quando a sessão não teve fala dele.
+    abertura: str = ""
+
+
+# A primeira fala do JOGADOR na sessão ``s``. Subconsulta, e não junção: é uma
+# linha por sessão, e o índice (sessao_id, id) a resolve lendo só o começo da
+# conversa, em vez de agrupar a conversa inteira para descartar quase tudo.
+_ABERTURA_SQL = (
+    "(SELECT a.texto FROM falas a WHERE a.sessao_id = s.id AND a.tag = 'usuario' "
+    "ORDER BY a.id LIMIT 1) AS abertura"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -321,7 +334,7 @@ class HistoricoStore:
         with self._lock:
             rows = self._connection.execute(
                 "SELECT s.id, s.iniciada_em, s.jogo, s.modo, s.nivel, "
-                "COUNT(f.id) AS falas "
+                f"COUNT(f.id) AS falas, {_ABERTURA_SQL} "
                 "FROM sessoes s LEFT JOIN falas f ON f.sessao_id = s.id "
                 "GROUP BY s.id ORDER BY s.iniciada_em DESC, s.id DESC LIMIT ?",
                 (max(1, limite),),
@@ -330,6 +343,7 @@ class HistoricoStore:
             ResumoDeSessao(
                 int(r["id"]), str(r["iniciada_em"]), str(r["jogo"]),
                 str(r["modo"]), str(r["nivel"]), int(r["falas"]),
+                str(r["abertura"] or ""),
             )
             for r in rows
         ]
@@ -347,7 +361,7 @@ class HistoricoStore:
         with self._lock:
             row = self._connection.execute(
                 "SELECT s.id, s.iniciada_em, s.jogo, s.modo, s.nivel, "
-                "COUNT(f.id) AS falas "
+                f"COUNT(f.id) AS falas, {_ABERTURA_SQL} "
                 "FROM sessoes s LEFT JOIN falas f ON f.sessao_id = s.id "
                 "WHERE s.id = ? GROUP BY s.id",
                 (sessao_id,),
@@ -357,6 +371,7 @@ class HistoricoStore:
         return ResumoDeSessao(
             int(row["id"]), str(row["iniciada_em"]), str(row["jogo"]),
             str(row["modo"]), str(row["nivel"]), int(row["falas"]),
+            str(row["abertura"] or ""),
         )
 
     def periodos(self) -> list[tuple[int, str, str]]:
@@ -417,7 +432,8 @@ class HistoricoStore:
                 "  WHERE busca LIKE ? ESCAPE '\\' GROUP BY sessao_id"
                 ") "
                 "SELECT s.id, s.iniciada_em, s.jogo, s.modo, s.nivel, c.casam, "
-                "(SELECT COUNT(*) FROM falas f WHERE f.sessao_id = s.id) AS falas "
+                "(SELECT COUNT(*) FROM falas f WHERE f.sessao_id = s.id) AS falas, "
+                f"{_ABERTURA_SQL} "
                 "FROM casados c JOIN sessoes s ON s.id = c.sessao_id "
                 "ORDER BY s.iniciada_em DESC, s.id DESC LIMIT ?",
                 (padrao, max(1, limite)),
@@ -427,6 +443,7 @@ class HistoricoStore:
                 ResumoDeSessao(
                     int(r["id"]), str(r["iniciada_em"]), str(r["jogo"]),
                     str(r["modo"]), str(r["nivel"]), int(r["falas"]),
+                    str(r["abertura"] or ""),
                 ),
                 int(r["casam"] or 0),
             )

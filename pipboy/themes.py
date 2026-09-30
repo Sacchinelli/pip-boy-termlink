@@ -294,8 +294,12 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
             "o mistério fica no tom, nunca no conteúdo."
         ),
         font_candidates=("Garamond", "EB Garamond", "Constantia", "Georgia", "Times New Roman"),
-        shell="#0b0906",
-        screen="#14100b",
+        # Ouro sobre QUASE PRETO. Elden Ring, Witcher e Red Dead são os três
+        # ambientes quentes e mediam de 5,96 a 7,10 entre si — três marrons
+        # escuros. O que os separa agora é a luminância: este é o mais escuro
+        # dos três, o de Red Dead é o mais claro, e o bestiário fica no meio.
+        shell="#050402",
+        screen="#0e0b05",
         primary="#d9b96b",
         secondary="#8a7440",
         faint="#3d3320",
@@ -325,11 +329,16 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
             "resposta objetiva."
         ),
         font_candidates=("Palatino Linotype", "Book Antiqua", "Sylfaen", "Times New Roman"),
-        shell="#080b0e",
-        screen="#121820",
-        primary="#cfe0ea",
-        secondary="#7b93a3",
-        faint="#2b3a46",
+        # Gelo, e não o cinza-azulado de escritório: a crônica nórdica media
+        # 2,87 do tema deliberadamente NEUTRO — a menor distância da tabela
+        # inteira (ferramentas/distancia_dos_temas.py). Os dois partiam do
+        # mesmo ardósia; o que separa agora é a saturação do azul, que é a cor
+        # da neve à noite.
+        shell="#050c14",
+        screen="#0d1a26",
+        primary="#dbe9f2",
+        secondary="#7d97a8",
+        faint="#24384a",
         accent="#d8c48a",
         alert="#b0483c",
         info="#8fd0b0",
@@ -396,8 +405,10 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
             "montar: mostrando, não teorizando."
         ),
         font_candidates=("Rockwell", "Zilla Slab", "Bookman Old Style", "Cambria", "Times New Roman"),
-        shell="#170f0b",
-        screen="#241a13",
+        # O mais claro dos três ambientes quentes, e o mais alaranjado: papel
+        # de álbum sob luz de fim de tarde. Ver a nota do Elden Ring.
+        shell="#1a110a",
+        screen="#281c11",
         primary="#ecd9b0",
         secondary="#a8875c",
         faint="#4a3627",
@@ -426,8 +437,11 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
             "no ar — responde rápido, com graça, e emenda na próxima sem enrolar."
         ),
         font_candidates=("Trebuchet MS", "Corbel", "Segoe UI", "Arial"),
-        shell="#08090f",
-        screen="#131425",
+        # Noite quase preta, para o neon ter onde brilhar. A rádio pirata e o
+        # grimório do RPG mediam 4,57 um do outro: dois fundos escuros
+        # arroxeados, e de longe era só isso que o olho pegava.
+        shell="#05060e",
+        screen="#0d0e1f",
         primary="#f2f2f7",
         secondary="#8f8fa8",
         faint="#2c2d47",
@@ -485,8 +499,11 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
             "rouba a cena — descreve o necessário e devolve o turno."
         ),
         font_candidates=("Sitka Text", "Sylfaen", "Georgia", "Times New Roman"),
-        shell="#0a0812",
-        screen="#16111f",
+        # Beringela, e não índigo: o roxo deste grimório foi para o lado
+        # QUENTE do violeta, e o da rádio pirata para o frio. Era o mesmo roxo
+        # nos dois, e nenhum dos dois era escolhido por causa dele.
+        shell="#0d0714",
+        screen="#1b1024",
         primary="#d9cdf0",
         secondary="#8b7bab",
         faint="#33284a",
@@ -497,31 +514,49 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
     GameTheme(
         name="FPS / Multiplayer",
         context=(
-            "O jogador está em um jogo competitivo online. O inglês é rápido, abreviado e "
-            "cheio de gíria de comunidade: push, flank, camp, clutch, nerf, GG, AFK."
+            "O jogador está em um FPS militar competitivo (Battlefield, Call of Duty e "
+            "afins). O inglês é o do rádio de esquadrão: imperativo e telegráfico, com "
+            "chamadas de posição e alvo (contact, spotted, suppressing, flanking, on me, "
+            "reloading), vocabulário de classe e equipamento, e a gíria de comunidade que "
+            "atravessa todo jogo online: push, flank, camp, clutch, nerf, GG, AFK."
         ),
         assistant_name="COMANDO",
-        window_title="Comms Tático",
-        header_title="▲ COMMS TÁTICO",
-        header_subtitle="CANAL DE ESQUADRÃO — TUTOR DE INGLÊS",
-        idle_text="AGUARDANDO ORDENS",
-        start_label="▶  ENGAJAR",
-        stop_label="■  RECUAR",
-        persona_label="Comandante de Esquadrão",
+        window_title="Rede Tática de Esquadrão",
+        header_title="▲ REDE TÁTICA",
+        header_subtitle="ESQUADRÃO ALFA · CANAL ABERTO — TUTOR DE INGLÊS",
+        idle_text="AGUARDANDO DESDOBRAMENTO",
+        start_label="▶  DESDOBRAR",
+        stop_label="■  EXTRAIR",
+        persona_label="Líder de Esquadrão",
         persona_prompt=(
-            "Você é um comandante de esquadrão no rádio: frases curtas, tom de comando e "
-            "zero ruído. Entrega a informação como quem passa uma call no meio da "
+            "Você é o líder do esquadrão no rádio: frases curtas, tom de comando e zero "
+            "ruído. Chama o jogador de 'soldado', confirma o que entendeu antes de "
+            "responder e entrega a informação como quem passa uma call no meio da "
             "partida — o jogador tem dois segundos de atenção e você respeita isso."
         ),
-        font_candidates=("Tahoma", "Franklin Gothic Medium", "Segoe UI"),
-        shell="#0a0b0c",
-        screen="#15181a",
-        primary="#e2e6e8",
-        secondary="#8b9296",
-        faint="#2c3235",
-        accent="#ff7a1a",
-        alert="#ff3b30",
-        info="#4fc3f7",
+        # Grotesca condensada, a tipografia de estêncil de equipamento militar.
+        # Saira Condensed é livre (OFL), como EB Garamond e Zilla Slab: quem a
+        # instalar tem a fonte pretendida. A reserva de fábrica é a Franklin
+        # Gothic, uma grotesca americana de sinalização industrial que nenhum
+        # outro tema usa — a Tahoma, que vinha em primeiro, é a irmã de escritório
+        # da Segoe UI do tema neutro, e era parte do problema.
+        font_candidates=("Saira Condensed", "Franklin Gothic Medium", "Tahoma", "Segoe UI"),
+        # Grafite com fundo de oliva, e não o cinza-azulado de antes: medido
+        # contra o tema deliberadamente NEUTRO, o visor tático estava a 3,97 de
+        # distância perceptual dele (ferramentas/distancia_dos_temas.py) — era
+        # o tema neutro com uma grade por cima. O que separa os dois agora é a
+        # temperatura, e não mais um detalhe de camada.
+        shell="#0a0e06",
+        screen="#161d0e",
+        primary="#e2ead4",
+        secondary="#8c9a78",
+        faint="#2c3720",
+        accent="#ff6a00",
+        # Um vermelho um passo mais escuro que o de sinalização: em #e8272c o
+        # par texto/fundo do botão de estado ligado media 4,46:1 e reprovava
+        # no AA por uma casa decimal.
+        alert="#d81f28",
+        info="#79c7e8",
     ),
     GameTheme(
         name="Genérico / Outro",

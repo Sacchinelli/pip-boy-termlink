@@ -18,6 +18,7 @@ import queue
 import threading
 import time
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -74,6 +75,7 @@ from .atalhos import Atalhos, globais_disponiveis
 from .atmosfera import Cenario, atmosfera_de
 from .caderno import JanelaCaderno
 from .componentes import (
+    Botao,
     CampoSelecao,
     Desvanecer,
     LuzDoCursor,
@@ -97,10 +99,12 @@ from .montagem import (
     GANHO_JOGO_PADRAO,
     GLIFO_MIC_ATIVO,
     GLIFO_MIC_MUDO,
+    LARGURA_TRILHO,
     NIVEIS_ATMOSFERA,
     NIVEIS_GANHO_JOGO,
 )
 from .movimento import SinalFlutuante
+from .paleta import PALAVRAS_DO_CADERNO, Comando, Paleta
 from .preferencias import Escolha, Marca, VinculoDePreferencias
 from .relogios import Batidas, Relogios
 from .tela_inicial import Resumo
@@ -146,6 +150,12 @@ class Sobreposicao(QWidget):
         if self._pintar_bordas is not None:
             self._pintar_bordas(pintor)
         pintor.end()
+
+
+# Abaixo desta largura de janela, a coluna lateral recolhe sozinha — a menos
+# que alguém a tenha aberto ou fechado à mão. A janela de abertura (1240 px)
+# fica acima; a mínima (980 px) e a metade de um monitor Full HD, abaixo.
+LARGURA_RECOLHE = 1180
 
 
 class Janela(QWidget):
@@ -489,6 +499,10 @@ class Janela(QWidget):
 
         self.barra_titulo = moldura.barra_titulo
         self.coluna_lateral = moldura.coluna_lateral
+        self.trilho = moldura.trilho
+        self.trilho_glifo = pecas.trilho.glifo
+        self.trilho_caderno = pecas.trilho.botao_caderno
+        self.trilho_historico = pecas.trilho.botao_historico
         self.lateral = moldura.lateral
         self.rolagem_lateral = moldura.rolagem_lateral
         self.rodape_lateral = moldura.rodape_lateral
@@ -513,6 +527,9 @@ class Janela(QWidget):
         self.chip_alto_falante = lateral.chip_alto_falante
         self.chip_jogo = lateral.chip_jogo
         self.chip_busca = lateral.chip_busca
+        self.ajustes_de_sessao = lateral.ajustes_de_sessao
+        self.bloco_volume = lateral.bloco_volume
+        self.resumo_sessao = lateral.resumo_sessao
 
         self.rotulo_caderno = rodape.rotulo_caderno
         self.botao_caderno = rodape.botao_caderno
@@ -572,6 +589,13 @@ class Janela(QWidget):
         # medida duas vezes por repintura, e a segunda apagava a primeira.
         self.marca.setText(t.header_title)
         self.submarca.setText(t.header_subtitle)
+        # O trilho leva a marca do jogo — o símbolo que abre o título dele —,
+        # e não um ícone genérico de menu: recolhida, a coluna continua
+        # dizendo em que ambiente se está.
+        partes_titulo = t.header_title.split()
+        self.trilho_glifo.setText(
+            partes_titulo[0] if partes_titulo and not partes_titulo[0].isalnum() else "◆"
+        )
 
         ativa = self._worker is not None
         self.botao_acao.setText(t.stop_label if ativa else t.start_label)
@@ -582,6 +606,7 @@ class Janela(QWidget):
             self.botao_acao, self.botao_mudo, self.botao_caderno,
             self.botao_historico, self.botao_enviar,
             self.chip_alto_falante, self.chip_jogo, self.chip_busca,
+            self.trilho_caderno, self.trilho_historico,
         ):
             botao.forma = self._atmosfera.forma
             botao.update()
@@ -625,7 +650,7 @@ class Janela(QWidget):
         tamanho do texto ajustável, "uma vez e nunca mais" vira "metade da
         janela ignora a escolha".
         """
-        self.coluna_lateral.setFixedWidth(self.largura_lateral)
+        self._aplicar_lateral()
         self.marca.setFont(self._ajustar_marca(self._tema.header_title))
         self.submarca.setFont(self.fonte("micro"))
         for rotulo in self._rotulos_secao:
@@ -636,7 +661,15 @@ class Janela(QWidget):
             campo.setFont(self.fonte("aux"))
         for chip in (self.chip_alto_falante, self.chip_jogo, self.chip_busca):
             chip.setFont(self.fonte("legenda"))
+        for rotulo_resumo in self.resumo_sessao.rotulos:
+            rotulo_resumo.setFont(self.fonte("rotulo"))
+        for valor_resumo in self.resumo_sessao.valores:
+            valor_resumo.setFont(self.fonte("aux"))
+        self.resumo_sessao.dica.setFont(self.fonte("micro"))
         self.rotulo_caderno.setFont(self.fonte("micro"))
+        self.trilho_glifo.setFont(self.fonte("display", ui=False))
+        for porta in (self.trilho_caderno, self.trilho_historico):
+            porta.setFont(self.fonte("titulo"))
         self.pilula.setFont(self.fonte("micro"))
         self.rotulo_meta.setFont(self._fonte_mono("micro"))
         self.entrada_texto.setFont(self.fonte("corpo"))
@@ -769,6 +802,7 @@ class Janela(QWidget):
 
     def resizeEvent(self, evento: Any) -> None:
         super().resizeEvent(evento)
+        self._aplicar_lateral()
         self._posicionar_veu()
         if hasattr(self, "_sobreposicao"):
             self._sobreposicao.setGeometry(self.rect())
@@ -1108,11 +1142,15 @@ class Janela(QWidget):
     def _atualizar_caderno(self) -> None:
         total = self._store.total()
         self._total_no_caderno = total
-        texto = f"Caderno · {total} termos"
+        texto = f"Caderno · {total} {'termo' if total == 1 else 'termos'}"
         vencidas = self._store.pendentes()
         if vencidas:
             texto += f"\n{vencidas} para revisar"
         self.rotulo_caderno.setText(texto)
+        # Na coluna recolhida, o contador vive na dica da porta do caderno.
+        self.trilho_caderno.setToolTip(
+            f"Caderno — {vencidas} para revisar (Ctrl+B)" if vencidas else "Caderno (Ctrl+B)"
+        )
         self.conversa.atualizar_inicial()
 
     def _definir_controles(self, ativa: bool, pode_parar: bool = True) -> None:
@@ -1135,8 +1173,51 @@ class Janela(QWidget):
         self.botao_acao.setEnabled(not (ativa and not pode_parar))
         self.conversa.definir_sessao_ativa(ativa)
         self.botao_mudo.setEnabled(ativa)
+        # Visíveis só com a sessão no ar: ver montagem._palco. O botão de ação
+        # fica na ponta direita da barra, então aparecer não o desloca.
+        self.botao_mudo.setVisible(ativa)
+        self.medidor.setVisible(ativa)
         self._relogios.medir_entrada(ativa)
         self._atualizar_medidor()
+        self._mostrar_resumo_da_sessao(ativa)
+
+    def linhas_do_resumo(self) -> list[tuple[str, str]]:
+        """O que vai na abertura da conexão, como a coluna o resume na sessão.
+
+        Lido dos PRÓPRIOS seletores, e não de uma cópia da configuração: é o
+        que eles mostram que o jogador escolheu, e é o que precisa continuar
+        visível quando eles se recolhem.
+        """
+        nomes = ("jogo", "persona", "nivel", "modo", "voz", "entrada", "saida")
+        linhas = [
+            (self.campos[nome].accessibleName(), self.campos[nome].currentText())
+            for nome in nomes
+        ]
+        opcoes = [
+            chip.text() for chip in (self.chip_alto_falante, self.chip_busca)
+            if chip.isChecked()
+        ]
+        if opcoes:
+            linhas.append(("Opções", " · ".join(opcoes)))
+        return linhas
+
+    def _mostrar_resumo_da_sessao(self, ativa: bool) -> None:
+        """Com a sessão no ar, os ajustes travados dão lugar ao resumo deles.
+
+        Ver ``montagem.ResumoDaSessao``. Continuam existindo — e travados —
+        por baixo: o resumo é o que se MOSTRA, e o travamento continua sendo o
+        que impede a troca.
+        """
+        if ativa:
+            self.resumo_sessao.definir(self.linhas_do_resumo())
+        self.resumo_sessao.setVisible(ativa)
+        self.ajustes_de_sessao.setVisible(not ativa)
+        self.bloco_volume.setVisible(not ativa)
+        # "Ouvir o jogo" só fica na coluna da sessão se der para mexer nele:
+        # sem dispositivo de loopback, ele é uma caixa cinza que não liga, e
+        # a coluna da sessão é justamente a que mostra só o que ainda vale.
+        self.chip_jogo.setVisible(not ativa or self.chip_jogo.isEnabled())
+        self._posicionar_veu()
 
     # ----------------------------------------------------------- Preferências
 
@@ -1209,10 +1290,6 @@ class Janela(QWidget):
         sistema inteiro quebraria o menu de pausa do jogo, que é exatamente
         onde este programa é usado.
         """
-        def focar_entrada() -> None:
-            self.entrada_texto.setFocus()
-            self.entrada_texto.selectAll()
-
         self._atalhos = Atalhos(
             self,
             locais={
@@ -1222,7 +1299,9 @@ class Janela(QWidget):
                 "Ctrl+H": self.abrir_historico,
                 "Ctrl+R": self.revisar_agora,
                 "Ctrl+M": self.entrar_modo_compacto,
-                "Ctrl+L": focar_entrada,
+                "Ctrl+L": self.focar_texto,
+                "Ctrl+K": self.abrir_paleta,
+                "Ctrl+\\": self.alternar_lateral,
             },
             # Pares, e não um dicionário: chaveado pela combinação, dois
             # atalhos com a mesma tecla no .env colapsariam num só antes de
@@ -1396,6 +1475,168 @@ class Janela(QWidget):
             return
         self.entrada_texto.clear()
         self._worker.send_text(texto)
+
+    # ------------------------------------------------------ Coluna lateral
+
+    @property
+    def lateral_recolhida(self) -> bool:
+        """A coluna está recolhida à faixa de ícones?
+
+        Quem decide é a escolha de quem usa, quando há uma; sem ela, a largura
+        da janela. É a mesma regra da atmosfera: o sistema propõe o padrão, e
+        a escolha feita à mão vale mesmo contrariando a proposta.
+        """
+        escolha = getattr(self, "_lateral_escolha", None)
+        if escolha is not None:
+            return bool(escolha)
+        return self.width() < LARGURA_RECOLHE
+
+    def alternar_lateral(self) -> None:
+        """Recolhe ou abre a coluna lateral (Ctrl+\\), e isso passa a valer."""
+        self._lateral_escolha = not self.lateral_recolhida
+        self._aplicar_lateral()
+
+    def _aplicar_lateral(self) -> None:
+        """Mostra a coluna inteira ou só a faixa de ícones, conforme a regra.
+
+        Numa janela estreita, 296 px de ajustes deixavam para a conversa o que
+        sobrava — e, com a sessão no ar, a coluna só tem o resumo e dois
+        controles. Recolhida, ela vira uma faixa com a marca do jogo e as duas
+        portas, e a conversa ganha a largura. Nada some de vez: os ajustes
+        voltam num clique ou num Ctrl+\\, e a paleta alcança todos eles com a
+        coluna fechada.
+        """
+        if not hasattr(self, "trilho"):
+            return  # a montagem ainda não terminou
+        recolhida = self.lateral_recolhida
+        largura = LARGURA_TRILHO if recolhida else self.largura_lateral
+        if self.coluna_lateral.width() != largura or self.coluna_lateral.minimumWidth() != largura:
+            self.coluna_lateral.setFixedWidth(largura)
+        self.rolagem_lateral.setVisible(not recolhida)
+        self.rodape_lateral.setVisible(not recolhida)
+        self.trilho.setVisible(recolhida)
+        botao = self.barra_titulo.botao_lateral
+        if botao is not None:
+            botao.definir_lateral_recolhida(recolhida)
+
+    def focar_texto(self) -> None:
+        """Leva o cursor para o campo de texto, com o que havia lá selecionado."""
+        self.entrada_texto.setFocus()
+        self.entrada_texto.selectAll()
+
+    def comandos(self) -> list[Comando]:
+        """Tudo o que a paleta alcança, montado a partir da própria janela.
+
+        A lista NÃO é escrita à mão: as opções saem dos seletores da lateral e
+        das chaves, lidos agora. Uma voz nova em ``VOZES``, um tema novo em
+        ``TEMAS``, um campo novo na coluna — todos entram na paleta sem que
+        ninguém precise lembrar de vir aqui, e uma lista copiada envelheceria
+        no primeiro acréscimo, em silêncio.
+
+        O que está desabilitado fica de fora: o seletor de jogo, durante uma
+        sessão, é cinza porque o contexto vai na abertura da conexão. Sem esta
+        regra a paleta seria a porta dos fundos para trocá-lo.
+
+        Iniciar uma sessão e enviar uma mensagem chamam a Live API e consomem
+        crédito; nenhum dos dois entra aqui. ENCERRAR entra: terminar não
+        custa, e é o que se procura com pressa.
+        """
+        lista = [
+            Comando("Abrir o caderno", "Ação", self.abrir_caderno, "Ctrl+B",
+                    "vocabulário palavras termos salvos"),
+            Comando("Ver o histórico", "Ação", self.abrir_historico, "Ctrl+H",
+                    "conversas sessões falas transcrição"),
+            Comando("Revisar cartões", "Ação", self.revisar_agora, "Ctrl+R",
+                    "estudar revisão vencidas repetição espaçada"),
+            Comando("Modo compacto", "Ação", self.entrar_modo_compacto, "Ctrl+M",
+                    "cápsula sobre o jogo janela pequena"),
+            Comando("Escrever no campo de texto", "Ação", self.focar_texto, "Ctrl+L",
+                    "digitar teclado mensagem"),
+            Comando(
+                "Mostrar a coluna lateral" if self.lateral_recolhida
+                else "Recolher a coluna lateral",
+                "Ação", self.alternar_lateral, "Ctrl+\\", "barra menu esconder ajustes",
+            ),
+        ]
+        if self.sessao_ativa:
+            lista.append(Comando("Encerrar a sessão", "Ação", self.encerrar_sessao, "Esc",
+                                 "parar terminar desligar"))
+            lista.append(Comando(
+                "Reativar o microfone" if self.mudo else "Silenciar o microfone",
+                "Ação", self.alternar_mudo, chaves="mudo mute voz microfone",
+            ))
+        for chip in (self.chip_alto_falante, self.chip_jogo, self.chip_busca):
+            if not chip.isEnabled():
+                continue
+            # O parâmetro com valor padrão amarra o alvo DESTA volta. Sem
+            # ele, as três fechaduras olhariam a mesma variável do laço, e a
+            # última venceria: os três comandos alternariam a busca na web.
+            def alternar(alvo: Botao = chip) -> None:
+                alvo.setChecked(not alvo.isChecked())
+
+            lista.append(Comando(
+                chip.text(), "Chave", alternar,
+                "ligada" if chip.isChecked() else "desligada",
+                "alternar ligar desligar",
+            ))
+        for campo in self.campos.values():
+            if not campo.isEnabled():
+                continue
+            rotulo = campo.accessibleName()
+            atual = campo.currentText()
+            for posicao in range(campo.count()):
+                valor = campo.itemText(posicao)
+
+                def escolher(alvo: CampoSelecao = campo, escolha: str = valor) -> None:
+                    alvo.setCurrentText(escolha)
+
+                lista.append(Comando(
+                    valor, rotulo, escolher, "atual" if valor == atual else "",
+                ))
+        return lista
+
+    def palavras_do_caderno(self, consulta: str) -> list[Comando]:
+        """As palavras do caderno que casam com ``consulta``, como comandos.
+
+        A paleta pergunta isto a cada tecla em vez de receber o caderno inteiro
+        na abertura: mil palavras viram mil objetos para mostrar sete, e o
+        banco já sabe procurar — por termo, tradução E exemplo, sem acento e
+        sem caixa, que é o mesmo caminho da busca do caderno.
+
+        A tradução e o exemplo vão nas CHAVES do comando, e não só na dica.
+        Foi o banco quem casou a busca com eles; sem isso o ranqueador da
+        paleta, que olha o título e as chaves, jogaria fora justamente a
+        palavra que o banco achou por "munição".
+        """
+        return [
+            Comando(
+                entrada.termo, "Caderno",
+                partial(self.procurar_no_caderno, entrada.termo),
+                entrada.traducao,
+                f"{entrada.traducao} {entrada.exemplo}",
+            )
+            for entrada in self._store.listar(busca=consulta, limite=PALAVRAS_DO_CADERNO)
+        ]
+
+    def procurar_no_caderno(self, termo: str) -> None:
+        """Abre o caderno já mostrando ``termo``."""
+        self.abrir_caderno()
+        if self._caderno is not None:
+            self._caderno.procurar(termo)
+
+    def abrir_paleta(self) -> None:
+        """A paleta de comandos (Ctrl+K).
+
+        A ação escolhida roda DEPOIS que a paleta fecha, e não de dentro dela:
+        "Revisar cartões" abre um modal, e um modal nascido dentro de outro
+        que está se fechando fica órfão de janela-mãe na hora de se posicionar.
+        """
+        paleta = Paleta(self, self.comandos(), extras=self.palavras_do_caderno)
+        paleta.exec()
+        escolhido = paleta.escolhido
+        paleta.deleteLater()
+        if escolhido is not None:
+            escolhido()
 
     def abrir_caderno(self) -> None:
         """Abre (ou traz para a frente) o visualizador do caderno.

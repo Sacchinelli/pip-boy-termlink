@@ -688,6 +688,15 @@ def main() -> int:
         "o modelo em uso aparece no rodapé da tela inicial",
     )
     checar(
+        not hasattr(tela, "comandos")
+        and tela.atalhos.text().index("Ctrl+K") < tela.atalhos.text().index("comandos"),
+        "os atalhos são uma linha só, e o Ctrl+K vem primeiro",
+    )
+    checar(
+        not tela.atalhos.isHidden(),
+        "e ela está sempre à vista: a paleta existe mesmo sem atalho global",
+    )
+    checar(
         tecla_legivel("ctrl+alt+p") == "Ctrl+Alt+P" and tecla_legivel("f12") == "F12",
         "as teclas do .env são escritas como se leem numa tecla",
     )
@@ -1160,8 +1169,8 @@ def main() -> int:
     )
     visor._busca.clear()
     checar(
-        visor._botao_fechar.font().pointSize() == janela.fonte("corpo_forte").pointSize(),
-        "os botões do rodapé usam a fonte dos outros botões",
+        visor._botao_apagar.font().pointSize() == janela.fonte("corpo_forte").pointSize(),
+        "o botão de apagar usa a fonte dos outros botões",
     )
 
     janela.campo_atmosfera.setCurrentText("Desligada")
@@ -1563,13 +1572,13 @@ def main() -> int:
     caderno_ima = janela._caderno
     assert caderno_ima is not None
     checar(
-        len(caderno_ima._campo_magnetico.botoes) == 5,
-        f"os cinco botões do rodapé do caderno são magnéticos ({len(caderno_ima._campo_magnetico.botoes)})",
+        len(caderno_ima._campo_magnetico.botoes) == 4,
+        f"os quatro botões do rodapé do caderno são magnéticos ({len(caderno_ima._campo_magnetico.botoes)})",
     )
-    fechar = caderno_ima.botao_fechar
-    mover_sobre(fechar, QPointF(fechar.width() - 2.0, fechar.height() / 2))
+    porta_ima = caderno_ima.botao_progresso
+    mover_sobre(porta_ima, QPointF(porta_ima.width() - 2.0, porta_ima.height() / 2))
     checar(
-        aguardar(lambda: fechar.deslocamento_ima.x() > 0.0),
+        aguardar(lambda: porta_ima.deslocamento_ima.x() > 0.0),
         "e o rastreador do caderno os puxa pelo cursor dele",
     )
     caderno_ima.close()
@@ -1888,11 +1897,11 @@ def main() -> int:
     assert caderno_borda is not None
     # A luz posta EM CIMA do botão do caderno, pela tela: a distância não o
     # recusa, e só a janela diferente pode.
-    fechar_borda = caderno_borda.botao_fechar
-    sobre_o_caderno = janela.mapFromGlobal(fechar_borda.mapToGlobal(fechar_borda.rect().center()))
+    porta_borda = caderno_borda.botao_progresso
+    sobre_o_caderno = janela.mapFromGlobal(porta_borda.mapToGlobal(porta_borda.rect().center()))
     assentar_cursor(QPointF(sobre_o_caderno))
     checar(
-        not acende(fechar_borda),
+        not acende(porta_borda),
         "a luz da janela principal não acende o que é de outra janela, nem passando por cima",
     )
     caderno_borda.close()
@@ -2566,8 +2575,8 @@ def main() -> int:
     aplicacao.processEvents()
     caderno_abraco = janela._caderno
     assert caderno_abraco is not None
-    fechar_abraco = caderno_abraco.botao_fechar
-    mover_sobre(fechar_abraco, QPointF(fechar_abraco.width() / 2, fechar_abraco.height() / 2))
+    porta_abraco = caderno_abraco.botao_progresso
+    mover_sobre(porta_abraco, QPointF(porta_abraco.width() / 2, porta_abraco.height() / 2))
     checar(
         aguardar(lambda: caderno_abraco._cenario.abracando),
         "no caderno, o anel abraça o botão sob o cursor",
@@ -2940,10 +2949,10 @@ def main() -> int:
         "o caderno recém-aberto não acende nada",
     )
     focar(caderno_foco.busca)
-    focar(caderno_foco.botao_fechar)
+    focar(caderno_foco.botao_progresso)
     checar(
         caderno_foco._cenario.cursor
-        == QPointF(caderno_foco.botao_fechar.mapTo(caderno_foco, caderno_foco.botao_fechar.rect().center())),
+        == QPointF(caderno_foco.botao_progresso.mapTo(caderno_foco, caderno_foco.botao_progresso.rect().center())),
         "mas o Tab dentro dele leva a luz do caderno junto",
     )
     caderno_foco.close()
@@ -2960,6 +2969,885 @@ def main() -> int:
     janela._cursor_mudou(None)
     janela.campo_atmosfera.setCurrentText(atmosfera_foco)
     aplicacao.processEvents()
+
+    print("a paleta alcança o que a janela faz")
+    from PySide6.QtGui import QKeyEvent
+
+    from pipboy.banco import dobrar
+    from pipboy.interface.paleta import LIMITE, Comando, Paleta, filtrar, pontuar
+
+    comandos = janela.comandos()
+    grupos = {c.grupo for c in comandos}
+    titulos = {c.titulo for c in comandos}
+    persona_antes = janela.campo_persona.currentText()
+    tamanho_antes = janela.campo_tamanho_texto.currentText()
+
+    # -- A lista é GERADA pelos seletores da lateral. Uma voz nova em VOZES
+    #    aparece aqui sem ninguém vir mexer na paleta; uma lista copiada à mão
+    #    envelheceria no primeiro acréscimo, em silêncio.
+    vozes = {janela.campo_voz.itemText(i) for i in range(janela.campo_voz.count())}
+    checar(
+        bool(vozes) and vozes <= titulos,
+        f"cada voz do seletor virou um comando ({len(vozes)} vozes)",
+    )
+    checar(
+        {c.grupo for c in comandos if c.titulo in vozes} == {"Voz"},
+        "e o grupo delas é o rótulo do próprio campo",
+    )
+    rotulos = {c.accessibleName() for c in janela.campos.values() if c.isEnabled()}
+    checar(
+        len(rotulos) >= 8 and rotulos <= grupos,
+        f"todos os campos habilitados da lateral estão na paleta ({sorted(rotulos - grupos)})",
+    )
+    chaves = {
+        c.text(): c
+        for c in (janela.chip_alto_falante, janela.chip_jogo, janela.chip_busca)
+    }
+    checar(
+        {nome for nome, c in chaves.items() if c.isEnabled()} == titulos & set(chaves),
+        f"as chaves habilitadas também, e só elas ({sorted(titulos & set(chaves))})",
+    )
+    chave_af = next(c for c in comandos if c.titulo == "Alto-falante (anti-eco)")
+    checar(
+        chave_af.dica == ("ligada" if janela.chip_alto_falante.isChecked() else "desligada"),
+        f"a dica de uma chave diz como ela está ({chave_af.dica})",
+    )
+    atual_voz = next(c for c in comandos if c.titulo == janela.campo_voz.currentText())
+    checar(atual_voz.dica == "atual", "e o valor em uso se anuncia como o atual")
+
+    # -- Nada aqui abre conexão. Iniciar e enviar consomem crédito por minuto;
+    #    encerrar não custa e por isso entra, mas só quando há o que encerrar.
+    proibidas = (janela.iniciar_sessao, janela.alternar_sessao, janela.enviar_texto)
+    checar(
+        all(c.acao not in proibidas for c in comandos),
+        "a paleta não oferece nada que chame a API",
+    )
+    checar("Encerrar a sessão" not in titulos, "e sem sessão no ar, nem o encerrar aparece")
+
+    # -- O que a janela proíbe, a paleta proíbe: um campo desabilitado não
+    #    gera comando. Sem isto, trocar o jogo no meio de uma sessão — que a
+    #    lateral impede com um campo cinza — teria uma porta dos fundos.
+    janela.campo_jogo.setEnabled(False)
+    sem_jogo = janela.comandos()
+    janela.campo_jogo.setEnabled(True)
+    checar(
+        all(c.grupo != "Jogo" for c in sem_jogo),
+        "um seletor desabilitado não entra na paleta",
+    )
+    checar(any(c.grupo == "Jogo" for c in janela.comandos()), "e volta quando ele volta")
+
+    # -- A busca: por subsequência, sem acento e sem caixa.
+    checar(pontuar("acao", "Ação") is not None, "a busca ignora acento e caixa")
+    checar(pontuar("tamtex", "Tamanho do texto") is not None, "e casa letras salteadas")
+    checar(pontuar("zx", "Caderno") is None, "o que não está lá não casa")
+    achados_cad = filtrar(comandos, "cad")
+    checar(
+        achados_cad[0].comando.titulo == "Abrir o caderno",
+        f"'cad' põe o caderno em primeiro ({achados_cad[0].comando.titulo})",
+    )
+    marcado = "".join(achados_cad[0].comando.titulo[i] for i in achados_cad[0].marcas)
+    checar(dobrar(marcado) == "cad", f"e as marcas apontam as letras que casaram ({marcado})")
+    achados_voz = filtrar(comandos, "voz")
+    checar(
+        len(achados_voz) > 1 and all(a.comando.grupo == "Voz" for a in achados_voz),
+        "procurar pelo grupo traz o grupo inteiro",
+    )
+    checar(
+        all(a.marcas == () for a in achados_voz),
+        "sem acender letra nenhuma: o que casou foi o grupo, e não o título",
+    )
+    checar(len(filtrar(comandos, "a")) == LIMITE, f"a lista para em {LIMITE} linhas")
+    checar(
+        [a.comando for a in filtrar(comandos, "   ")] == comandos[:LIMITE],
+        "sem busca, as ações da janela — e não um retângulo vazio",
+    )
+
+    # -- A caixa: escolha pelo teclado, pelo mouse, e a ação devolvida em vez
+    #    de executada.
+    def teclar(alvo: QWidget, tecla: Qt.Key) -> None:
+        # No campo de busca, e não na paleta: as setas SOBEM do QLineEdit para
+        # o diálogo, e é essa subida que deixa a lista ser percorrida sem
+        # tirar o foco de onde se digita.
+        QApplication.sendEvent(
+            alvo, QKeyEvent(QEvent.Type.KeyPress, tecla, Qt.KeyboardModifier.NoModifier)
+        )
+
+    paleta = Paleta(janela, comandos)
+    paleta.show()
+    aplicacao.processEvents()
+    checar(paleta.focusWidget() is paleta.campo, "a paleta abre com o foco no campo de busca")
+    checar(
+        paleta.escolha is not None and paleta.linhas[0].escolhida,
+        "com a primeira linha escolhida",
+    )
+    primeira = paleta.escolha
+    teclar(paleta.campo, Qt.Key.Key_Down)
+    checar(paleta.escolha is not primeira and paleta.linhas[1].escolhida, "a seta desce")
+    teclar(paleta.campo, Qt.Key.Key_Up)
+    checar(paleta.escolha is primeira, "e volta")
+    teclar(paleta.campo, Qt.Key.Key_Up)
+    checar(
+        paleta.escolha is comandos[LIMITE - 1],
+        "subir na primeira dá a volta e cai na última",
+    )
+    entrar(paleta.linhas[2], 20.0, 10.0)
+    aplicacao.processEvents()
+    checar(paleta.escolha is comandos[2], "o mouse escolhe a linha por onde passa")
+
+    paleta.campo.setText("historico")
+    aplicacao.processEvents()
+    escolhida = paleta.escolha
+    checar(
+        escolhida is not None and escolhida.titulo == "Ver o histórico",
+        f"digitar refaz a lista ({None if escolhida is None else escolhida.titulo})",
+    )
+    paleta._ativar()
+    checar(
+        paleta.escolhido == janela.abrir_historico and not paleta.isVisible(),
+        "o Enter fecha a paleta e GUARDA a ação, em vez de executá-la de dentro",
+    )
+
+    paleta_vazia = Paleta(janela, comandos)
+    paleta_vazia.show()
+    paleta_vazia.campo.setText("qzqzqz")
+    aplicacao.processEvents()
+    checar(
+        paleta_vazia.escolha is None and paleta_vazia.vazio.isVisible(),
+        "sem resultado, a paleta diz que não achou",
+    )
+    paleta_vazia._ativar()
+    checar(paleta_vazia.escolhido is None, "e o Enter não escolhe nada")
+    checar(not paleta_vazia.grab().isNull(), "a paleta se desenha")
+    paleta_vazia.close()
+
+    # -- Cada comando mexe no SEU campo. Sem o alvo amarrado em cada fechadura,
+    #    todas olhariam a última variável do laço e mexeriam no mesmo lugar.
+    voz_antiga = janela.campo_voz.currentText()
+    outra_voz = next(v for v in sorted(vozes) if v != voz_antiga)
+    next(c for c in comandos if c.titulo == outra_voz and c.grupo == "Voz").acao()
+    aplicacao.processEvents()
+    checar(
+        janela.campo_voz.currentText() == outra_voz
+        and janela.campo_persona.currentText() == persona_antes
+        and janela.campo_tamanho_texto.currentText() == tamanho_antes,
+        f"escolher uma voz mexe só no campo dela ({janela.campo_voz.currentText()})",
+    )
+    janela.campo_voz.setCurrentText(voz_antiga)
+    af_antes, web_antes = janela.chip_alto_falante.isChecked(), janela.chip_busca.isChecked()
+    chave_af.acao()
+    checar(
+        janela.chip_alto_falante.isChecked() is not af_antes
+        and janela.chip_busca.isChecked() is web_antes,
+        "e alternar uma chave alterna só aquela chave",
+    )
+    chave_af.acao()
+
+    # -- A elisão: um nome de microfone não cabe na linha, e a letra que sumiu
+    #    não pode ser acesa em cima das reticências.
+    linha_teste = paleta.linhas[0]
+    linha_teste.definir(Comando("Microfone comprido demais", "Áudio", lambda: None), (2, 20))
+    checar(
+        linha_teste._marcas_visiveis("Microfone com…") == (2,),
+        "a letra acesa que a elisão comeu não é pintada",
+    )
+    paleta.close()
+
+    # -- Ctrl+K abre de verdade, e a ação escolhida roda com a janela de volta.
+    def _escolher_na_paleta() -> None:
+        ativo = aplicacao.activeModalWidget()
+        if isinstance(ativo, Paleta):
+            ativo.campo.setText("caderno")
+            ativo._ativar()
+        elif ativo is not None:
+            ativo.close()
+
+    QTimer.singleShot(150, _escolher_na_paleta)
+    # Rede de segurança: um exec() sem ninguém para fechá-lo penduraria a suíte.
+    QTimer.singleShot(2500, _escolher_na_paleta)
+    janela.abrir_paleta()
+    aplicacao.processEvents()
+    checar(
+        janela._caderno is not None and janela._caderno.isVisible(),
+        "Ctrl+K, 'caderno' e Enter abrem o caderno depois que a paleta fecha",
+    )
+    if janela._caderno is not None:
+        janela._caderno.close()
+    aplicacao.processEvents()
+
+    print("a paleta acha as palavras do caderno")
+    from pipboy.vocabulary import FILTRO_DOMINADAS
+
+    # -- O caderno entra na paleta pelo BANCO, a cada tecla: uma lista montada
+    #    na abertura viraria mil objetos para mostrar sete.
+    achadas = janela.palavras_do_caderno("wast")
+    palavra = next((c for c in achadas if c.titulo == "wasteland"), None)
+    checar(
+        palavra is not None and palavra.grupo == "Caderno",
+        f"uma palavra do caderno vira comando ({[c.titulo for c in achadas]})",
+    )
+    # A tradução vem do banco, e não da constante do começo da suíte: as seções
+    # anteriores editam o caderno, e uma tradução escrita à mão aqui envelhece.
+    entrada_w = janela._store.entrada("wasteland")
+    assert entrada_w is not None
+    checar(
+        palavra is not None and palavra.dica == entrada_w.traducao,
+        f"com a tradução como dica ({None if palavra is None else palavra.dica})",
+    )
+    checar(
+        any(
+            c.titulo == "wasteland"
+            for c in janela.palavras_do_caderno(entrada_w.traducao)
+        ),
+        f"e o banco a acha também pela tradução ({entrada_w.traducao})",
+    )
+
+    # -- Casar INTEIRO vale mais que casar salteado. Sem esta regra, "muni"
+    #    prendia o 'm' no primeiro "ammo" do texto procurável e a palavra que o
+    #    banco achou pela tradução ficava atrás de qualquer rótulo de raspão.
+    trecho = pontuar("muni", "ammo Caderno municao")
+    checar(
+        trecho is not None and trecho[1] == (13, 14, 15, 16),
+        f"o trecho que aparece inteiro vence a varredura gulosa ({trecho})",
+    )
+    checar(
+        (pontuar("muni", "ammo Caderno municao") or (0, ()))[0]
+        > (pontuar("muni", "Médio Volume do jogo na mistura") or (0, ()))[0],
+        "e por isso a palavra do caderno passa na frente do rótulo salteado",
+    )
+    checar(
+        (pontuar("am", "teams ammo") or (0, ()))[1] == (6, 7),
+        "e entre duas aparições inteiras ganha a que começa uma palavra",
+    )
+
+    # -- A tradução precisa estar nas CHAVES, e não só na dica: sem isso o
+    #    ranqueador da paleta descartaria justamente o que o banco achou.
+    quantas = [0]
+
+    def extras_contadas(consulta: str) -> list[Comando]:
+        quantas[0] += 1
+        return janela.palavras_do_caderno(consulta)
+
+    paleta_palavras = Paleta(janela, janela.comandos(), extras=extras_contadas)
+    paleta_palavras.show()
+    aplicacao.processEvents()
+    paleta_palavras.campo.setText(entrada_w.traducao)
+    aplicacao.processEvents()
+    escolha_palavra = paleta_palavras.escolha
+    checar(
+        escolha_palavra is not None and escolha_palavra.titulo == "wasteland",
+        f"procurar pela tradução acha a palavra na paleta "
+        f"({None if escolha_palavra is None else escolha_palavra.titulo})",
+    )
+    paleta_palavras.campo.setText("wasteland")
+    aplicacao.processEvents()
+    checar(
+        paleta_palavras.escolha is not None
+        and paleta_palavras.escolha.titulo == "wasteland",
+        "e a palavra digitada por inteiro ganha das ações que casaram de raspão",
+    )
+
+    # -- Uma letra só não vai ao banco: traria a primeira palavra qualquer, e
+    #    cobraria uma consulta por tecla para mostrar o que ninguém pediu.
+    quantas[0] = 0
+    paleta_palavras.campo.setText("w")
+    aplicacao.processEvents()
+    checar(quantas[0] == 0, f"com uma letra, a paleta não pergunta ao caderno ({quantas[0]})")
+    paleta_palavras.campo.setText("wa")
+    aplicacao.processEvents()
+    checar(quantas[0] == 1, f"com duas, pergunta ({quantas[0]})")
+    paleta_palavras.close()
+
+    # -- Escolher a palavra abre o caderno MOSTRANDO ela, e não o caderno como
+    #    ele ficou da última visita.
+    caderno_paleta = janela._caderno
+    if caderno_paleta is None:
+        janela.abrir_caderno()
+        caderno_paleta = janela._caderno
+    assert caderno_paleta is not None
+    caderno_paleta._escolher_filtro(FILTRO_DOMINADAS)
+    aplicacao.processEvents()
+    checar(
+        "wasteland" not in [c._entrada.termo for c in caderno_paleta._cartoes],
+        "com 'dominadas' ligado, a palavra não aparece",
+    )
+    assert palavra is not None
+    palavra.acao()
+    aplicacao.processEvents()
+    checar(
+        caderno_paleta.isVisible() and caderno_paleta.busca.text() == "wasteland",
+        "a palavra da paleta abre o caderno com ela na busca",
+    )
+    checar(
+        [c._entrada.termo for c in caderno_paleta._cartoes] == ["wasteland"],
+        f"e o filtro guardado da visita passada não a esconde "
+        f"({[c._entrada.termo for c in caderno_paleta._cartoes]})",
+    )
+    caderno_paleta.busca.clear()
+    caderno_paleta.close()
+    aplicacao.processEvents()
+
+    print("o visor do FPS enquadra a tela")
+    from dataclasses import replace as trocar_campos
+
+    from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_VISOR
+    from pipboy.interface.atmosfera import Cenario as CenarioVisor
+    from pipboy.interface.moldura import ALTURA_BARRA
+    from pipboy.themes import TEMAS as TEMAS_VISOR
+
+    receita_visor = RECEITAS_VISOR["FPS / Multiplayer"]
+    checar(receita_visor.cantoneiras > 0, "o tema de FPS pede o enquadramento")
+
+    def tinta_do_visor(largura: int, altura: int, forca: float) -> tuple[bytes, int, int]:
+        """Só a camada de cantoneiras, sobre o vazio: tinta total e onde ela cai."""
+        imagem = QImage(largura, altura, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem.fill(0)
+        pintor = QPainter(imagem)
+        pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+        CenarioVisor._camada_cantoneiras(
+            pintor, largura, altura,
+            trocar_campos(receita_visor, cantoneiras=forca),
+            TEMAS_VISOR["FPS / Multiplayer"],
+        )
+        pintor.end()
+        alfas = bytes(imagem.constBits())[3::4]
+        acesos = [i for i, a in enumerate(alfas) if a]
+        primeira = min((i // largura for i in acesos), default=-1)
+        return bytes(alfas), sum(alfas), primeira
+
+    _, tinta_cheia, topo_aceso = tinta_do_visor(900, 600, receita_visor.cantoneiras)
+    _, tinta_fraca, _ = tinta_do_visor(900, 600, receita_visor.cantoneiras * 0.4)
+    checar(tinta_cheia > 0, f"a camada desenha alguma coisa ({tinta_cheia} de tinta)")
+    checar(
+        tinta_fraca < tinta_cheia * 0.6,
+        f"e uma atmosfera mais fraca desenha menos tinta ({tinta_fraca} contra {tinta_cheia})",
+    )
+    checar(
+        topo_aceso >= ALTURA_BARRA,
+        f"o enquadramento começa ABAIXO da barra de título ({topo_aceso} >= {ALTURA_BARRA}): "
+        "a 16 px do alto ele riscava o botão de fechar",
+    )
+
+    # Colchetes, e não moldura: o miolo da tela fica limpo.
+    alfas_visor, _, _ = tinta_do_visor(900, 600, receita_visor.cantoneiras)
+    miolo = sum(
+        alfas_visor[y * 900 + x]
+        for y in range(150, 450)
+        for x in range(225, 675)
+    )
+    checar(miolo == 0, f"e o miolo da tela fica intocado ({miolo})")
+    # Colchetes de CANTO: a borda de cima não é um traço de ponta a ponta. Uma
+    # moldura fechada tem o mesmo miolo vazio e diz outra coisa — ela emoldura
+    # um quadro, e não enquadra um alvo.
+    faixa = range(topo_aceso - 2, topo_aceso + 3)
+    colunas = sum(
+        1 for x in range(900)
+        if any(alfas_visor[y * 900 + x] for y in faixa if 0 <= y < 600)
+    )
+    checar(
+        colunas < 900 * 0.25,
+        f"e a borda de cima só acende nos cantos e no tique do meio ({colunas} de 900 colunas)",
+    )
+
+    _, tinta_minima, _ = tinta_do_visor(200, 140, receita_visor.cantoneiras)
+    checar(
+        tinta_minima == 0,
+        f"numa janela pequena demais ele não aparece ({tinta_minima}): quatro colchetes "
+        "encostando um no outro viram moldura, que é o oposto de enquadramento",
+    )
+
+    # A intensidade da atmosfera atenua a camada como todas as outras.
+    cenario_visor = CenarioVisor()
+    cenario_visor.definir(TEMAS_VISOR["FPS / Multiplayer"], receita_visor)
+    cenario_visor.definir_intensidade(0.5)
+    checar(
+        abs(cenario_visor._efetiva.cantoneiras - receita_visor.cantoneiras * 0.5) < 1e-9,
+        f"a atmosfera 'Discreta' atenua o enquadramento ({cenario_visor._efetiva.cantoneiras})",
+    )
+    cenario_visor.definir_intensidade(0.0)
+    checar(
+        cenario_visor._efetiva.cantoneiras == 0.0,
+        "e a 'Desligada' o apaga",
+    )
+
+    print("cada ambiente tem uma camada só dele")
+    # As camadas de assinatura são o que impede um ambiente de ser outro com
+    # outra cor. A régua (ferramentas/distancia_dos_temas.py) media 2,87 entre
+    # Skyrim e o tema NEUTRO, e 4,57 entre a rádio pirata e o grimório: dois
+    # fundos escuros parecidos e nada que dissesse de que jogo eram.
+    assinaturas = {
+        "aurora": "Skyrim",
+        "selo": "RPG / Aventura (geral)",
+        "horizonte": "GTA",
+        "arranhoes": "Red Dead",
+        "cantoneiras": "FPS / Multiplayer",
+    }
+    for campo, dono in assinaturas.items():
+        donos = sorted(
+            nome for nome, r in RECEITAS_VISOR.items() if getattr(r, campo) > 0
+        )
+        checar(donos == [dono], f"'{campo}' é assinatura de um ambiente só ({donos})")
+
+    def alfas_da_camada(
+        metodo: str, jogo: str, largura: int = 900, altura: int = 600, forca: float = -1.0
+    ) -> bytes:
+        """Só a camada pedida, sobre o vazio, no tema de quem a declara."""
+        receita = RECEITAS_VISOR[jogo]
+        campo = metodo.replace("_camada_", "")
+        if forca >= 0.0:
+            receita = trocar_campos(receita, **{campo: forca})
+        imagem = QImage(largura, altura, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem.fill(0)
+        pintor = QPainter(imagem)
+        pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+        getattr(CenarioVisor, metodo)(pintor, largura, altura, receita, TEMAS_VISOR[jogo])
+        pintor.end()
+        return bytes(imagem.constBits())[3::4]
+
+    # -- A aurora fica no CÉU: metade de cima, e não espalhada pela janela.
+    ceu = alfas_da_camada("_camada_aurora", "Skyrim")
+    tinta_alta = sum(ceu[: 300 * 900])
+    tinta_baixa = sum(ceu[300 * 900 :])
+    checar(
+        tinta_alta > tinta_baixa * 3,
+        f"a aurora fica no alto do céu ({tinta_alta} contra {tinta_baixa} embaixo)",
+    )
+    checar(
+        sum(alfas_da_camada("_camada_aurora", "Skyrim", forca=0.0)) == 0,
+        "e com a atmosfera desligada não existe",
+    )
+
+    # -- O selo é um ANEL: o miolo dele fica vazio, ou vira uma mancha por
+    #    cima do texto em vez de uma marca-d'água na página.
+    pagina = alfas_da_camada("_camada_selo", "RPG / Aventura (geral)")
+    centro_selo = sum(
+        pagina[y * 900 + x]
+        for y in range(int(600 * 0.52) - 40, int(600 * 0.52) + 40)
+        for x in range(int(900 * 0.66) - 40, int(900 * 0.66) + 40)
+    )
+    checar(sum(pagina) > 0 and centro_selo == 0, f"o selo é um anel, e não um disco ({centro_selo})")
+
+    # -- O horizonte é uma linha BAIXA, com o brilho subindo dela.
+    cidade = alfas_da_camada("_camada_horizonte", "GTA")
+    linhas = [sum(cidade[y * 900 : (y + 1) * 900]) for y in range(600)]
+    mais_acesa = linhas.index(max(linhas))
+    checar(
+        0.70 < mais_acesa / 600 < 0.78,
+        f"a linha do horizonte fica no terço de baixo ({mais_acesa / 600:.2f} da altura)",
+    )
+    checar(
+        sum(linhas[: int(600 * 0.4)]) == 0,
+        "e o céu acima dela fica limpo: o brilho sobe só um pedaço",
+    )
+
+    # -- Os arranhões são VERTICAIS: poucas colunas, muitas linhas.
+    pelicula = alfas_da_camada("_camada_arranhoes", "Red Dead")
+    colunas_risco = sum(
+        1 for x in range(900) if any(pelicula[y * 900 + x] for y in range(0, 600, 3))
+    )
+    linhas_risco = sum(
+        1 for y in range(600) if any(pelicula[y * 900 + x] for x in range(0, 900, 3))
+    )
+    checar(
+        0 < colunas_risco < 60 and linhas_risco > 300,
+        f"os riscos da película são verticais ({colunas_risco} colunas, {linhas_risco} linhas)",
+    )
+
+    # -- Todas as quatro obedecem à intensidade da atmosfera, como as antigas.
+    for campo, jogo in (
+        ("aurora", "Skyrim"), ("selo", "RPG / Aventura (geral)"),
+        ("horizonte", "GTA"), ("arranhoes", "Red Dead"),
+    ):
+        cheia = sum(alfas_da_camada(f"_camada_{campo}", jogo))
+        fraca = sum(alfas_da_camada(f"_camada_{campo}", jogo, forca=0.2 * getattr(
+            RECEITAS_VISOR[jogo], campo
+        )))
+        checar(
+            0 < fraca < cheia * 0.5,
+            f"a atmosfera atenua '{campo}' ({fraca} contra {cheia})",
+        )
+        # E pelo caminho de verdade: quem atenua é a receita EFETIVA, a que a
+        # intensidade escolhida no seletor produz. As medidas acima passam a
+        # força na mão e não provariam nada sobre esse caminho.
+        cenario_camada = CenarioVisor()
+        cenario_camada.definir(TEMAS_VISOR[jogo], RECEITAS_VISOR[jogo])
+        cenario_camada.definir_intensidade(0.5)
+        declarado = getattr(RECEITAS_VISOR[jogo], campo)
+        checar(
+            abs(getattr(cenario_camada._efetiva, campo) - declarado * 0.5) < 1e-9,
+            f"e a atmosfera 'Discreta' pela metade em '{campo}' "
+            f"({getattr(cenario_camada._efetiva, campo)})",
+        )
+
+    print("a sessão ganha a lateral")
+    # Parada, a coluna mostra os ajustes; no ar, o resumo do que está valendo.
+    # Os seletores travados eram uma parede cinza que empurrava para baixo da
+    # dobra os dois controles que ainda funcionavam.
+    janela._definir_controles(ativa=False)
+    aplicacao.processEvents()
+    checar(
+        not janela.ajustes_de_sessao.isHidden() and janela.resumo_sessao.isHidden(),
+        "parada, a coluna mostra os ajustes e esconde o resumo",
+    )
+
+    # A busca na web é ajuste de ENSINO (como o tutor responde), e não de áudio.
+    checar(
+        janela.chip_busca.parent() is janela.ajustes_de_sessao
+        and janela.chip_busca.y() < janela.campo_entrada.y()
+        and janela.chip_busca.y() > janela.campo_voz.y(),
+        "a busca na web mora com os ajustes de ensino, logo depois da voz",
+    )
+    checar(
+        janela.botao_caderno.y() == janela.botao_historico.y()
+        and janela.botao_caderno.x() < janela.botao_historico.x(),
+        "caderno e histórico ficam lado a lado no rodapé da coluna",
+    )
+
+    janela.chip_busca.setChecked(True)
+    janela.chip_alto_falante.setChecked(False)
+    janela._definir_controles(ativa=True)
+    aplicacao.processEvents()
+    checar(
+        janela.ajustes_de_sessao.isHidden() and not janela.resumo_sessao.isHidden()
+        and janela.bloco_volume.isHidden(),
+        "no ar, os ajustes travados saem e o resumo entra no lugar",
+    )
+    linhas_resumo = dict(janela.resumo_sessao.linhas)
+    checar(
+        linhas_resumo.get("Jogo") == janela.campo_jogo.currentText()
+        and linhas_resumo.get("Voz") == janela.campo_voz.currentText()
+        and linhas_resumo.get("Microfone") == janela.campo_entrada.currentText(),
+        f"o resumo diz o que os próprios seletores escolheram ({linhas_resumo.get('Jogo')})",
+    )
+    checar(
+        linhas_resumo.get("Opções") == "Busca na web",
+        f"e as opções ligadas, e só elas ({linhas_resumo.get('Opções')})",
+    )
+    checar(
+        all(not c.isEnabled() for n, c in janela.campos.items()
+            if n not in ("atmosfera", "tamanho_texto")),
+        "o travamento continua por baixo: esconder não é destravar",
+    )
+    checar(
+        janela.campo_atmosfera.isEnabled() and janela.campo_tamanho_texto.isEnabled()
+        and not janela.campo_atmosfera.isHidden(),
+        "e os dois controles de apresentação continuam à vista e vivos",
+    )
+    checar(
+        "encerre a sessão" in janela.resumo_sessao.dica.text(),
+        "o resumo termina dizendo como trocar",
+    )
+
+    # "Ouvir o jogo" só fica na coluna da sessão se der para mexer nele.
+    habilitado_antes = janela.chip_jogo.isEnabled()
+    janela.chip_jogo.setEnabled(False)
+    janela._definir_controles(ativa=True)
+    checar(janela.chip_jogo.isHidden(), "sem loopback, 'ouvir o jogo' some da coluna da sessão")
+    janela.chip_jogo.setEnabled(True)
+    janela._definir_controles(ativa=True)
+    checar(not janela.chip_jogo.isHidden(), "com loopback, ele fica: é o único ajuste de áudio vivo")
+    janela.chip_jogo.setEnabled(habilitado_antes)
+
+    janela.chip_busca.setChecked(False)
+    janela._definir_controles(ativa=True)
+    checar(
+        "Opções" not in dict(janela.resumo_sessao.linhas),
+        "sem opção ligada, a linha de opções não aparece vazia",
+    )
+
+    janela._definir_controles(ativa=False)
+    aplicacao.processEvents()
+    checar(
+        not janela.ajustes_de_sessao.isHidden() and janela.resumo_sessao.isHidden()
+        and not janela.bloco_volume.isHidden() and not janela.chip_jogo.isHidden(),
+        "ao encerrar, a coluna volta a ser a dos ajustes",
+    )
+
+    print("as ações ficam no lugar da importância delas")
+    from PySide6.QtGui import QKeyEvent as TeclaAcao
+
+    janela.abrir_caderno()
+    aplicacao.processEvents()
+    caderno_acoes = janela._caderno
+    assert caderno_acoes is not None
+    checar(
+        not hasattr(caderno_acoes, "botao_fechar"),
+        "o caderno não repete o × da barra de título com um botão 'Fechar'",
+    )
+    rodape_botoes = sorted(
+        (caderno_acoes.botao_exportar, caderno_acoes.botao_importar,
+         caderno_acoes.botao_progresso, caderno_acoes.botao_revisar),
+        key=lambda b: b.x(),
+    )
+    checar(
+        rodape_botoes[-1] is caderno_acoes.botao_revisar,
+        "a revisão, que é a ação principal, fica por último, à direita",
+    )
+    QApplication.sendEvent(
+        caderno_acoes,
+        TeclaAcao(QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier),
+    )
+    aplicacao.processEvents()
+    checar(not caderno_acoes.isVisible(), "e o Esc fecha o caderno, como fechava o botão")
+
+    janela.abrir_historico()
+    aplicacao.processEvents()
+    visor_acoes = janela._visor_historico
+    assert visor_acoes is not None
+    checar(
+        not hasattr(visor_acoes, "_botao_fechar"),
+        "o histórico também não repete o × da barra de título",
+    )
+    checar(
+        visor_acoes._botao_apagar.variante == "perigo_sutil",
+        "apagar a sessão é discreto em repouso: o destrutivo não é o mais chamativo",
+    )
+    checar(
+        abs(visor_acoes._botao_apagar.y() - visor_acoes._cabecalho.y()) < 24,
+        "e fica no cabeçalho da conversa que ele apaga, e não num rodapé",
+    )
+    QApplication.sendEvent(
+        visor_acoes,
+        TeclaAcao(QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier),
+    )
+    aplicacao.processEvents()
+    checar(not visor_acoes.isVisible(), "e o Esc fecha o histórico")
+
+    print("o histórico se lê de relance")
+    from datetime import datetime as Instante
+    from datetime import timedelta as Intervalo
+    from datetime import timezone as Fuso
+
+    from pipboy.interface.historico import _data_amigavel
+
+    fuso_local = Instante.now().astimezone().tzinfo
+    referencia = Instante(2026, 9, 24, 22, 50, tzinfo=fuso_local)
+
+    def ha(dias: int, hora: int = 21, minuto: int = 5) -> str:
+        instante = (referencia - Intervalo(days=dias)).replace(hour=hora, minute=minuto)
+        return instante.astimezone(Fuso.utc).isoformat()
+
+    checar(_data_amigavel(ha(0), referencia) == "Hoje, 21:05", "o mesmo dia é 'Hoje'")
+    checar(_data_amigavel(ha(1), referencia) == "Ontem, 21:05", "o dia anterior é 'Ontem'")
+    checar(
+        _data_amigavel(ha(3), referencia) == "Seg, 21:05",
+        f"nesta semana, o dia da semana ({_data_amigavel(ha(3), referencia)})",
+    )
+    checar(
+        _data_amigavel(ha(40), referencia) == "15 ago, 21:05",
+        f"neste ano, dia e mês em português ({_data_amigavel(ha(40), referencia)})",
+    )
+    checar(
+        _data_amigavel(ha(400), referencia) == "20 ago 2025",
+        f"de outro ano, o ano no lugar da hora ({_data_amigavel(ha(400), referencia)})",
+    )
+    checar(_data_amigavel("não é data", referencia) == "não é data", "texto estranho passa intacto")
+
+    relance = HistoricoStore(dados / "historico.sqlite3")
+    com_pergunta = relance.iniciar_sessao(jogo="Fallout")
+    relance.registrar_fala(com_pergunta, autor="PIP-BOY", tag="assistente", texto="Pronto.")
+    relance.registrar_fala(com_pergunta, autor="VOCÊ", tag="usuario", texto="o que é feral?")
+    relance.registrar_fala(com_pergunta, autor="PIP-BOY", tag="assistente", texto="Selvagem.")
+    relance.registrar_fala(com_pergunta, autor="PIP-BOY", tag="assistente", texto="Como gato de rua.")
+    janela.abrir_historico()
+    aplicacao.processEvents()
+    visor_relance = janela._visor_historico
+    assert visor_relance is not None
+    visor_relance.recarregar()
+    aplicacao.processEvents()
+    item_relance = visor_relance._itens_lista[com_pergunta]
+    checar(
+        item_relance.text().startswith("“o que é feral?”"),
+        f"a conversa na lista se chama pela primeira pergunta ({item_relance.text().splitlines()[0]})",
+    )
+    checar(
+        "Fallout · Hoje" in item_relance.text() and "4 falas" in item_relance.text(),
+        "e o jogo, o quando e o tamanho vão na linha de baixo",
+    )
+    visor_relance._itens_lista[com_pergunta].click()
+    aplicacao.processEvents()
+    blocos_relance = [
+        visor_relance._pilha_falas.itemAt(i).widget()
+        for i in range(visor_relance._pilha_falas.count() - 1)
+    ]
+    legendas = [b.text().count("font-size") for b in blocos_relance if isinstance(b, QLabel)]
+    checar(
+        legendas == [1, 1, 1, 0],
+        f"quem fala vira legenda, e só quando muda de pessoa ({legendas})",
+    )
+    checar(
+        all("—" not in b.text().split("</div>")[0] for b in blocos_relance if isinstance(b, QLabel)),
+        "o nome não vem mais colado na fala com travessão",
+    )
+    visor_relance.close()
+    relance.remover_sessao(com_pergunta)
+
+    print("o caderno se lê como pares")
+    janela.abrir_caderno()
+    aplicacao.processEvents()
+    caderno_pares = janela._caderno
+    assert caderno_pares is not None
+    caderno_pares.atualizar()
+    aplicacao.processEvents()
+    cartao_par = caderno_pares._cartoes[0]
+    rotulos_par = cartao_par.findChildren(QLabel)
+    termo_par = next(r for r in rotulos_par if r.text() == cartao_par._entrada.termo)
+    traducao_par = next(r for r in rotulos_par if r.text() == cartao_par._entrada.traducao)
+    checar(
+        abs(termo_par.y() - traducao_par.y()) <= 3 and traducao_par.x() > termo_par.x(),
+        "termo e tradução dividem a linha, como um par — e não uma pilha de três andares",
+    )
+    titulo_cab, resumo_cab = caderno_pares.titulo, caderno_pares.resumo
+    checar(
+        titulo_cab.text() == "CADERNO"
+        and titulo_cab.geometry().bottom() >= resumo_cab.geometry().top()
+        and resumo_cab.x() > titulo_cab.x(),
+        "o título não repete a barra de título, e os números moram na linha dele",
+    )
+    caderno_pares.close()
+    aplicacao.processEvents()
+
+    print("a palavra salva fica junto de quem a ensinou")
+    from pipboy.events import Tag as TagNota
+
+    janela.conversa.limpar()
+    janela._registrar("Wasteland é terra devastada.", TagNota.ASSISTENTE, "PIP-BOY")
+    janela._registrar("⊕ wasteland — terra devastada", TagNota.VOCAB)
+    janela._registrar("E ammo?", TagNota.USUARIO, "Você")
+    janela._registrar("⊕ ammo — munição", TagNota.VOCAB)
+    aplicacao.processEvents()
+    itens_nota = janela.conversa._itens
+    nota_tutor, nota_jogador = itens_nota[1], itens_nota[3]
+    meio_nota = janela.conversa.viewport().width() / 2
+    rotulo_tutor = nota_tutor.findChild(QLabel)
+    rotulo_jogador = nota_jogador.findChild(QLabel)
+    assert rotulo_tutor is not None and rotulo_jogador is not None
+    checar(
+        rotulo_tutor.geometry().right() < meio_nota,
+        "depois da fala do tutor, a anotação fica do lado dele, e não no meio do painel",
+    )
+    checar(
+        rotulo_jogador.geometry().left() > meio_nota,
+        "e depois de uma fala do jogador, do lado do jogador",
+    )
+    janela.conversa.limpar()
+    aplicacao.processEvents()
+
+    print("em repouso, o topo mostra só o que se pode fazer")
+    janela._definir_controles(ativa=False)
+    aplicacao.processEvents()
+    checar(
+        janela.botao_mudo.isHidden() and janela.medidor.isHidden()
+        and not janela.botao_acao.isHidden(),
+        "sem sessão, o Mudo e o medidor ficam fora: a única ação é iniciar",
+    )
+    direita_parada = janela.botao_acao.geometry().right()
+    janela._definir_controles(ativa=True)
+    aplicacao.processEvents()
+    checar(
+        not janela.botao_mudo.isHidden() and not janela.medidor.isHidden(),
+        "com a sessão no ar, os dois aparecem",
+    )
+    checar(
+        janela.botao_acao.geometry().right() == direita_parada,
+        "e o botão principal não sai do lugar quando eles chegam",
+    )
+    janela._definir_controles(ativa=False)
+    aplicacao.processEvents()
+    checar(janela.botao_mudo.isHidden(), "ao encerrar, o Mudo sai de novo")
+
+    # Um botão escondido não é puxado pelo cursor que passa onde ele estava.
+    # Habilitado de propósito: em repouso o Mudo também está desabilitado, e
+    # um botão desabilitado já não sente o ímã — sem isto a checagem passaria
+    # pela regra errada.
+    mudo_escondido = janela.botao_mudo
+    mudo_escondido.setEnabled(True)
+    mudo_escondido.atrair(None)
+    onde_estava = QPointF(mudo_escondido.mapTo(janela, mudo_escondido.rect().center()))
+    janela._campo_magnetico.mover(onde_estava)
+    aplicacao.processEvents()
+    esperar(300)
+    checar(
+        mudo_escondido.deslocamento_ima.x() == 0.0 and mudo_escondido.deslocamento_ima.y() == 0.0,
+        f"o ímã não puxa botão escondido ({mudo_escondido.deslocamento_ima})",
+    )
+    janela._campo_magnetico.mover(None)
+    mudo_escondido.setEnabled(False)
+
+    print("a coluna lateral recolhe")
+    from pipboy.interface.janela import LARGURA_RECOLHE
+    from pipboy.interface.montagem import LARGURA_TRILHO
+
+    tamanho_trilho = janela.size()
+    janela._lateral_escolha = None
+    janela.resize(1240, 860)
+    aplicacao.processEvents()
+    checar(
+        not janela.lateral_recolhida and not janela.rolagem_lateral.isHidden()
+        and janela.trilho.isHidden(),
+        "na janela de abertura, a coluna está inteira",
+    )
+    janela.resize(LARGURA_RECOLHE - 200, 620)
+    aplicacao.processEvents()
+    checar(
+        janela.lateral_recolhida and janela.coluna_lateral.width() == LARGURA_TRILHO
+        and janela.rolagem_lateral.isHidden() and janela.rodape_lateral.isHidden()
+        and not janela.trilho.isHidden(),
+        f"numa janela estreita, ela recolhe sozinha à faixa ({janela.coluna_lateral.width()} px)",
+    )
+    checar(
+        janela.trilho_glifo.text() == janela.tema.header_title.split()[0],
+        "e a faixa leva a marca do jogo, e não um ícone genérico",
+    )
+    botao_coluna = janela.barra_titulo.botao_lateral
+    assert botao_coluna is not None
+    checar(
+        botao_coluna.toolTip().startswith("Mostrar"),
+        "o botão da barra de título diz o que o clique vai fazer",
+    )
+
+    # A escolha à mão vale mais que a largura, nos dois sentidos.
+    janela.alternar_lateral()
+    aplicacao.processEvents()
+    checar(
+        not janela.lateral_recolhida and not janela.rolagem_lateral.isHidden(),
+        "aberta à mão numa janela estreita, ela abre",
+    )
+    janela.resize(LARGURA_RECOLHE - 190, 620)
+    aplicacao.processEvents()
+    checar(not janela.lateral_recolhida, "e continua aberta quando a janela mexe")
+    janela.alternar_lateral()
+    janela.resize(1240, 860)
+    aplicacao.processEvents()
+    checar(
+        janela.lateral_recolhida and janela.coluna_lateral.width() == LARGURA_TRILHO,
+        "fechada à mão, fica fechada mesmo numa janela larga",
+    )
+    comando_coluna = next(c for c in janela.comandos() if c.acao == janela.alternar_lateral)
+    checar(
+        comando_coluna.titulo == "Mostrar a coluna lateral",
+        f"a paleta oferece o caminho de volta ({comando_coluna.titulo})",
+    )
+
+    # As portas continuam funcionando com a coluna recolhida.
+    janela.trilho_caderno.click()
+    aplicacao.processEvents()
+    checar(
+        janela._caderno is not None and janela._caderno.isVisible(),
+        "a porta do caderno na faixa abre o caderno",
+    )
+    janela._caderno.close()
+    aplicacao.processEvents()
+
+    # Sem mudar de tamanho não há evento de redimensionamento: a regra é
+    # reaplicada à mão, como faria o próximo arrasto da borda.
+    janela._lateral_escolha = None
+    janela.resize(tamanho_trilho)
+    janela._aplicar_lateral()
+    aplicacao.processEvents()
+    checar(
+        not janela.lateral_recolhida and janela.coluna_lateral.width() == janela.largura_lateral,
+        "sem escolha à mão, a largura volta a decidir",
+    )
 
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()
@@ -2985,8 +3873,9 @@ def main() -> int:
         for a in janela.findChildren(QShortcut, options=Qt.FindChildOption.FindDirectChildrenOnly)
     }
     checar(
-        instalados == {"F12", "Esc", "Ctrl+B", "Ctrl+H", "Ctrl+R", "Ctrl+M", "Ctrl+L"},
-        f"os sete atalhos locais estão instalados ({sorted(instalados)})",
+        instalados
+        == {"F12", "Esc", "Ctrl+B", "Ctrl+H", "Ctrl+R", "Ctrl+M", "Ctrl+L", "Ctrl+K", "Ctrl+\\"},
+        f"os nove atalhos locais estão instalados ({sorted(instalados)})",
     )
     janela.conversa.setFocus()
     aplicacao.processEvents()

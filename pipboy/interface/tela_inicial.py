@@ -24,6 +24,7 @@ aparece é a ``Conversa``.
 
 from __future__ import annotations
 
+import html
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -539,7 +540,15 @@ class TelaInicial(QWidget):
         base = QVBoxLayout(rodape)
         base.setContentsMargins(0, design.ESPACO_MD, 0, 0)
         base.setSpacing(2)
+        # Os atalhos numa linha só, e o Ctrl+K primeiro: a paleta é invisível
+        # por natureza, ninguém descobre um Ctrl+K sozinho, e é aqui que quem
+        # está parado na tela inicial procura o que fazer. Eram três linhas
+        # soltas no pé do painel — atalhos globais, paleta, diagnóstico —, todas
+        # na mesma cor apagada, e o olho não tinha onde pousar. Agora as TECLAS
+        # ficam legíveis e o que elas fazem, discreto; o diagnóstico, que é
+        # para quando algo dá errado, fica sozinho embaixo.
         self.atalhos = rotulo("inicialRodape")
+        self.atalhos.setTextFormat(Qt.TextFormat.RichText)
         self.diagnostico = rotulo("inicialRodape")
         base.addWidget(self.atalhos)
         base.addWidget(self.diagnostico)
@@ -613,11 +622,23 @@ class TelaInicial(QWidget):
         for ficha, frase in zip(self.fichas, frases, strict=True):
             ficha.definir_frase(frase)
 
-        self.atalhos.setText(
-            "Atalhos globais: "
-            + " · ".join(f"{tecla_legivel(tecla)} {acao}" for tecla, acao in resumo.atalhos)
-        )
-        self.atalhos.setVisible(bool(resumo.atalhos))
+        cor_tecla = design.garantir_contraste(t.primary, t.surface)
+
+        def tecla(texto: str) -> str:
+            return f'<span style="color:{cor_tecla};">{html.escape(texto)}</span>'
+
+        partes = [f"{tecla('Ctrl+K')} comandos"]
+        if resumo.atalhos:
+            # "De dentro do jogo" diz o que "global" dizia, na língua de quem
+            # joga: estes funcionam com o jogo em primeiro plano; o Ctrl+K, não.
+            partes.append(
+                "de dentro do jogo: "
+                + " · ".join(
+                    f"{tecla(tecla_legivel(combinacao))} {html.escape(acao)}"
+                    for combinacao, acao in resumo.atalhos
+                )
+            )
+        self.atalhos.setText("   ·   ".join(partes))
         self.diagnostico.setText(resumo.diagnostico)
 
         self.setStyleSheet(f"""
