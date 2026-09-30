@@ -384,6 +384,7 @@ pip-boy-termlink/
 - O áudio do microfone é enviado ao serviço Gemini. Se você ativar **Ouvir o jogo**, o áudio do jogo — incluindo vozes de outros jogadores em partidas online — também é enviado. Use apenas com quem sabe disso.
 - A retomada de sessão faz o servidor guardar o contexto da conversa por até algumas horas. Se isso for um problema para você, edite `session.py` e remova o campo `session_resumption`.
 - Revise `pipboy.log` antes de compartilhá-lo.
+- **O caderno trata como dado o que chega de fora.** O que o modelo grava — e ele escuta o áudio do jogo, uma fonte que ninguém controla — e o que se importa de um arquivo passam pela mesma limpeza: as tags de HTML conhecidas saem (sem apagar texto de jogo como *Press <E> to interact*), as entidades são desfeitas, e cada campo tem tamanho máximo (um termo de mais de 80 caracteres é recusado; tradução e exemplo são cortados). Na tela, os campos do caderno são sempre texto puro, e nunca HTML interpretado. E os argumentos do modelo são lidos pelo que dizem: um "errou" mandado como texto conta como erro.
 - O **histórico de sessões** (`historico.sqlite3`) guarda a transcrição das suas conversas com o tutor, apenas localmente. Sessões podem ser apagadas uma a uma pelo visualizador; apagar o arquivo remove tudo.
 
 ## Custos

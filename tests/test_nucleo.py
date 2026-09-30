@@ -1730,6 +1730,93 @@ def teste_temporarios_da_suite() -> None:
     )
 
 
+def teste_dados_de_fora() -> None:
+    """O que chega de fora — do modelo, de um arquivo — entra limpo no caderno.
+
+    O contrato: tags de HTML conhecidas saem e entidades são desfeitas, mas
+    texto de jogo com sinais de menor e maior fica ("Press <E> to interact");
+    os campos têm tamanho máximo; as buscas por termo usam a mesma limpeza da
+    gravação; e os booleanos do modelo são lidos pelo que dizem — "false" é
+    falso.
+    """
+    print("dados de fora")
+    from pipboy.tools import ToolDispatcher, booleano
+    from pipboy.vocabulary import (
+        MAX_EXEMPLO,
+        MAX_TERMO,
+        MAX_TRADUCAO,
+        interpretar_linha,
+        limpar_campo,
+    )
+
+    checar(
+        limpar_campo("<b>ammo</b>") == "ammo"
+        and limpar_campo('<span style="x">loot</span> <I>drop</I>') == "loot drop"
+        and limpar_campo("ammo &amp; loot") == "ammo & loot"
+        and limpar_campo("uma<br>linha") == "uma linha"
+        and limpar_campo("a\x00b\x1fc") == "a b c",
+        "tags conhecidas saem, entidades se desfazem, controle vira espaço",
+    )
+    checar(
+        limpar_campo("Press <E> to interact") == "Press <E> to interact"
+        and limpar_campo("<insert name>") == "<insert name>"
+        and limpar_campo("List<T>") == "List<T>" and limpar_campo("x < y") == "x < y",
+        "texto de jogo com < e > fica — só a marcação conhecida sai",
+    )
+    cortado = limpar_campo("x" * 500, MAX_TRADUCAO)
+    checar(
+        len(cortado) == MAX_TRADUCAO and cortado.endswith("…"),
+        "o que passa do limite é cortado com reticências, no tamanho exato",
+    )
+    checar(
+        interpretar_linha(["<b>bounty</b>", "recompensa<br><i>Press <E> to claim it.</i>", "Red Dead"])
+        == ("bounty", "recompensa", "Press <E> to claim it.", "Red Dead"),
+        "a importação limpa o termo também, e não come o <E> do exemplo",
+    )
+
+    store = VocabularyStore(Path(tempfile.mkdtemp()) / "fora.sqlite3")
+    entrada, _ = store.registrar("<b>ammo</b>", "muni&ccedil;&atilde;o", "I'm low on <i>ammo</i>.")
+    checar(
+        (entrada.termo, entrada.traducao, entrada.exemplo) == ("ammo", "munição", "I'm low on ammo."),
+        f"o que o modelo grava com marcação entra limpo ({entrada.termo!r}, {entrada.traducao!r})",
+    )
+    checar(
+        store.avaliar("<b>ammo</b>", True)["termo"] == "ammo" and store.entrada("<i>ammo</i>") is not None,
+        "e é achado pelo mesmo termo marcado: a busca usa a limpeza da gravação",
+    )
+    try:
+        store.registrar("x" * (MAX_TERMO + 1), "y")
+        checar(False, "um termo longo demais é recusado, e não cortado")
+    except ValueError:
+        checar(store.entrada("x" * MAX_TERMO) is None, "um termo longo demais é recusado, e não cortado")
+    longa, _ = store.registrar("loot", "t" * 999, "e" * 999)
+    checar(
+        len(longa.traducao) == MAX_TRADUCAO and len(longa.exemplo) == MAX_EXEMPLO,
+        "tradução e exemplo longos entram cortados no limite",
+    )
+
+    checar(
+        (booleano("false"), booleano("False "), booleano("true"), booleano("SIM"), booleano(True), booleano(0))
+        == (False, False, True, True, True, False),
+        "o booleano do modelo é lido pelo que diz: o texto \"false\" é falso",
+    )
+    ferramentas = ToolDispatcher(store, jogo="Fallout")
+    ferramentas.dispatch("avaliar_vocabulario", {"termo": "loot", "acertou": "false"})
+    entrada_loot = store.entrada("loot")
+    checar(
+        entrada_loot is not None and entrada_loot.erros == 1 and entrada_loot.acertos == 0,
+        "um erro dito como texto conta como erro, e não como acerto",
+    )
+    resposta = ferramentas.dispatch(
+        "registrar_vocabulario", {"termo": "z" * 500, "traducao": "nada"}
+    )
+    checar(
+        "erro" in resposta and store.total() == 2,
+        "o modelo que tenta gravar um termo de 500 caracteres recebe um erro, e nada entra",
+    )
+    store.close()
+
+
 def teste_backup() -> None:
     """Cópia diária do caderno com rotação.
 
@@ -3346,6 +3433,7 @@ def main() -> int:
         teste_nivel,
         teste_ferramenta_de_mutantes,
         teste_temporarios_da_suite,
+        teste_dados_de_fora,
     ):
         try:
             teste()

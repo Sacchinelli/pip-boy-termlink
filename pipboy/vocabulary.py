@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import csv
+import html
 import math
 import re
 import sqlite3
@@ -179,12 +180,51 @@ class Estatisticas:
 MAX_LINHAS_IMPORTACAO = 20_000
 
 _MARCA_QUEBRA = re.compile(r"<br\s*/?>", re.IGNORECASE)
-_MARCA_TAG = re.compile(r"<[^>]+>")
+# As tags de HTML que chegam em texto de fora: o verso do Anki num arquivo
+# importado, o negrito que o modelo às vezes põe numa palavra. SÓ as tags
+# conhecidas saem. A regra antiga apagava qualquer coisa entre < e >, e isso
+# comia justamente o texto de jogo — "Press <E> to interact", "<insert name>".
+_MARCA_TAG = re.compile(
+    r"</?(?:a|b|i|u|s|em|strong|small|big|sub|sup|span|div|p|font|br|hr|img|code|pre"
+    r"|ul|ol|li|strike|del|ins|mark|h[1-6]|table|tbody|thead|tr|td|th)\b[^>]*>",
+    re.IGNORECASE,
+)
+_CONTROLE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+# Tamanho máximo de cada campo. O caderno é escrito pelo modelo, em silêncio,
+# e o modelo escuta o áudio do jogo no modo "ouvir o jogo" — uma fonte que
+# ninguém controla. Um termo de mil caracteres quebraria o cartão, a revisão e
+# o modo de escrever; os limites ficam folgados para qualquer expressão real.
+MAX_TERMO = 80
+MAX_TRADUCAO = 160
+MAX_EXEMPLO = 300
 
 
-def _limpar(texto: str) -> str:
-    """Tira marcação e normaliza espaços de um campo vindo de fora."""
-    return " ".join(_MARCA_TAG.sub("", texto).split()).strip()
+def limpar_campo(texto: str, limite: int | None = None) -> str:
+    """Um campo vindo de fora, pronto para o caderno.
+
+    Sem as tags de HTML conhecidas, com as entidades desfeitas ("&amp;" vira
+    "&"), sem caracteres de controle e com os espaços normalizados. Com
+    ``limite``, o que passar dele é cortado com reticências. É a MESMA limpeza
+    para o que o modelo grava, o que se importa de um arquivo e o que se
+    corrige à mão — antes, só a importação limpava, e uma palavra gravada pelo
+    modelo como "<b>ammo</b>" nunca mais podia ser acertada no modo de
+    escrever.
+    """
+    texto = _MARCA_TAG.sub("", _MARCA_QUEBRA.sub(" ", texto))
+    texto = " ".join(_CONTROLE.sub(" ", html.unescape(texto)).split())
+    if limite is not None and len(texto) > limite:
+        texto = texto[: limite - 1].rstrip() + "…"
+    return texto
+
+
+def chave_do_termo(termo: str) -> str:
+    """O termo como o banco o procura: a mesma limpeza da gravação.
+
+    Sem isto, o modelo que pede para avaliar "<b>ammo</b>" não acharia a
+    palavra que foi gravada como "ammo".
+    """
+    return limpar_campo(termo)
 
 
 @dataclass(frozen=True, slots=True)
@@ -222,17 +262,17 @@ def interpretar_linha(colunas: list[str]) -> tuple[str, str, str, str] | None:
     if not campos or not campos[0].strip():
         return None
 
-    termo = " ".join(campos[0].split()).strip()
+    termo = limpar_campo(campos[0])
     traducao = exemplo = jogo = ""
     if len(campos) == 2:
-        traducao = _limpar(campos[1])
+        traducao = limpar_campo(campos[1])
     elif len(campos) == 3:
-        verso, jogo = campos[1], _limpar(campos[2])
+        verso, jogo = campos[1], limpar_campo(campos[2])
         partes = _MARCA_QUEBRA.split(verso, maxsplit=1)
-        traducao = _limpar(partes[0])
-        exemplo = _limpar(partes[1]) if len(partes) > 1 else ""
+        traducao = limpar_campo(partes[0])
+        exemplo = limpar_campo(partes[1]) if len(partes) > 1 else ""
     elif len(campos) >= 4:
-        traducao, exemplo, jogo = (_limpar(c) for c in campos[1:4])
+        traducao, exemplo, jogo = (limpar_campo(c) for c in campos[1:4])
     else:
         return None
 
@@ -348,10 +388,16 @@ class VocabularyStore:
         Reencontrar uma palavra não é um erro — é sinal de que ela importa.
         Por isso o contador ``encontros`` sobe em vez de a escrita falhar.
         """
-        termo = " ".join(termo.split()).strip()
+        termo = chave_do_termo(termo)
         if not termo:
             raise ValueError("termo vazio")
-        traducao = " ".join(traducao.split()).strip()
+        if len(termo) > MAX_TERMO:
+            # Cortar mudaria QUAL palavra é; um termo desse tamanho não é uma
+            # palavra, e a gravação é recusada (o modelo recebe o erro).
+            raise ValueError(f"termo longo demais ({len(termo)} caracteres)")
+        traducao = limpar_campo(traducao, MAX_TRADUCAO)
+        exemplo = limpar_campo(exemplo, MAX_EXEMPLO)
+        jogo = limpar_campo(jogo, MAX_TERMO)
         momento = agora()
 
         with self._lock:
@@ -461,7 +507,7 @@ class VocabularyStore:
         o que permite perguntar ao caderno, no meio de uma fala, se aquela
         palavra ali já foi ensinada.
         """
-        termo = " ".join(termo.split()).strip()
+        termo = chave_do_termo(termo)
         if not termo:
             return None
         with self._lock:
@@ -509,7 +555,7 @@ class VocabularyStore:
         *difícil*, acertou mas custou. A ``facilidade`` faz o papel do fator E
         do algoritmo original, limitada entre 1.3 e 3.0.
         """
-        termo = " ".join(termo.split()).strip()
+        termo = chave_do_termo(termo)
         with self._lock:
             row = self._connection.execute(
                 "SELECT * FROM vocabulario WHERE termo = ? COLLATE NOCASE", (termo,)
@@ -661,7 +707,7 @@ class VocabularyStore:
 
     def remover(self, termo: str) -> bool:
         """Apaga um termo do caderno. Devolve se havia algo para apagar."""
-        termo = " ".join(termo.split()).strip()
+        termo = chave_do_termo(termo)
         if not termo:
             return False
         with self._lock:
@@ -698,7 +744,7 @@ class VocabularyStore:
         apaga. É a distinção que permite limpar um exemplo errado sem ser
         obrigado a reescrever a tradução junto.
         """
-        termo = " ".join(termo.split()).strip()
+        termo = chave_do_termo(termo)
         with self._lock:
             linha = self._connection.execute(
                 "SELECT * FROM vocabulario WHERE termo = ? COLLATE NOCASE", (termo,)
@@ -706,13 +752,17 @@ class VocabularyStore:
             if linha is None:
                 raise ValueError(f"termo não está no caderno: {termo}")
 
-            alvo = " ".join((novo_termo if novo_termo is not None else linha["termo"]).split())
-            nova_traducao = " ".join(
-                (traducao if traducao is not None else linha["traducao"]).split()
+            alvo = chave_do_termo(novo_termo if novo_termo is not None else linha["termo"])
+            nova_traducao = limpar_campo(
+                traducao if traducao is not None else linha["traducao"], MAX_TRADUCAO
             )
-            novo_exemplo = " ".join((exemplo if exemplo is not None else linha["exemplo"]).split())
+            novo_exemplo = limpar_campo(
+                exemplo if exemplo is not None else linha["exemplo"], MAX_EXEMPLO
+            )
             if not alvo or not nova_traducao:
                 raise ValueError("termo e tradução não podem ficar vazios")
+            if len(alvo) > MAX_TERMO:
+                raise ValueError(f"termo longo demais ({len(alvo)} caracteres)")
 
             # O índice de termo é único: renomear para uma palavra que já existe
             # seria um IntegrityError cru subindo até a interface. Recusar aqui
