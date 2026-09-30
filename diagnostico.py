@@ -275,26 +275,25 @@ def checar_fontes() -> None:
     secao("5. Tipografia dos temas")
     try:
         sys.path.insert(0, str(RAIZ))
-        from PySide6.QtGui import QFontDatabase
         from PySide6.QtWidgets import QApplication
 
+        from pipboy.interface.fontes import familias_instaladas, primeira_instalada
         from pipboy.themes import TEMAS
     except Exception as error:
         avisar(f"Não foi possível inspecionar fontes: {error}", "Resolva os itens acima.")
         return
 
     QApplication.instance() or QApplication([])
-    instaladas = set(QFontDatabase.families())
-    if not instaladas:
+    # Com as fontes embutidas registradas: sem isso, o relatório dizia "queria
+    # Cinzel, obteve Georgia" de uma fonte que o programa usa de fato.
+    if not familias_instaladas():
         avisar("O Qt não listou nenhuma fonte.", "Ambiente sem servidor gráfico?")
         return
 
     resolvidas: dict[str, list[str]] = {}
     for nome, tema in TEMAS.items():
         alvo = tema.font_candidates[0]
-        obtida = next(
-            (f for f in tema.font_candidates if f in instaladas), tema.font_candidates[-1]
-        )
+        obtida = primeira_instalada(tema.font_candidates)
         resolvidas.setdefault(obtida, []).append(nome)
         nota = "" if obtida == alvo else f"  (queria {alvo})"
         print(f"  {nome:24} {obtida}{nota}")

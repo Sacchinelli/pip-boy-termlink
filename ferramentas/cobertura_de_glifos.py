@@ -129,15 +129,14 @@ def main() -> int:
     print("  COBERTURA DE GLIFOS — quanto é da fonte, quanto é do Windows")
     print("=" * 74)
 
-    from PySide6.QtGui import QFontDatabase
     from PySide6.QtWidgets import QApplication
 
     QApplication(sys.argv)
-    from pipboy.interface.fontes import registrar_fontes
+    # Com apelido: familias_instaladas, aqui, é a de baixo — família → arquivo.
+    from pipboy.interface.fontes import FONTES_MONO, primeira_instalada
+    from pipboy.interface.fontes import familias_instaladas as familias_do_qt
 
-    registrar_fontes()
-    visiveis = {str(f) for f in QFontDatabase.families()}
-    if not visiveis:
+    if not familias_do_qt():
         print("\n  Nenhuma família visível nesta plataforma Qt; nada foi medido.")
         print("  (Não rode com QT_QPA_PLATFORM=offscreen.)")
         print("=" * 74 + "\n")
@@ -145,11 +144,9 @@ def main() -> int:
 
     from verificar_glifos import simbolos_no_codigo
 
-    from pipboy.interface.janela import FONTES_MONO
     from pipboy.themes import TEMAS
 
-    def primeira(candidatas: tuple[str, ...]) -> str:
-        return next((c for c in candidatas if c in visiveis), candidatas[-1])
+    primeira = primeira_instalada
 
     # Mesma resolução do verificar_glifos.py, e pela mesma razão: medir uma
     # família que o programa não usaria seria medir nada.

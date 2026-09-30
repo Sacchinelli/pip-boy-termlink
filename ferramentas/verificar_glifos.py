@@ -131,16 +131,15 @@ def main() -> int:
     print("  VERIFICAÇÃO DE GLIFOS — PIP-BOY TERMLINK")
     print("=" * 68)
 
-    from PySide6.QtGui import QFont, QFontDatabase, QFontMetrics
+    from PySide6.QtGui import QFont, QFontMetrics
     from PySide6.QtWidgets import QApplication
 
     QApplication(sys.argv)
-    # As fontes que acompanham o programa contam: são elas que ele usa.
-    from pipboy.interface.fontes import registrar_fontes
+    # As fontes que acompanham o programa contam: são elas que ele usa (a
+    # regra de escolha registra as embutidas antes de perguntar).
+    from pipboy.interface.fontes import FONTES_MONO, familias_instaladas, primeira_instalada
 
-    registrar_fontes()
-    instaladas = {str(f) for f in QFontDatabase.families()}
-    if not instaladas:
+    if not familias_instaladas():
         # Acontece em backends sem base de fontes — o offscreen é um deles.
         # Não saber medir não é o mesmo que encontrar defeito: o script avisa
         # e sai limpo, em vez de reprovar um código que pode estar correto.
@@ -150,11 +149,9 @@ def main() -> int:
         print("=" * 68 + "\n")
         return 0
 
-    from pipboy.interface.janela import FONTES_MONO
     from pipboy.themes import TEMAS
 
-    def primeira(candidatas: tuple[str, ...]) -> str:
-        return next((c for c in candidatas if c in instaladas), candidatas[-1])
+    primeira = primeira_instalada
 
     # Toda fonte que o programa pode acabar usando para desenhar texto. O
     # dicionário guarda quem pediu cada uma, para o relatório dizer qual tema

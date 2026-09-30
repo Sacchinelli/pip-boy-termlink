@@ -13,7 +13,7 @@ tema — o do último jogo usado, como a tela de abertura.
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -27,7 +27,7 @@ from ..config import ConfigurationError, Preferences, salvar_chave
 from ..themes import GameTheme, paleta_de, theme_for
 from .atmosfera import atmosfera_de
 from .componentes import Botao, caminho_forma
-from .fontes import ajuste_optico, compor_titulo, registrar_fontes, tem_negrito
+from .fontes import fonte_do_papel
 
 LARGURA = 560
 ENDERECO_CHAVE = "https://aistudio.google.com/apikey"
@@ -39,27 +39,11 @@ class _ProvedorMinimo:
     def __init__(self) -> None:
         self.tema: GameTheme = theme_for(Preferences.load().jogo)
         self.atmosfera = atmosfera_de(self.tema.name)
-        registrar_fontes()
-        self._instaladas = set(QFontDatabase.families())
 
     def fonte(self, papel: str, *, ui: bool = True) -> QFont:
-        # A mesma regra de Janela.fonte: títulos na letra de título, leitura
-        # no corpo aparente da referência, negrito só se a família o tem.
-        tipo = design.TIPO[papel]
-        if ui:
-            candidatas = self.tema.ui_font_candidates
-        elif papel == "display":
-            candidatas = self.tema.display_candidates
-        else:
-            candidatas = self.tema.font_candidates
-        familia = next((f for f in candidatas if f in self._instaladas), candidatas[-1])
-        ajuste = 1.0 if papel == "display" else ajuste_optico(familia)
-        fonte = QFont(familia, max(1, round(tipo.tamanho * ajuste)))
-        fonte.setBold(tipo.peso == "bold" and tem_negrito(familia))
-        if papel == "display" and not ui:
-            compor_titulo(fonte, self.tema)
-        fonte.setItalic(tipo.estilo == "italic")
-        return fonte
+        # A mesma regra da janela (ver fontes.fonte_do_papel), no tamanho de
+        # texto padrão: este cartão aparece antes de haver escolha nenhuma.
+        return fonte_do_papel(self.tema, papel, ui=ui)
 
     def paleta(self) -> dict[str, str]:
         return paleta_de(self.tema)

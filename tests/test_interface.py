@@ -895,6 +895,32 @@ def main() -> int:
     )
     checar(registrar_fontes() == familias_embutidas, "e registrar de novo não duplica nada")
 
+    # Uma regra de escolha só (fontes.primeira_instalada / fonte_do_papel), e
+    # não uma cópia por janela: o cartão de boas-vindas, que aparece antes da
+    # janela existir, escolhe exatamente a mesma letra que ela.
+    from pipboy.interface.boas_vindas import _ProvedorMinimo
+    from pipboy.interface.fontes import primeira_instalada
+
+    checar(
+        primeira_instalada(("Família Que Não Existe", "Outra Que Não Existe")) == "Outra Que Não Existe"
+        and primeira_instalada(("Família Que Não Existe", "Cinzel", "Georgia")) == "Cinzel",
+        "a primeira candidata instalada vale — as embutidas contam —, e a última é a reserva",
+    )
+    provedor_letra = _ProvedorMinimo()
+    tema_provedor = janela.tema
+    provedor_letra.tema = tema_provedor
+    escala_letra = janela._escala_texto
+    janela._escala_texto = 1.0
+    diferentes_letra = [
+        (papel, ui) for papel in design_letra.TIPO for ui in (True, False)
+        if provedor_letra.fonte(papel, ui=ui) != janela.fonte(papel, ui=ui)
+    ]
+    janela._escala_texto = escala_letra
+    checar(
+        not diferentes_letra,
+        f"a janela e o cartão de boas-vindas escolhem a mesma fonte em todo degrau ({diferentes_letra})",
+    )
+
     jogo_letra = janela.campo_jogo.currentText()
     janela.campo_jogo.setCurrentText("Red Dead")
     aplicacao.processEvents()
