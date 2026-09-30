@@ -90,6 +90,18 @@ class GameTheme:
     stop_label: str
     persona_label: str
     persona_prompt: str
+    # O título da tela inicial: a primeira frase que o jogo diz a quem abre o
+    # programa. Era "Pronto para ouvir" nos dez — o maior texto da tela, e o
+    # único que não sabia em que jogo estava. Frases escritas aqui, no tom de
+    # cada um, e não falas tiradas dos jogos.
+    saudacao: str
+    # O convite do campo de texto — o que ele diz vazio. Era "Perguntar por
+    # texto…" nos dez: a única frase da barra de baixo, e a que o jogador lê
+    # toda vez que vai digitar. Cada jogo convida do jeito dele: o prompt do
+    # terminal, a mensagem deixada no chão da Terra Intermédia, o canal do
+    # esquadrão. O nome ACESSÍVEL do campo não muda com o tema: quem usa leitor
+    # de tela precisa encontrar o mesmo campo em qualquer jogo.
+    convite: str
     # Primeira família instalada no sistema é a usada; a última é a reserva.
     #
     # A cadeia precisa ser distinta das dos OUTROS temas, e não só bonita:
@@ -116,6 +128,20 @@ class GameTheme:
     accent: str
     alert: str
     info: str
+    # A letra da INTERFACE do jogo, quando ele tem uma: é a dos controles
+    # (ver ``ui_font_candidates``). Vazia, a neutra de sempre.
+    interface: tuple[str, ...] = ()
+    # A letra dos TÍTULOS — a marca, a saudação, o anúncio —, quando o jogo
+    # titula numa letra que não serve para ler uma fala inteira: a romana de
+    # inscrição da Terra Intermédia, o tipo de madeira dos cartazes. Vazia,
+    # os títulos usam a fonte do tema.
+    titulos: tuple[str, ...] = ()
+    # E como os títulos são compostos: os menus do Skyrim são Futura FINA em
+    # maiúsculas; o terminal, a Night City e o visor titulam em caixa alta.
+    # O texto continua o de verdade — é a letra que muda de caixa, e o leitor
+    # de tela lê a frase como ela foi escrita.
+    titulos_leves: bool = False
+    titulos_em_caixa_alta: bool = False
 
     # --- Cores derivadas -------------------------------------------------
     # Calculadas, nunca declaradas. Duas famílias:
@@ -131,13 +157,24 @@ class GameTheme:
 
     @property
     def ui_font_candidates(self) -> tuple[str, ...]:
-        """Fonte dos controles — neutra e igual em todos os temas.
+        """Fonte dos controles: a de interface do jogo, ou a neutra.
 
-        A fonte do tema assina a marca e a fala do assistente. Rótulo, botão e
-        campo usam esta: é assim que um produto com skins funciona, e é o que
-        separa "aplicativo com tema" de "aplicativo feito na fonte do tema".
+        A regra antiga era a neutra nos dez, para separar "aplicativo com
+        tema" de "aplicativo feito na fonte do tema" — e continua valendo para
+        a letra de TÍTULO: serifa de inscrição e tipo de madeira não servem
+        para rótulo de nove pontos. Mas alguns jogos têm uma letra de
+        INTERFACE, desenhada para exatamente isso — a Futura Condensed dos
+        menus do Skyrim, o DIN do Witcher, a Rajdhani da Night City, a
+        Roboto Condensed do Pip-Boy —, e ali a neutra era só a letra de outro
+        produto. Com a interface declarada, ela vem primeiro; a neutra fica de
+        reserva.
         """
-        return design.FONTES_UI
+        return self.interface + design.FONTES_UI
+
+    @property
+    def display_candidates(self) -> tuple[str, ...]:
+        """Fonte dos títulos: a declarada para eles, e depois a do tema."""
+        return self.titulos + self.font_candidates
 
     @property
     def surface(self) -> str:
@@ -253,7 +290,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         header_title="◈ PIP-BOY 3000 MK IV",
         header_subtitle="TERMLINK — TUTOR DE INGLÊS PARA JOGOS",
         idle_text="AGUARDANDO ENTRADA",
-        start_label="▶  INICIAR",
+        start_label="▶  INICIALIZAR",
         stop_label="■  ENCERRAR",
         persona_label="Pip-Boy Sarcástico",
         persona_prompt=(
@@ -262,7 +299,9 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
             "faz piadas secas sobre radiação e sobre a incompetência da humanidade, "
             "mas por trás do deboche você ajuda de verdade e com precisão."
         ),
-        font_candidates=("Consolas", "Courier New"),
+        saudacao="Terminal pronto",
+        convite="> digite uma pergunta_",
+        font_candidates=("Share Tech Mono", "Consolas", "Courier New"),
         shell="#161a15",
         screen="#0a1208",
         primary="#4dff7a",
@@ -271,6 +310,8 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         accent="#ffb000",
         alert="#ff5c5c",
         info="#7ad4ff",
+        titulos_em_caixa_alta=True,
+        interface=("Roboto Condensed",),
     ),
     GameTheme(
         name="Elden Ring",
@@ -293,6 +334,8 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
             "com gravidade ritual, mas suas explicações são sempre claras e diretas — "
             "o mistério fica no tom, nunca no conteúdo."
         ),
+        saudacao="Que a graça ilumine o caminho",
+        convite="Deixar uma mensagem…",
         font_candidates=("Garamond", "EB Garamond", "Constantia", "Georgia", "Times New Roman"),
         # Ouro sobre QUASE PRETO. Elden Ring, Witcher e Red Dead são os três
         # ambientes quentes e mediam de 5,96 a 7,10 entre si — três marrons
@@ -306,6 +349,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         accent="#e0a24a",
         alert="#a33b2a",
         info="#9fb8c8",
+        titulos=("Cinzel",),
     ),
     GameTheme(
         name="Skyrim",
@@ -328,7 +372,9 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
             "adora uma boa história, mas corta a lorota assim que ele precisa de uma "
             "resposta objetiva."
         ),
-        font_candidates=("Palatino Linotype", "Book Antiqua", "Sylfaen", "Times New Roman"),
+        saudacao="O norte está à escuta",
+        convite="Perguntar ao guia…",
+        font_candidates=("Jost", "Palatino Linotype", "Book Antiqua", "Sylfaen", "Times New Roman"),
         # Gelo, e não o cinza-azulado de escritório: a crônica nórdica media
         # 2,87 do tema deliberadamente NEUTRO — a menor distância da tabela
         # inteira (ferramentas/distancia_dos_temas.py). Os dois partiam do
@@ -342,6 +388,9 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         accent="#d8c48a",
         alert="#b0483c",
         info="#8fd0b0",
+        titulos_leves=True,
+        titulos_em_caixa_alta=True,
+        interface=("Jost",),
     ),
     GameTheme(
         name="The Witcher 3",
@@ -365,6 +414,8 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
             "a cumprir e responde com frieza profissional — sem rispidez e sem nunca "
             "deixar de entregar o que foi pedido."
         ),
+        saudacao="Há um contrato na mesa",
+        convite="Perguntar ao bruxo…",
         font_candidates=("Georgia", "Cambria", "Times New Roman"),
         # Chão QUENTE. Tudo neste tema já era quente — a prata creme do
         # texto, o vermelho-sangue do acento, e uma atmosfera que a própria
@@ -381,6 +432,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         accent="#c0392b",
         alert="#e05a3a",
         info="#7fa8c0",
+        interface=("D-DIN",),
     ),
     GameTheme(
         name="Red Dead",
@@ -404,6 +456,8 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
             "tem paciência para rodeio e explica as coisas como quem ensina alguém a "
             "montar: mostrando, não teorizando."
         ),
+        saudacao="A trilha está aberta",
+        convite="Perguntar ao parceiro…",
         font_candidates=("Rockwell", "Zilla Slab", "Bookman Old Style", "Cambria", "Times New Roman"),
         # O mais claro dos três ambientes quentes, e o mais alaranjado: papel
         # de álbum sob luz de fim de tarde. Ver a nota do Elden Ring.
@@ -415,6 +469,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         accent="#d8a13a",
         alert="#c0392b",
         info="#9ec4a0",
+        titulos=("Rye",),
     ),
     GameTheme(
         name="GTA",
@@ -436,6 +491,8 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
             "cheio de energia de madrugada. Trata cada dúvida como um pedido de ouvinte "
             "no ar — responde rápido, com graça, e emenda na próxima sem enrolar."
         ),
+        saudacao="Você está no ar",
+        convite="Mandar mensagem para a rádio…",
         font_candidates=("Trebuchet MS", "Corbel", "Segoe UI", "Arial"),
         # Noite quase preta, para o neon ter onde brilhar. A rádio pirata e o
         # grimório do RPG mediam 4,57 um do outro: dois fundos escuros
@@ -469,7 +526,9 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
             "de gíria de rua. Despreza corporação e conversa mole, mas entrega a "
             "informação certa na hora certa — para você, dado limpo é questão de honra."
         ),
-        font_candidates=("Bahnschrift", "Consolas", "Segoe UI"),
+        saudacao="Link neural estável",
+        convite="// transmitir pergunta",
+        font_candidates=("Rajdhani", "Bahnschrift", "Consolas", "Segoe UI"),
         shell="#08080a",
         screen="#101014",
         primary="#fcee0a",
@@ -478,6 +537,8 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         accent="#00f0ff",
         alert="#ff003c",
         info="#ff4fd8",
+        titulos_em_caixa_alta=True,
+        interface=("Rajdhani",),
     ),
     GameTheme(
         name="RPG / Aventura (geral)",
@@ -490,7 +551,7 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         header_title="✧ GRIMÓRIO DE VIAGEM",
         header_subtitle="MESTRE DE JOGO — TUTOR DE INGLÊS",
         idle_text="AGUARDANDO O AVENTUREIRO",
-        start_label="▶  INICIAR",
+        start_label="▶  DESBRAVAR",
         stop_label="■  ENCERRAR",
         persona_label="Mestre de Jogo",
         persona_prompt=(
@@ -498,7 +559,9 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
             "em transformar qualquer dúvida numa cena curta que fixa a palavra. Nunca "
             "rouba a cena — descreve o necessário e devolve o turno."
         ),
-        font_candidates=("Sitka Text", "Sylfaen", "Georgia", "Times New Roman"),
+        saudacao="A aventura começa aqui",
+        convite="Perguntar ao mestre…",
+        font_candidates=("IM FELL English", "Sitka Text", "Sylfaen", "Georgia", "Times New Roman"),
         # Beringela, e não índigo: o roxo deste grimório foi para o lado
         # QUENTE do violeta, e o da rádio pirata para o frio. Era o mesmo roxo
         # nos dois, e nenhum dos dois era escolhido por causa dele.
@@ -534,13 +597,15 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
             "responder e entrega a informação como quem passa uma call no meio da "
             "partida — o jogador tem dois segundos de atenção e você respeita isso."
         ),
+        saudacao="Esquadrão em posição",
+        convite="[ESQUADRÃO] mensagem…",
         # Grotesca condensada, a tipografia de estêncil de equipamento militar.
         # Saira Condensed é livre (OFL), como EB Garamond e Zilla Slab: quem a
         # instalar tem a fonte pretendida. A reserva de fábrica é a Franklin
         # Gothic, uma grotesca americana de sinalização industrial que nenhum
         # outro tema usa — a Tahoma, que vinha em primeiro, é a irmã de escritório
         # da Segoe UI do tema neutro, e era parte do problema.
-        font_candidates=("Saira Condensed", "Franklin Gothic Medium", "Tahoma", "Segoe UI"),
+        font_candidates=("Barlow Condensed", "Saira Condensed", "Franklin Gothic Medium", "Tahoma", "Segoe UI"),
         # Grafite com fundo de oliva, e não o cinza-azulado de antes: medido
         # contra o tema deliberadamente NEUTRO, o visor tático estava a 3,97 de
         # distância perceptual dele (ferramentas/distancia_dos_temas.py) — era
@@ -557,6 +622,8 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
         # no AA por uma casa decimal.
         alert="#d81f28",
         info="#79c7e8",
+        titulos_em_caixa_alta=True,
+        interface=("Barlow Condensed",),
     ),
     GameTheme(
         name="Genérico / Outro",
@@ -574,6 +641,8 @@ _TEMAS: Final[tuple[GameTheme, ...]] = (
             "muitos títulos e explica tudo com energia. Adora uma referência cruzada "
             "entre jogos, desde que ela caiba em uma frase."
         ),
+        saudacao="Pronto para ouvir",
+        convite="Perguntar por texto…",
         font_candidates=("Segoe UI", "Consolas", "Arial"),
         shell="#0d1116",
         screen="#171c22",

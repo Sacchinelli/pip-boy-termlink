@@ -29,15 +29,19 @@ from __future__ import annotations
 
 import math
 import random
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Final
 
 from PySide6.QtCore import QEasingCurve, QPointF, QRect, QRectF, Qt
 from PySide6.QtGui import (
     QColor,
+    QFont,
+    QFontMetricsF,
     QImage,
     QLinearGradient,
     QPainter,
+    QPainterPath,
     QPen,
     QPixmap,
     QRadialGradient,
@@ -74,6 +78,9 @@ class Atmosfera:
     selo: float = 0.0               # círculo arcano, como marca-d'água
     horizonte: float = 0.0          # linha de neon com brilho, baixa na tela
     arranhoes: float = 0.0          # riscos verticais de filme velho
+    digitais: float = 0.0           # marcas de dedo e gordura no vidro do aparelho
+    constelacao: float = 0.0        # a constelação sobre uma nebulosa pintada
+    estencil: float = 0.0           # marcação de esquadrão pintada com molde
     fibras: float = 0.0             # fibras horizontais de papel/couro
 
     # Camadas vivas
@@ -86,6 +93,43 @@ class Atmosfera:
     forma: str = "arredondada"      # arredondada | chanfrada | reta
     # Fósforo: quanto a letra do assistente sangra luz na própria cor.
     brilho_texto: float = 0.0
+    # O traço dos menus do jogo: o ornamento das divisórias (ver
+    # ornamentos.DIVISORIAS) e o espaçamento entre letras dos títulos, em px.
+    # Caixa alta espaçada é serifa de lenda no Elden Ring e estêncil no
+    # tático; colada, é terminal no Fallout.
+    divisoria: str = "linha"
+    espacamento_titulo: float = 0.0
+    # A moldura do painel da conversa (ver ornamentos.MOLDURAS); vazia, nenhuma.
+    # O terminal e o visor já têm a sua — o tubo e as cantoneiras —, e o tema
+    # neutro existe para não ter.
+    moldura: str = ""
+    # Como o item escolhido se marca (ver ornamentos.SELECOES); vazio, o
+    # realce de sempre.
+    selecao: str = ""
+    # A marca que o botão principal veste (um estilo de ornamentos.SELECOES);
+    # vazio, a placa cheia de sempre — que no terminal, no Cyberpunk e no
+    # tático já é a cara do jogo.
+    botao_principal: str = ""
+    # Como o jogo anuncia a palavra nova (ver avisos.AVISOS); vazio, o
+    # cartão discreto do tema neutro.
+    aviso: str = ""
+    # Como o jogo arruma o menu da tela inicial — revisar, caderno, histórico:
+    # vazio, cartões lado a lado; "lista_centrada", a pilha de itens no meio
+    # da tela dos menus de título da alta fantasia; "lista_a_esquerda", a
+    # coluna de pausa encostada à esquerda do velho oeste, do bruxo e da
+    # Night City; "abas", a fileira de abas do Pip-Boy, do celular do GTA e
+    # do lobby do visor. Ver tela_inicial.CartaoAcao.
+    menu: str = ""
+    # A mira que persegue o cursor (ver MIRAS); vazio, o anel de sempre.
+    mira: str = ""
+    # O ritmo do jogo (ver movimento.definir_ritmo): um fator sobre as
+    # durações de ``design`` e o nome de uma curva — a alta fantasia anda
+    # devagar e solene, o visor seco e depressa, o GTA passa do ponto, o
+    # terminal anda aos saltos. E como as letras de um título chegam (ver
+    # componentes.CHEGADAS_DAS_LETRAS): o embaralho de terminal era de todos.
+    tempo: float = 1.0
+    curva: str = "suave"
+    letras: str = "decifrar"
 
     semente: int = 7
     # Cor de acento das camadas vivas; vazio usa o acento do tema.
@@ -97,12 +141,25 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # Terminal de fósforo: varredura densa, brilho sangrando do centro, tubo
     # abaulado e a tremulação característica de um CRT malcuidado.
     "Fallout": Atmosfera(
+        mira="colchetes",
+        digitais=0.6,
+        tempo=0.85, curva="degraus", letras="datilografar",
+        menu="abas",
+        aviso="terminal",
+        selecao="invertida",
         grao=0.05, varredura=0.22, passo_varredura=3, vinheta=0.62, curvatura=0.55,
         brilho=0.30, brilho_y=0.45, tremulacao=0.035, particulas="estatica",
         densidade=18, forma="reta", semente=11,
      brilho_texto=0.6,),
     # Luz dourada baixa e partículas subindo, contra pergaminho.
     "Elden Ring": Atmosfera(
+        mira="graca",
+        tempo=1.7, curva="solene", letras="revelar",
+        menu="lista_centrada",
+        aviso="graca",
+        botao_principal="brilho_dourado",
+        selecao="brilho_dourado",
+        divisoria="fio_de_ouro", moldura="graca", espacamento_titulo=2.5,
         grao=0.07, vinheta=0.66, brilho=0.26, brilho_y=0.82, fibras=0.05,
         particulas="motes", densidade=46, forma="arredondada", semente=3,
     ),
@@ -111,11 +168,26 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # para ver, e o que faltava para esta crônica não ser o tema neutro com
     # neve. O halo do fundo desceu: com a aurora no alto, os dois brigavam.
     "Skyrim": Atmosfera(
+        mira="arcos",
+        constelacao=0.7,
+        tempo=1.4, curva="solene", letras="revelar",
+        menu="lista_centrada",
+        aviso="descoberta",
+        botao_principal="losangos",
+        selecao="losangos",
+        divisoria="nordica", moldura="placa", espacamento_titulo=2.0,
         grao=0.06, vinheta=0.58, brilho=0.10, brilho_y=0.72, aurora=0.6,
         particulas="neve", densidade=70, forma="reta", semente=19,
     ),
     # Couro e vela: grão grosso, halo quente lateral, brasas lentas.
     "The Witcher 3": Atmosfera(
+        mira="medalhao",
+        tempo=1.15, curva="suave", letras="revelar",
+        menu="lista_a_esquerda",
+        aviso="diario",
+        botao_principal="brasa",
+        selecao="brasa",
+        divisoria="medalhao", moldura="ferragens", espacamento_titulo=1.0,
         grao=0.08, vinheta=0.64, brilho=0.18, brilho_y=0.35, fibras=0.06,
         particulas="brasas", densidade=26, forma="reta", semente=23,
     ),
@@ -124,6 +196,13 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # chão quente com Elden Ring e Witcher; o que só o velho oeste tem não é
     # a cor, é o SUPORTE.
     "Red Dead": Atmosfera(
+        mira="olho_morto",
+        tempo=1.25, curva="suave", letras="escrever",
+        menu="lista_a_esquerda",
+        aviso="cartaz",
+        botao_principal="pincelada",
+        selecao="pincelada",
+        divisoria="cartaz", moldura="cartaz", espacamento_titulo=1.5,
         grao=0.10, vinheta=0.70, brilho=0.14, brilho_y=0.55, fibras=0.10,
         arranhoes=0.5, particulas="poeira", densidade=34, forma="reta", semente=29,
     ),
@@ -131,12 +210,25 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # o pôr do sol de neon no horizonte — a imagem inteira deste ambiente, e
     # o que ele não tinha. O halo saiu do alto: o brilho agora sobe da linha.
     "GTA": Atmosfera(
+        mira="neon",
+        tempo=0.8, curva="mola", letras="acender",
+        menu="abas",
+        aviso="missao",
+        botao_principal="letreiro",
+        selecao="letreiro",
+        divisoria="neon", moldura="neon", espacamento_titulo=0.5,
         grao=0.05, varredura=0.16, passo_varredura=4, vinheta=0.55,
         brilho=0.14, brilho_y=0.25, horizonte=0.7, interferencia=0.35,
         particulas="estatica", densidade=14, forma="chanfrada", semente=31,
      brilho_texto=0.32,),
     # Interferência digital, varredura fina e chuva de dados descendo.
     "Cyberpunk 2077": Atmosfera(
+        mira="chanfro",
+        tempo=0.7, curva="seco", letras="decifrar",
+        menu="lista_a_esquerda",
+        aviso="fragmento",
+        selecao="aba",
+        divisoria="segmentada", moldura="circuito", espacamento_titulo=1.5,
         grao=0.04, varredura=0.22, passo_varredura=3, vinheta=0.58, curvatura=0.20,
         brilho=0.24, brilho_y=0.30, interferencia=0.55, particulas="dados",
         densidade=30, forma="chanfrada", semente=37,
@@ -146,6 +238,13 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # ele este ambiente e a rádio pirata eram dois fundos escuros arroxeados,
     # a 4,57 um do outro.
     "RPG / Aventura (geral)": Atmosfera(
+        mira="runas",
+        tempo=1.3, curva="solene", letras="escrever",
+        menu="lista_centrada",
+        aviso="pergaminho",
+        botao_principal="iluminura",
+        selecao="iluminura",
+        divisoria="iluminura", moldura="pagina", espacamento_titulo=1.5,
         grao=0.06, vinheta=0.60, brilho=0.24, brilho_y=0.50, selo=0.85,
         particulas="motes", densidade=38, forma="arredondada", semente=41,
      brilho_texto=0.18,),
@@ -156,6 +255,13 @@ ATMOSFERAS: Final[dict[str, Atmosfera]] = {
     # grade volta ao papel de retícula de fundo. O pó é cinza de cinza, e não
     # laranja: partícula na cor do acento vira vaga-lume, e aqui é escombro.
     "FPS / Multiplayer": Atmosfera(
+        mira="cruz",
+        estencil=0.6,
+        tempo=0.6, curva="seco", letras="varrer",
+        menu="abas",
+        aviso="abate",
+        selecao="mira",
+        divisoria="regua", espacamento_titulo=1.5,
         grao=0.05, grade=0.3, passo_grade=58, vinheta=0.6, brilho=0.1,
         brilho_y=0.62, cantoneiras=0.55, particulas="poeira", densidade=20,
         interferencia=0.12, forma="chanfrada", semente=43,
@@ -532,6 +638,225 @@ def _juntar_pares(antes: list[QRect], agora: list[QRect]) -> list[QRect]:
 
 
 # ---------------------------------------------------------------------- Cenário
+
+# ------------------------------------------------------------------- Miras
+# O anel que persegue o cursor era o mesmo círculo nos dez ambientes — o
+# elemento mais presente da janela, o único que está sempre onde o olho está,
+# e nenhum jogo mira com um círculo liso. Cada ambiente declara a sua mira
+# (``Atmosfera.mira``): os colchetes do terminal, os dois arcos do norte, a
+# cruz do visor, o ponto do velho oeste. Solta, a mira é do jogo; abraçando um
+# botão, ela vira o contorno dele, como sempre — e passa de uma a outra
+# esmaecendo, sem estalo. Cada mira cabe na caixa do anel mais três pixels,
+# que é o que a região suja do quadro repinta.
+
+
+def _caneta(cor: QColor, largura: float) -> QPen:
+    caneta = QPen(cor)
+    caneta.setWidthF(largura)
+    caneta.setCapStyle(Qt.PenCapStyle.FlatCap)
+    return caneta
+
+
+def _ponto(pintor: QPainter, centro: QPointF, cor: QColor, raio: float) -> None:
+    pintor.save()
+    pintor.setPen(Qt.PenStyle.NoPen)
+    pintor.setBrush(cor)
+    pintor.drawEllipse(centro, raio, raio)
+    pintor.restore()
+
+
+def _mira_colchetes(pintor: QPainter, c: QPointF, r: float, cor: QColor, crescido: float) -> None:
+    """Fallout: os quatro cantos de um quadrado, como a seleção do terminal."""
+    braco = r * 0.45
+    pintor.setPen(_caneta(cor, 1.6))
+    for dx, dy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
+        canto = QPointF(c.x() + dx * r * 0.86, c.y() + dy * r * 0.86)
+        pintor.drawLine(canto, QPointF(canto.x() - dx * braco, canto.y()))
+        pintor.drawLine(canto, QPointF(canto.x(), canto.y() - dy * braco))
+    _ponto(pintor, c, cor, 1.2 + 1.2 * crescido)
+
+
+def _mira_arcos(pintor: QPainter, c: QPointF, r: float, cor: QColor, crescido: float) -> None:
+    """Skyrim: os dois arcos abertos em volta do alvo, um de cada lado."""
+    pintor.setPen(_caneta(cor, 1.5))
+    caixa = QRectF(c.x() - r * 0.8, c.y() - r * 0.8, r * 1.6, r * 1.6)
+    pintor.drawArc(caixa, 135 * 16, 90 * 16)
+    pintor.drawArc(caixa, -45 * 16, 90 * 16)
+    if crescido > 0.05:
+        _ponto(pintor, c, cor, 1.4 * crescido)
+
+
+def _mira_graca(pintor: QPainter, c: QPointF, r: float, cor: QColor, crescido: float) -> None:
+    """Elden Ring: um anel fino de ouro com quatro losangos nos pontos cardeais."""
+    pintor.setPen(_caneta(cor, 1.0))
+    pintor.drawEllipse(c, r * 0.72, r * 0.72)
+    pintor.save()
+    pintor.setPen(Qt.PenStyle.NoPen)
+    pintor.setBrush(cor)
+    for dx, dy in ((0, -1), (1, 0), (0, 1), (-1, 0)):
+        centro = QPointF(c.x() + dx * r * 0.72, c.y() + dy * r * 0.72)
+        lado = 2.4 + 0.8 * crescido
+        losango = QPainterPath()
+        losango.moveTo(centro.x(), centro.y() - lado)
+        losango.lineTo(centro.x() + lado, centro.y())
+        losango.lineTo(centro.x(), centro.y() + lado)
+        losango.lineTo(centro.x() - lado, centro.y())
+        losango.closeSubpath()
+        pintor.drawPath(losango)
+    pintor.restore()
+
+
+def _mira_medalhao(pintor: QPainter, c: QPointF, r: float, cor: QColor, crescido: float) -> None:
+    """The Witcher 3: a argola dupla do medalhão, com os dentes em cima e embaixo."""
+    pintor.setPen(_caneta(cor, 1.5))
+    pintor.drawEllipse(c, r * 0.7, r * 0.7)
+    fino = QColor(cor)
+    fino.setAlphaF(cor.alphaF() * 0.55)
+    pintor.setPen(_caneta(fino, 0.9))
+    pintor.drawEllipse(c, r * 0.45, r * 0.45)
+    pintor.setPen(_caneta(cor, 1.5))
+    for dy in (-1, 1):
+        pintor.drawLine(QPointF(c.x(), c.y() + dy * r * 0.7), QPointF(c.x(), c.y() + dy * r * 0.95))
+
+
+def _mira_olho_morto(pintor: QPainter, c: QPointF, r: float, cor: QColor, crescido: float) -> None:
+    """Red Dead: o ponto miúdo do revólver, sob um anel quase apagado."""
+    fino = QColor(cor)
+    fino.setAlphaF(cor.alphaF() * 0.35)
+    pintor.setPen(_caneta(fino, 1.0))
+    pintor.drawEllipse(c, r * 0.7, r * 0.7)
+    _ponto(pintor, c, cor, 1.8 + 1.4 * crescido)
+
+
+def _mira_neon(pintor: QPainter, c: QPointF, r: float, cor: QColor, crescido: float) -> None:
+    """GTA: um tubo de neon em anel — o halo largo e o traço aceso por dentro."""
+    halo = QColor(cor)
+    halo.setAlphaF(cor.alphaF() * 0.25)
+    pintor.setPen(_caneta(halo, 4.0))
+    pintor.drawEllipse(c, r * 0.68, r * 0.68)
+    pintor.setPen(_caneta(cor, 1.4))
+    pintor.drawEllipse(c, r * 0.68, r * 0.68)
+    if crescido > 0.05:
+        _ponto(pintor, c, cor, 1.6 * crescido)
+
+
+def _mira_chanfro(pintor: QPainter, c: QPointF, r: float, cor: QColor, crescido: float) -> None:
+    """Cyberpunk: um octógono de cantos cortados, com o ponto de mira no meio."""
+    lado, corte = r * 0.78, r * 0.32
+    forma = QPainterPath()
+    forma.moveTo(c.x() - lado + corte, c.y() - lado)
+    forma.lineTo(c.x() + lado - corte, c.y() - lado)
+    forma.lineTo(c.x() + lado, c.y() - lado + corte)
+    forma.lineTo(c.x() + lado, c.y() + lado - corte)
+    forma.lineTo(c.x() + lado - corte, c.y() + lado)
+    forma.lineTo(c.x() - lado + corte, c.y() + lado)
+    forma.lineTo(c.x() - lado, c.y() + lado - corte)
+    forma.lineTo(c.x() - lado, c.y() - lado + corte)
+    forma.closeSubpath()
+    pintor.setPen(_caneta(cor, 1.3))
+    pintor.drawPath(forma)
+    _ponto(pintor, c, cor, 1.2 + crescido)
+
+
+def _mira_runas(pintor: QPainter, c: QPointF, r: float, cor: QColor, crescido: float) -> None:
+    """RPG: o círculo da bússola do mapa, com oito marcas para dentro."""
+    pintor.setPen(_caneta(cor, 1.1))
+    pintor.drawEllipse(c, r * 0.78, r * 0.78)
+    for passo in range(8):
+        angulo = math.tau * passo / 8
+        direcao = QPointF(math.cos(angulo), math.sin(angulo))
+        comprimento = 0.30 if passo % 2 == 0 else 0.16
+        pintor.drawLine(c + direcao * (r * 0.78), c + direcao * (r * (0.78 - comprimento)))
+
+
+def _mira_cruz(pintor: QPainter, c: QPointF, r: float, cor: QColor, crescido: float) -> None:
+    """FPS: a cruz do visor — quatro traços com o miolo vazio e o ponto no centro."""
+    vao = r * (0.28 + 0.12 * crescido)
+    pintor.setPen(_caneta(cor, 1.6))
+    for dx, dy in ((0, -1), (1, 0), (0, 1), (-1, 0)):
+        pintor.drawLine(
+            QPointF(c.x() + dx * vao, c.y() + dy * vao),
+            QPointF(c.x() + dx * r * 0.9, c.y() + dy * r * 0.9),
+        )
+    _ponto(pintor, c, cor, 1.2)
+
+
+MIRAS: Final[dict[str, Callable[[QPainter, QPointF, float, QColor, float], None]]] = {
+    "colchetes": _mira_colchetes,
+    "arcos": _mira_arcos,
+    "graca": _mira_graca,
+    "medalhao": _mira_medalhao,
+    "olho_morto": _mira_olho_morto,
+    "neon": _mira_neon,
+    "chanfro": _mira_chanfro,
+    "runas": _mira_runas,
+    "cruz": _mira_cruz,
+}
+
+
+def pintar_mira(
+    pintor: QPainter, estilo: str, centro: QPointF, raio: float, cor: QColor, crescido: float
+) -> bool:
+    """Desenha a mira de ``estilo``. ``False`` quando não há — fica o anel de sempre."""
+    desenhar = MIRAS.get(estilo)
+    if desenhar is None:
+        return False
+    pintor.save()
+    pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pintor.setBrush(Qt.BrushStyle.NoBrush)
+    desenhar(pintor, centro, raio, cor, crescido)
+    pintor.restore()
+    return True
+
+
+def pintar_onda(
+    pintor: QPainter, estilo: str, centro: QPointF, progresso: float, cor: QColor, alerta: QColor
+) -> None:
+    """A resposta ao clique, na língua da mira.
+
+    O visor mostra o marcador de acerto — quatro traços diagonais que abrem e
+    somem; o velho oeste deixa o X vermelho com que o Dead Eye marca o alvo; o
+    terminal, um quadrado que se expande em varredura. Os outros, a onda
+    redonda de sempre. Tudo dentro de ``RAIO_ONDA``.
+    """
+    curva = QEasingCurve(QEasingCurve.Type.OutCubic)
+    aberto = curva.valueForProgress(progresso)
+    resta = max(0.0, 1.0 - progresso)
+    pintor.save()
+    pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pintor.setBrush(Qt.BrushStyle.NoBrush)
+    if estilo == "cruz":
+        tinta = QColor(cor)
+        tinta.setAlphaF(cor.alphaF() * resta)
+        pintor.setPen(_caneta(tinta, 2.0))
+        de, ate = 6.0 + 10.0 * aberto, 13.0 + 14.0 * aberto
+        for dx, dy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
+            unidade = QPointF(dx * 0.7071, dy * 0.7071)
+            pintor.drawLine(centro + unidade * de, centro + unidade * ate)
+    elif estilo == "olho_morto":
+        tinta = QColor(alerta)
+        tinta.setAlphaF(alerta.alphaF() * min(1.0, resta * 1.6))
+        pintor.setPen(_caneta(tinta, 2.4))
+        braco = 5.0 + 3.0 * aberto
+        pintor.drawLine(QPointF(centro.x() - braco, centro.y() - braco),
+                        QPointF(centro.x() + braco, centro.y() + braco))
+        pintor.drawLine(QPointF(centro.x() + braco, centro.y() - braco),
+                        QPointF(centro.x() - braco, centro.y() + braco))
+    elif estilo == "colchetes":
+        tinta = QColor(cor)
+        tinta.setAlphaF(cor.alphaF() * resta)
+        pintor.setPen(_caneta(tinta, 0.6 + 2.0 * resta))
+        lado = 8.0 + (RAIO_ONDA - 10.0) * aberto
+        pintor.drawRect(QRectF(centro.x() - lado, centro.y() - lado, 2 * lado, 2 * lado))
+    else:
+        tinta = QColor(cor)
+        tinta.setAlphaF(cor.alphaF() * resta)
+        pintor.setPen(_caneta(tinta, 0.6 + 2.2 * resta))
+        raio = 8.0 + (RAIO_ONDA - 8.0) * aberto
+        pintor.drawEllipse(centro, raio, raio)
+    pintor.restore()
+
+
 class Cenario:
     """Compõe e desenha a atmosfera. Não é um widget: pinta onde mandarem.
 
@@ -898,6 +1223,7 @@ class Cenario:
             brilho=a.brilho * i, grade=a.grade * i, fibras=a.fibras * i,
             cantoneiras=a.cantoneiras * i, aurora=a.aurora * i, selo=a.selo * i,
             horizonte=a.horizonte * i, arranhoes=a.arranhoes * i,
+            digitais=a.digitais * i, constelacao=a.constelacao * i, estencil=a.estencil * i,
             tremulacao=a.tremulacao * i, interferencia=a.interferencia * i,
             densidade=int(a.densidade * i),
         )
@@ -1152,8 +1478,21 @@ class Cenario:
         pintor.setBrush(Qt.BrushStyle.NoBrush)
         cor = QColor(self._tema.accent)
         forca = self._forca_luz * self._intensidade
+        estilo = self._atmosfera.mira
         if forca > 0.001:
             crescido = max(0.0, (self._raio_anel - RAIO_ANEL) / (RAIO_ANEL_CLICAVEL - RAIO_ANEL))
+            # Solta, a mira do jogo; abraçando um botão, o contorno dele. Entre
+            # uma e outra, as duas esmaecendo em sentidos opostos.
+            peso_mira = max(0.0, 1.0 - 2.0 * self._forca_abraco) if estilo in MIRAS else 0.0
+            if peso_mira > 0.001:
+                cor_mira = QColor(cor)
+                cor_mira.setAlphaF(min(1.0, 0.9 * forca * peso_mira))
+                pintar_mira(
+                    pintor, estilo, self._caixa_anel.center(), self._caixa_anel.width() / 2,
+                    cor_mira, crescido,
+                )
+            forca *= 1.0 - peso_mira
+        if forca > 0.001:
             contorno = QColor(cor)
             contorno.setAlphaF(min(1.0, 0.85 * forca))
             caneta = QPen(contorno)
@@ -1174,16 +1513,12 @@ class Cenario:
             # mesma chamada desenha o anel solto e o anel abraçando.
             pintor.drawRoundedRect(self._caixa_anel, self._canto_anel, self._canto_anel)
             pintor.setBrush(Qt.BrushStyle.NoBrush)
-        curva = QEasingCurve(QEasingCurve.Type.OutCubic)
+        onda = QColor(cor)
+        onda.setAlphaF(min(1.0, 0.75 * self._intensidade))
+        alerta = QColor(self._tema.alert)
+        alerta.setAlphaF(min(1.0, 0.9 * self._intensidade))
         for centro, idade in self._ondas:
-            progresso = idade / DURACAO_ONDA
-            raio = 8.0 + (RAIO_ONDA - 8.0) * curva.valueForProgress(progresso)
-            onda = QColor(cor)
-            onda.setAlphaF(max(0.0, 0.75 * (1.0 - progresso)) * self._intensidade)
-            caneta = QPen(onda)
-            caneta.setWidthF(0.6 + 2.2 * (1.0 - progresso))
-            pintor.setPen(caneta)
-            pintor.drawEllipse(centro, raio, raio)
+            pintar_onda(pintor, estilo, centro, idade / DURACAO_ONDA, onda, alerta)
         pintor.restore()
 
     def pintar_luz(self, pintor: QPainter, *, atenuacao: float = 1.0) -> None:
@@ -1291,6 +1626,15 @@ class Cenario:
                 self._camada_horizonte(pintor, largura, altura, a, self._tema)
             if a.arranhoes > 0:
                 self._camada_arranhoes(pintor, largura, altura, a, self._tema)
+            # E as três do material de cada aparelho: o vidro engordurado do
+            # Pip-Boy, o céu das habilidades do norte, o inventário pintado
+            # com molde do visor.
+            if a.digitais > 0:
+                self._camada_digitais(pintor, largura, altura, a, self._tema)
+            if a.constelacao > 0:
+                self._camada_constelacao(pintor, largura, altura, a, self._tema)
+            if a.estencil > 0:
+                self._camada_estencil(pintor, largura, altura, a, self._tema)
         if a.cantoneiras > 0 and self._tema is not None:
             self._camada_cantoneiras(pintor, largura, altura, a, self._tema)
         if a.vinheta > 0:
@@ -1499,6 +1843,215 @@ class Cenario:
             pintor.setPen(caneta)
             pintor.drawLine(QPointF(x, topo), QPointF(x + rng.uniform(-1.5, 1.5), fundo))
         pintor.restore()
+
+    @staticmethod
+    def _camada_digitais(
+        pintor: QPainter, largura: int, altura: int, a: Atmosfera, t: GameTheme
+    ) -> None:
+        """Digitais e gordura no vidro do Pip-Boy.
+
+        É o último acabamento que a equipe de arte da Bethesda conta ter dado
+        à tela do aparelho: uma camada de sujeira e marcas de dedo. É o que
+        faz o verde de fósforo parecer um VIDRO na frente de um tubo, e não
+        uma cor de fundo — o aparelho é usado, no pulso de alguém, num mundo
+        de poeira.
+
+        As marcas ficam onde um polegar encosta num aparelho de pulso: nos
+        cantos e nas bordas, nunca no meio da conversa. Cada digital é um
+        punhado de arcos elípticos concêntricos, com falhas — as cristas —,
+        sobre uma mancha de gordura que pega a luz.
+        """
+        rng = random.Random(a.semente * 13 + 5)
+        pintor.save()
+        pintor.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
+        pintor.setBrush(Qt.BrushStyle.NoBrush)
+        lugares = (
+            (0.93, 0.86, 1.0), (0.06, 0.12, 0.8), (0.97, 0.20, 0.7), (0.30, 0.95, 0.6),
+        )
+        for fx, fy, peso in lugares:
+            centro = QPointF(largura * fx, altura * fy)
+            raio = min(largura, altura) * rng.uniform(0.045, 0.06)
+            # A gordura: um borrão que pega a luz, mais largo que a digital.
+            mancha = QRadialGradient(centro, raio * 2.2)
+            perto = QColor(t.primary)
+            perto.setAlphaF(min(1.0, a.digitais * 0.05 * peso))
+            longe = QColor(perto)
+            longe.setAlphaF(0.0)
+            mancha.setColorAt(0.0, perto)
+            mancha.setColorAt(1.0, longe)
+            pintor.setPen(Qt.PenStyle.NoPen)
+            pintor.setBrush(mancha)
+            pintor.drawEllipse(centro, raio * 2.2, raio * 2.2)
+            pintor.setBrush(Qt.BrushStyle.NoBrush)
+            # As cristas: arcos concêntricos, levemente achatados e girados.
+            giro = rng.uniform(-40.0, 40.0)
+            pintor.save()
+            pintor.translate(centro)
+            pintor.rotate(giro)
+            for anel in range(1, 9):
+                r = raio * anel / 8
+                crista = QColor(t.primary)
+                crista.setAlphaF(min(1.0, a.digitais * 0.07 * peso))
+                caneta = QPen(crista)
+                caneta.setWidthF(0.9)
+                pintor.setPen(caneta)
+                inicio = rng.uniform(0, 360)
+                vao = rng.uniform(30, 90)
+                caixa = QRectF(-r, -r * 1.3, r * 2, r * 2.6)
+                pintor.drawArc(caixa, int(inicio * 16), int((360 - vao) * 16))
+            pintor.restore()
+        pintor.restore()
+
+    @staticmethod
+    def _camada_constelacao(
+        pintor: QPainter, largura: int, altura: int, a: Atmosfera, t: GameTheme
+    ) -> None:
+        """A constelação sobre uma nebulosa pintada: o céu das habilidades.
+
+        No Skyrim, subir de nível é olhar para cima: cada árvore de talentos
+        é uma constelação sobre nebulosas pintadas à mão — que depois foram
+        parar no céu de Sovngarde. A aurora já estava aqui; o que faltava era
+        o desenho no céu, que é o que se reconhece.
+
+        A figura é uma espada — a do Guerreiro, a primeira das pedras-guia —,
+        no alto, encostada à direita, fora da coluna lateral e do texto da
+        tela inicial. As linhas são finas e apagadas; as estrelas, pontos
+        pequenos com halo: um céu, e não um diagrama.
+        """
+        # Encostada na borda direita: o texto da tela inicial é centrado e
+        # chega a dois terços da largura; ali só passam as falas do jogador,
+        # e as estrelas são pontos de dois pixels.
+        caixa = QRectF(largura * 0.82, altura * 0.07, largura * 0.15, altura * 0.40)
+        pintor.save()
+        pintor.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
+        pintor.setPen(Qt.PenStyle.NoPen)
+        # A nebulosa: três nuvens sobrepostas, em cores frias.
+        for cor_base, fx, fy, fr, forca in (
+            (t.info, 0.45, 0.35, 0.95, 0.09),
+            (t.accent, 0.62, 0.60, 0.70, 0.06),
+            (t.primary, 0.35, 0.72, 0.60, 0.05),
+        ):
+            centro = QPointF(caixa.left() + caixa.width() * fx, caixa.top() + caixa.height() * fy)
+            raio = caixa.width() * fr
+            nuvem = QRadialGradient(centro, raio)
+            perto = QColor(cor_base)
+            perto.setAlphaF(min(1.0, a.constelacao * forca))
+            longe = QColor(perto)
+            longe.setAlphaF(0.0)
+            nuvem.setColorAt(0.0, perto)
+            nuvem.setColorAt(1.0, longe)
+            pintor.setBrush(nuvem)
+            pintor.drawEllipse(centro, raio, raio)
+
+        def ponto(fx: float, fy: float) -> QPointF:
+            return QPointF(caixa.left() + caixa.width() * fx, caixa.top() + caixa.height() * fy)
+
+        # A espada: ponta, lâmina, guarda, punho e pomo — e duas estrelas
+        # soltas, que toda constelação de verdade tem.
+        estrelas = {
+            "ponta": ponto(0.50, 0.02), "lamina": ponto(0.52, 0.34), "guarda": ponto(0.50, 0.62),
+            "esq": ponto(0.28, 0.58), "dir": ponto(0.74, 0.66), "punho": ponto(0.49, 0.80),
+            "pomo": ponto(0.51, 0.90), "solta1": ponto(0.16, 0.24), "solta2": ponto(0.86, 0.30),
+        }
+        tracos = (
+            ("ponta", "lamina"), ("lamina", "guarda"), ("esq", "guarda"), ("guarda", "dir"),
+            ("guarda", "punho"), ("punho", "pomo"),
+        )
+        linha = QColor(t.primary)
+        linha.setAlphaF(min(1.0, a.constelacao * 0.16))
+        caneta = QPen(linha)
+        caneta.setWidthF(0.9)
+        pintor.setPen(caneta)
+        for de, ate in tracos:
+            pintor.drawLine(estrelas[de], estrelas[ate])
+        pintor.setPen(Qt.PenStyle.NoPen)
+        for nome, centro in estrelas.items():
+            tamanho = 1.4 if nome.startswith("solta") else 2.0
+            halo = QRadialGradient(centro, tamanho * 4)
+            brilho = QColor(t.primary)
+            brilho.setAlphaF(min(1.0, a.constelacao * 0.45))
+            apagado = QColor(brilho)
+            apagado.setAlphaF(0.0)
+            halo.setColorAt(0.0, brilho)
+            halo.setColorAt(0.25, brilho)
+            halo.setColorAt(1.0, apagado)
+            pintor.setBrush(halo)
+            pintor.drawEllipse(centro, tamanho * 4, tamanho * 4)
+        pintor.restore()
+
+    ESTENCIL = "A-04"
+
+    @staticmethod
+    def molde_do_estencil(
+        largura: int, altura: int, t: GameTheme
+    ) -> tuple[QFont, QPointF, list[QRectF]]:
+        """A fonte, a linha de base e as pontes da marcação em estêncil.
+
+        À parte da pintura porque as pontes são a regra que faz um estêncil —
+        e a suíte confere que, onde elas passam, não sobra tinta nenhuma.
+        """
+        fonte = QFont(t.font_candidates[0])
+        fonte.setBold(True)
+        fonte.setPixelSize(max(40, int(altura * 0.26)))
+        fonte.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, altura * 0.012)
+        metricas = QFontMetricsF(fonte)
+        largura_texto = metricas.horizontalAdvance(Cenario.ESTENCIL)
+        base = QPointF(largura * 0.97 - largura_texto, altura * 0.93)
+        topo = base.y() - metricas.ascent()
+        passo = metricas.averageCharWidth() * 0.55
+        espessura = max(2.0, altura * 0.006)
+        pontes: list[QRectF] = []
+        x = base.x() + passo * 0.5
+        while x < base.x() + largura_texto:
+            pontes.append(QRectF(x, topo, espessura, metricas.ascent()))
+            x += passo
+        return fonte, base, pontes
+
+    @staticmethod
+    def _camada_estencil(
+        pintor: QPainter, largura: int, altura: int, a: Atmosfera, t: GameTheme
+    ) -> None:
+        """A marcação em estêncil do esquadrão, grande e apagada, no fundo.
+
+        O Battlefield 6 usa uma variante em estêncil da sua fonte utilitária
+        como elemento decorativo de fundo das telas — a marcação pintada com
+        molde que se vê em caixa de munição e em casco de blindado. Um
+        visor é equipamento; o equipamento tem inventário pintado nele.
+
+        As pontes do estêncil — as falhas verticais que o molde deixa na
+        letra — são cortadas depois de escrever, com a composição que APAGA:
+        é o que separa uma marcação pintada de um número qualquer.
+        """
+        fonte, base, pontes = Cenario.molde_do_estencil(largura, altura, t)
+        metricas = QFontMetricsF(fonte)
+        topo = base.y() - metricas.ascent()
+        # Numa imagem à parte, para o corte das pontes não abrir buracos no
+        # resto do vidro.
+        molde = QImage(largura, altura, QImage.Format.Format_ARGB32_Premultiplied)
+        molde.fill(QColor(0, 0, 0, 0))
+        tinta = QPainter(molde)
+        tinta.setRenderHint(QPainter.RenderHint.Antialiasing)
+        cor = QColor(t.primary)
+        cor.setAlphaF(min(1.0, a.estencil * 0.07))
+        tinta.setPen(cor)
+        tinta.setFont(fonte)
+        tinta.drawText(base, Cenario.ESTENCIL)
+        tinta.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+        for ponte in pontes:
+            tinta.fillRect(ponte, QColor(0, 0, 0))
+        # E a legenda pequena, em cima, como a de uma caixa de carga.
+        tinta.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+        rotulo = QFont(t.font_candidates[0])
+        rotulo.setBold(True)
+        rotulo.setPixelSize(max(9, int(altura * 0.018)))
+        rotulo.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 3.0)
+        legenda = QColor(t.primary)
+        legenda.setAlphaF(min(1.0, a.estencil * 0.12))
+        tinta.setPen(legenda)
+        tinta.setFont(rotulo)
+        tinta.drawText(QPointF(base.x(), topo - altura * 0.012), "ESQUADRÃO ALFA · UNIDADE 04")
+        tinta.end()
+        pintor.drawImage(0, 0, molde)
 
     @staticmethod
     def _camada_cantoneiras(

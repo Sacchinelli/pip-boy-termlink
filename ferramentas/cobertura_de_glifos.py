@@ -133,6 +133,9 @@ def main() -> int:
     from PySide6.QtWidgets import QApplication
 
     QApplication(sys.argv)
+    from pipboy.interface.fontes import registrar_fontes
+
+    registrar_fontes()
     visiveis = {str(f) for f in QFontDatabase.families()}
     if not visiveis:
         print("\n  Nenhuma família visível nesta plataforma Qt; nada foi medido.")
@@ -153,7 +156,8 @@ def main() -> int:
     papeis: dict[str, list[str]] = {}
     for nome, tema in TEMAS.items():
         papeis.setdefault(primeira(tema.font_candidates), []).append(nome)
-    papeis.setdefault(primeira(TEMAS["Fallout"].ui_font_candidates), []).append("controles")
+        papeis.setdefault(primeira(tema.display_candidates), []).append(f"{nome}/títulos")
+        papeis.setdefault(primeira(tema.ui_font_candidates), []).append(f"{nome}/controles")
     papeis.setdefault(primeira(FONTES_MONO), []).append("rodapé/mono")
 
     simbolos = sorted(simbolos_no_codigo())

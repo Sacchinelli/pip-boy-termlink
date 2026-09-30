@@ -73,6 +73,7 @@ from ..vocabulary import FILTRO_REVISAR, VocabularyStore
 from . import montagem
 from .atalhos import Atalhos, globais_disponiveis
 from .atmosfera import Cenario, atmosfera_de
+from .avisos import Recado
 from .caderno import JanelaCaderno
 from .componentes import (
     Botao,
@@ -81,12 +82,14 @@ from .componentes import (
     LuzDoCursor,
     TransicaoDeTema,
     acender_borda,
+    definir_chegada_das_letras,
     definir_fonte_da_luz,
     definir_movimento_reduzido,
 )
 from .cursor import CampoMagnetico, RastreadorDeCursor, abraco_de, centro_de
 from .dialogo import avisar
 from .estilo import RAIO_PADRAO, RAIO_POR_FORMA, folha_da_janela
+from .fontes import ajuste_optico, compor_titulo, registrar_fontes, tem_negrito
 from .moldura import (
     GripsRedimensionamento,
     aplicar_cantos_do_sistema,
@@ -103,7 +106,8 @@ from .montagem import (
     NIVEIS_ATMOSFERA,
     NIVEIS_GANHO_JOGO,
 )
-from .movimento import SinalFlutuante
+from .movimento import SinalFlutuante, definir_ritmo
+from .ornamentos import definir_estilo_de_selecao, definir_estilo_do_principal
 from .paleta import PALAVRAS_DO_CADERNO, Comando, Paleta
 from .preferencias import Escolha, Marca, VinculoDePreferencias
 from .relogios import Batidas, Relogios
@@ -217,6 +221,9 @@ class Janela(QWidget):
 
         self._tema: GameTheme = theme_for(self._prefs.jogo)
         self._atmosfera = atmosfera_de(self._tema.name)
+        # As fontes que acompanham o programa entram antes de a janela
+        # perguntar quais existem.
+        registrar_fontes()
         self._instaladas = set(QFontDatabase.families())
         self._mono = self._primeira_instalada(FONTES_MONO)
 
@@ -427,12 +434,30 @@ class Janela(QWidget):
         alternativa a manter em paralelo.
         """
         tipo = design.TIPO[papel]
-        familia = self._primeira_instalada(
-            self._tema.ui_font_candidates if ui else self._tema.font_candidates
-        )
-        fonte = QFont(familia, design.escalar(tipo.tamanho, self._escala_texto))
-        fonte.setBold(tipo.peso == "bold")
+        if ui:
+            candidatas = self._tema.ui_font_candidates
+        elif papel == "display":
+            # Os títulos na letra de título do jogo, quando ele tem uma.
+            candidatas = self._tema.display_candidates
+        else:
+            candidatas = self._tema.font_candidates
+        familia = self._primeira_instalada(candidatas)
+        # A letra de LER no corpo aparente da de referência (ver
+        # fontes.ajuste_optico); o título fica no corpo que o desenho dele pede.
+        ajuste = 1.0 if papel == "display" else ajuste_optico(familia)
+        fonte = QFont(familia, design.escalar(tipo.tamanho, self._escala_texto * ajuste))
+        fonte.setBold(tipo.peso == "bold" and tem_negrito(familia))
         fonte.setItalic(tipo.estilo == "italic")
+        if papel == "display" and not ui:
+            compor_titulo(fonte, self._tema)
+        return fonte
+
+    def fonte_de_secao(self) -> QFont:
+        """O título de seção: a fonte do jogo, com o espaçamento dos menus dele."""
+        fonte = self.fonte("secao", ui=False)
+        fonte.setLetterSpacing(
+            QFont.SpacingType.AbsoluteSpacing, 1.0 + self._atmosfera.espacamento_titulo
+        )
         return fonte
 
     def _fonte_mono(self, papel: str) -> QFont:
@@ -445,14 +470,24 @@ class Janela(QWidget):
         return design.escalar(design.LARGURA_LATERAL, self._escala_texto)
 
     def _ajustar_marca(self, texto: str) -> QFont:
-        """Encolhe o nome do ambiente até ele caber na largura da coluna."""
+        """Encolhe o nome do ambiente até ele caber na largura da coluna.
+
+        Primeiro com o espaçamento do jogo, encolhendo a letra; se nem na
+        menor letra ele couber, o espaçamento cede antes da palavra — um
+        "PERGAMINHO DO DOVAHKIIN" espaçado saía cortado em "DOVAHKII", e
+        ninguém lê um nome pela metade para apreciar o espaçamento dele.
+        """
+        limite = design.escalar(design.CABECALHO_LARGURA_MAX, self._escala_texto)
         fonte = self.fonte("display", ui=False)
         maximo = fonte.pointSize()
-        limite = design.escalar(design.CABECALHO_LARGURA_MAX, self._escala_texto)
-        for tamanho in range(maximo, maximo - 10, -1):
-            fonte.setPointSize(tamanho)
-            if QFontMetrics(fonte).horizontalAdvance(texto) <= limite:
-                break
+        for espacamento in (self._atmosfera.espacamento_titulo, 0.0):
+            # O espaçamento entra ANTES da medida: a conta de caber já precisa
+            # das letras afastadas, ou o título espaçado estoura a coluna.
+            fonte.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, espacamento)
+            for tamanho in range(maximo, maximo - 10, -1):
+                fonte.setPointSize(tamanho)
+                if QFontMetrics(fonte).horizontalAdvance(texto) <= limite:
+                    return fonte
         return fonte
 
     # ----------------------------------------------------------------- Janela
@@ -541,6 +576,8 @@ class Janela(QWidget):
         self.botao_mudo = palco.botao_mudo
         self.botao_acao = palco.botao_acao
         self.conversa = palco.conversa
+        self.moldura_painel = palco.moldura_painel
+        self.aviso_de_palavra = palco.aviso_de_palavra
         self.entrada_texto = palco.entrada_texto
         self.botao_enviar = palco.botao_enviar
 
@@ -600,8 +637,18 @@ class Janela(QWidget):
         ativa = self._worker is not None
         self.botao_acao.setText(t.stop_label if ativa else t.start_label)
         self.botao_acao.variante = "perigo" if ativa else "primario"
+        # O convite do campo de texto é do jogo; o nome acessível dele, não.
+        self.entrada_texto.setPlaceholderText(t.convite)
 
         self._cenario.definir(t, self._atmosfera)
+        # O jeito de o jogo marcar o que está escolhido vale no programa
+        # inteiro — chaves, filtros do caderno, lista do histórico, paleta.
+        definir_estilo_de_selecao(self._atmosfera.selecao)
+        definir_estilo_do_principal(self._atmosfera.botao_principal)
+        # E o ritmo dele, e o jeito de as letras de um título chegarem —
+        # antes de qualquer título se decifrar com o nome do jogo novo.
+        definir_ritmo(self._atmosfera.tempo, self._atmosfera.curva)
+        definir_chegada_das_letras(self._atmosfera.letras, t.accent_text)
         for botao in (
             self.botao_acao, self.botao_mudo, self.botao_caderno,
             self.botao_historico, self.botao_enviar,
@@ -626,6 +673,9 @@ class Janela(QWidget):
             campo.definir_cor_seta(t.text_muted)
             campo.definir_cor_luz(t.primary, raio_borda=raio)
         self._atualizar_pilula()
+        # A moldura do painel troca de traço — ou some — com o jogo.
+        self.moldura_painel.acompanhar()
+        self.aviso_de_palavra.recolher()
         self._campainha.aplicar_tema()
         if self._capsula is not None:
             self._capsula.aplicar_tema()
@@ -654,7 +704,7 @@ class Janela(QWidget):
         self.marca.setFont(self._ajustar_marca(self._tema.header_title))
         self.submarca.setFont(self.fonte("micro"))
         for rotulo in self._rotulos_secao:
-            rotulo.setFont(self.fonte("secao"))
+            rotulo.setFont(self.fonte_de_secao())
         for etiqueta in self._rotulos_campo:
             etiqueta.setFont(self.fonte("rotulo"))
         for campo in self.campos.values():
@@ -1783,16 +1833,27 @@ class Janela(QWidget):
             )
 
     def _anunciar_palavras(self, novas: int) -> None:
-        """Um "+1" sobe do contador do caderno, na lateral.
+        """A palavra nova, anunciada sobre a conversa e no contador da lateral.
 
-        A lateral é o único lugar da janela principal que mostra o tamanho do
-        caderno, e a mudança de "3 termos" para "4 termos" acontecia num quadro,
+        Sobre a conversa, do jeito do jogo (ver avisos): é onde o olho está,
+        e o instante em que os jogos mais capricham. Na lateral, um "+1" sobe
+        do contador do caderno — o único lugar da janela que mostra o tamanho
+        dele, e a mudança de "3 termos" para "4 termos" acontecia num quadro,
         num texto miúdo, no canto oposto ao da conversa. O som da campainha já
         dizia que algo foi salvo; o sinal diz ONDE aquilo foi parar.
+
+        Com a atmosfera desligada, nenhum dos dois: a anotação na conversa já
+        diz o que entrou, e quem desligou pediu uma janela quieta.
         """
+        if self._intensidade_atmosfera <= 0.0:
+            return
+        recentes = self._store.listar(limite=1)
+        if recentes and self.conversa.isVisible():
+            palavra = recentes[0]
+            self.aviso_de_palavra.anunciar(Recado(palavra.termo, palavra.traducao, novas))
         rotulo = self.rotulo_caderno
         pai = rotulo.parentWidget()
-        if self._intensidade_atmosfera <= 0.0 or pai is None or not rotulo.isVisible():
+        if pai is None or not rotulo.isVisible():
             return
         primeira_linha = rotulo.text().split("\n", 1)[0]
         fonte = self.fonte("legenda")

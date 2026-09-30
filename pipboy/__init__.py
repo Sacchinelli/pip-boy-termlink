@@ -114,6 +114,15 @@ def main() -> int:
     except Exception:
         LOGGER.debug("Ícone indisponível.", exc_info=True)
 
+    # As fontes que acompanham o programa entram no banco do Qt antes de
+    # qualquer coisa desenhar texto — a abertura já é no tema do jogo.
+    try:
+        from .interface.fontes import registrar_fontes
+
+        registrar_fontes()
+    except Exception:
+        LOGGER.debug("Fontes do programa indisponíveis.", exc_info=True)
+
     # A abertura cobre o segundo de carga com o tema do último jogo usado.
     # Se falhar por qualquer motivo, o arranque segue sem ela: é enfeite.
     abertura = None

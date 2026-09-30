@@ -697,6 +697,24 @@ def main() -> int:
         "e ela está sempre à vista: a paleta existe mesmo sem atalho global",
     )
     checar(
+        tela.titulo.text() == janela.tema.saudacao,
+        f"a tela inicial abre com a frase do jogo ({tela.titulo.text()})",
+    )
+    jogo_saudacao = janela.campo_jogo.currentText()
+    janela.campo_jogo.setCurrentText("Red Dead")
+    aplicacao.processEvents()
+    checar(
+        tela.titulo.text() == "A trilha está aberta",
+        f"e trocar de jogo troca a frase ({tela.titulo.text()})",
+    )
+    checar(
+        janela.entrada_texto.placeholderText() == "Perguntar ao parceiro…"
+        and janela.entrada_texto.accessibleName() == "Perguntar por texto",
+        "e o convite do campo de texto — mas não o nome que o leitor de tela anuncia",
+    )
+    janela.campo_jogo.setCurrentText(jogo_saudacao)
+    aplicacao.processEvents()
+    checar(
         tecla_legivel("ctrl+alt+p") == "Ctrl+Alt+P" and tecla_legivel("f12") == "F12",
         "as teclas do .env são escritas como se leem numa tecla",
     )
@@ -800,8 +818,15 @@ def main() -> int:
     from pipboy.design import ESPACO_MD
 
     def fileira_coerente() -> bool:
+        # A lista de menu de um jogo está sempre empilhada; abas e cartões
+        # seguem a conta, com o espaço que a gramática põe entre eles.
+        if tela.gramatica.startswith("lista"):
+            return tela.empilhada
         cartoes = (tela.cartao_revisar, tela.cartao_caderno, tela.cartao_historico)
-        necessaria = 3 * max(c.largura_ideal() for c in cartoes) + 2 * ESPACO_MD
+        ideais = [c.largura_ideal() for c in cartoes]
+        # Abas cabem pela soma; cartões, pelo mais largo vezes três.
+        ocupada = sum(ideais) if tela.gramatica == "abas" else 3 * max(ideais)
+        necessaria = ocupada + 2 * tela._fileira.spacing()
         return tela.empilhada == (necessaria > min(tela.width(), tela.LARGURA_MAX))
 
     tamanho_antes = janela.size()
@@ -829,6 +854,275 @@ def main() -> int:
     janela.campo_tamanho_texto.setCurrentText(escala_antes)
     janela.resize(tamanho_antes)
     aplicacao.processEvents()
+
+    print("cada jogo escreve na letra dele")
+    from pipboy import design as design_letra
+    from pipboy.interface.fontes import (
+        AJUSTE_MAXIMO,
+        AJUSTE_MINIMO,
+        ajuste_optico,
+        registrar_fontes,
+    )
+
+    familias_embutidas = registrar_fontes()
+    checar(
+        set(familias_embutidas) >= {
+            "Share Tech Mono", "Roboto Condensed", "Cinzel", "Jost", "D-DIN", "Rye",
+            "Rajdhani", "Barlow Condensed", "IM FELL English",
+        },
+        f"as nove famílias do programa entram no banco do Qt ({familias_embutidas})",
+    )
+    checar(registrar_fontes() == familias_embutidas, "e registrar de novo não duplica nada")
+
+    jogo_letra = janela.campo_jogo.currentText()
+    janela.campo_jogo.setCurrentText("Red Dead")
+    aplicacao.processEvents()
+    titulo_rdr = janela.fonte("display", ui=False)
+    checar(
+        titulo_rdr.family() == "Rye" and not titulo_rdr.bold(),
+        "no Red Dead, os títulos no tipo de madeira — sem o negrito falso que a Rye não tem",
+    )
+    checar(
+        janela.fonte("corpo", ui=False).family() != "Rye"
+        and janela.fonte("rotulo").family() != "Rye",
+        "e a fala e os controles continuam numa letra de ler",
+    )
+    checar(
+        janela.marca.font().family() == "Rye"
+        and janela.conversa.tela_inicial.titulo.font().family() == "Rye",
+        "a marca da lateral e a saudação vestem a letra do título",
+    )
+    janela.campo_jogo.setCurrentText("Cyberpunk 2077")
+    aplicacao.processEvents()
+    checar(
+        janela.fonte("rotulo").family() == "Rajdhani"
+        and janela.fonte("corpo", ui=False).family() == "Rajdhani",
+        "na Night City, controles e fala em Rajdhani, a letra da interface do jogo",
+    )
+    janela.campo_jogo.setCurrentText("Elden Ring")
+    aplicacao.processEvents()
+    checar(
+        janela.fonte("display", ui=False).family() == "Cinzel"
+        and janela.fonte("display", ui=False).bold(),
+        "no Elden Ring, a romana de inscrição nos títulos, com o negrito que ela tem",
+    )
+    checar(
+        janela.fonte("rotulo").family() not in familias_embutidas,
+        "e os controles na neutra: letra de título não serve para rótulo de nove pontos",
+    )
+    janela.campo_jogo.setCurrentText("GTA")
+    aplicacao.processEvents()
+    checar(
+        all(
+            janela.fonte(papel, ui=ui).family() not in familias_embutidas
+            for papel, ui in (("rotulo", True), ("corpo", False), ("display", False))
+        ),
+        "o GTA segue nas letras de antes: as dele não são livres",
+    )
+
+    # O ajuste óptico: a letra de ler no corpo aparente da referência; o
+    # título, no corpo que o desenho dele pede.
+    checar(
+        all(AJUSTE_MINIMO <= ajuste_optico(f) <= AJUSTE_MAXIMO for f in familias_embutidas),
+        "o ajuste óptico de toda família fica dentro dos limites",
+    )
+    janela.campo_jogo.setCurrentText("Skyrim")
+    aplicacao.processEvents()
+    fala_skyrim = janela.fonte("corpo", ui=False)
+    esperado_skyrim = design_letra.escalar(
+        design_letra.TIPO["corpo"].tamanho, janela._escala_texto * ajuste_optico(fala_skyrim.family())
+    )
+    checar(
+        fala_skyrim.family() == "Jost" and fala_skyrim.pointSize() == esperado_skyrim,
+        f"no norte, a fala em Jost, no corpo aparente da referência ({fala_skyrim.pointSize()} pt)",
+    )
+    checar(
+        janela.fonte("display", ui=False).pointSize()
+        == design_letra.escalar(design_letra.TIPO["display"].tamanho, janela._escala_texto),
+        "e o título no corpo que o desenho dele pede, sem ajuste",
+    )
+    from PySide6.QtGui import QFont as FonteTitulo
+
+    titulo_norte = janela.fonte("display", ui=False)
+    checar(
+        titulo_norte.capitalization() == FonteTitulo.Capitalization.AllUppercase
+        and titulo_norte.weight() == FonteTitulo.Weight.Light and not titulo_norte.bold(),
+        "os títulos do norte são Futura fina em maiúsculas, como os menus do Skyrim",
+    )
+    checar(
+        janela.conversa.tela_inicial.titulo.text() == "O norte está à escuta"
+        and janela.conversa.tela_inicial.titulo.accessibleName() == "O norte está à escuta",
+        "a caixa alta é da letra: o texto e o que o leitor de tela lê continuam como foram escritos",
+    )
+    checar(
+        janela.fonte("corpo", ui=False).capitalization() == FonteTitulo.Capitalization.MixedCase
+        and janela.fonte("rotulo").capitalization() == FonteTitulo.Capitalization.MixedCase,
+        "e a fala e os controles do norte nunca viram caixa alta",
+    )
+    janela.campo_jogo.setCurrentText("Elden Ring")
+    aplicacao.processEvents()
+    titulo_graca = janela.fonte("display", ui=False)
+    checar(
+        titulo_graca.capitalization() == FonteTitulo.Capitalization.MixedCase and titulo_graca.bold(),
+        "e onde o jogo não pede, os títulos seguem como eram",
+    )
+    janela.campo_jogo.setCurrentText(jogo_letra)
+    aplicacao.processEvents()
+
+    print("a tela inicial é o menu do jogo")
+    from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_MENU
+
+    menus = {nome: r.menu for nome, r in RECEITAS_MENU.items()}
+    checar(
+        set(menus.values()) <= {"", "lista_centrada", "lista_a_esquerda", "abas"},
+        "todo jogo arruma o menu numa gramática que existe",
+    )
+    checar(
+        menus["Fallout"] == "abas" and menus["Elden Ring"] == "lista_centrada"
+        and menus["Red Dead"] == "lista_a_esquerda" and menus["Genérico / Outro"] == "",
+        "abas no Pip-Boy, lista no meio no Elden Ring, coluna de pausa no velho oeste, cartões no neutro",
+    )
+    checar(
+        sum(1 for g in menus.values() if g) == len(menus) - 1,
+        "e só o tema neutro fica com a gramática de aplicativo",
+    )
+
+    tela_menu = janela.conversa.tela_inicial
+    jogo_menu = janela.campo_jogo.currentText()
+    janela.conversa.limpar()
+
+    inclinacoes_menu: list[tuple[float, float]] = []
+
+    def sob_o_cursor(item, x_rel: float = 0.45):
+        ponto_menu = QPointF(item.width() * x_rel, item.height() / 2)
+        QApplication.sendEvent(item, QEnterEvent(ponto_menu, ponto_menu, QPointF(item.mapToGlobal(ponto_menu))))
+        aguardar(lambda: item._holofote.valor == 1.0)
+        imagem_menu = item.grab().toImage()
+        inclinacoes_menu.append(item.inclinacao())
+        QApplication.sendEvent(item, QEvent(QEvent.Type.Leave))
+        aguardar(lambda: item._holofote.valor == 0.0)
+        return imagem_menu
+
+    # O velho oeste: a tela inteira encosta à esquerda, os itens viram coluna.
+    janela.campo_jogo.setCurrentText("Red Dead")
+    aplicacao.processEvents()
+    checar(
+        tela_menu.gramatica == "lista_a_esquerda"
+        and bool(tela_menu.titulo.alignment() & Qt.AlignmentFlag.AlignLeft)
+        and bool(tela_menu.corpo.alignment() & Qt.AlignmentFlag.AlignLeft),
+        "no Red Dead, título e texto encostam à esquerda, com o menu",
+    )
+    checar(
+        tela_menu.empilhada and tela_menu._fileira.spacing() == 0
+        and tela_menu._fileira_widget.maximumWidth() == tela_menu.LARGURA_COLUNA,
+        "e os itens são uma coluna de pausa: um sobre o outro, colados, na largura do menu",
+    )
+    tela_menu.LARGURA_MAX = 100_000
+    tela_menu.resize(100_000, tela_menu.height())
+    checar(tela_menu.empilhada, "a coluna não vira fileira nem com espaço de sobra")
+    del tela_menu.LARGURA_MAX
+    janela.conversa.atualizar_inicial()
+    aplicacao.processEvents()
+    item_rdr = tela_menu.cartao_caderno
+    checar(
+        item_rdr.accessibleName() == "Caderno" and item_rdr.text() == "Caderno",
+        "o leitor de tela continua ouvindo 'Caderno', e não o título em maiúsculas",
+    )
+    repouso_rdr = item_rdr.grab().toImage()
+    aceso_rdr = sob_o_cursor(item_rdr, 0.9)
+    y_meio = aceso_rdr.height() // 2
+    vermelhos = sum(
+        1 for x in range(0, aceso_rdr.width(), 2)
+        if (c := aceso_rdr.pixelColor(x, y_meio)).red() > c.green() + 50 and c.red() > c.blue() + 50
+    )
+    vermelhos_repouso = sum(
+        1 for x in range(0, repouso_rdr.width(), 2)
+        if (c := repouso_rdr.pixelColor(x, y_meio)).red() > c.green() + 50 and c.red() > c.blue() + 50
+    )
+    checar(
+        vermelhos > aceso_rdr.width() // 4 and vermelhos_repouso == 0,
+        f"sob o cursor, a linha ganha a pincelada vermelha, que em repouso não há ({vermelhos} px)",
+    )
+    checar(
+        inclinacoes_menu[-1] == (0.0, 0.0),
+        f"e item de menu, aceso sob o cursor, não inclina como cartão ({inclinacoes_menu[-1]})",
+    )
+
+    # O Pip-Boy: abas sobre um fio, a escolhida acesa inteira no fósforo.
+    janela.campo_jogo.setCurrentText("Fallout")
+    aplicacao.processEvents()
+    # Com o teto de largura fora do caminho: "cabe" não pode depender da
+    # métrica de fonte da máquina que roda a suíte (ver a fileira, acima).
+    tela_menu.LARGURA_MAX = 100_000
+    tela_menu.resize(100_000, tela_menu.height())
+    checar(
+        tela_menu.gramatica == "abas" and not tela_menu.empilhada
+        and tela_menu._fileira.spacing() == 0
+        and bool(tela_menu.titulo.alignment() & Qt.AlignmentFlag.AlignHCenter),
+        "no Fallout, as três são abas lado a lado, encostadas, com a tela no meio",
+    )
+    # Uma largura em que as três cabem pela soma, mas não pela regra dos
+    # cartões (a mais larga vezes três): é aí que as duas regras se separam.
+    ideais_abas = [
+        c.largura_ideal()
+        for c in (tela_menu.cartao_revisar, tela_menu.cartao_caderno, tela_menu.cartao_historico)
+    ]
+    if 3 * max(ideais_abas) > sum(ideais_abas) + 8:
+        tela_menu.resize((3 * max(ideais_abas) + sum(ideais_abas)) // 2, tela_menu.height())
+        checar(
+            not tela_menu.empilhada,
+            f"cabendo pela soma, as abas ficam lado a lado mesmo com uma bem mais larga ({ideais_abas})",
+        )
+    checar(
+        tela_menu._fileira.stretch(0) == tela_menu.cartao_revisar.largura_ideal()
+        and tela_menu._fileira.stretch(2) == tela_menu.cartao_historico.largura_ideal(),
+        "e cada aba estica na proporção do que tem escrito, como as do Pip-Boy",
+    )
+    del tela_menu.LARGURA_MAX
+    aceso_fo = sob_o_cursor(tela_menu.cartao_caderno)
+    meio_fo = aceso_fo.pixelColor(aceso_fo.width() // 5, aceso_fo.height() // 3)
+    checar(
+        meio_fo.green() > 180 and meio_fo.red() < 150,
+        f"e a aba sob o cursor acende no verde do fósforo ({meio_fo.name()})",
+    )
+
+    # Elden Ring: a faixa de luz fica em volta do item, e não do painel inteiro.
+    janela.campo_jogo.setCurrentText("Elden Ring")
+    aplicacao.processEvents()
+    tela_menu.resize(900, tela_menu.height())
+    aplicacao.processEvents()
+    item_er = tela_menu.cartao_caderno
+    repouso_er = item_er.grab().toImage()
+    aceso_er = sob_o_cursor(item_er)
+
+    def mudou(x: int) -> bool:
+        y = aceso_er.height() // 2
+        return aceso_er.pixelColor(x, y) != repouso_er.pixelColor(x, y)
+
+    checar(
+        tela_menu.empilhada and mudou(aceso_er.width() // 2 - 60) and not mudou(4)
+        and not mudou(aceso_er.width() - 5),
+        "no Elden Ring, a faixa dourada acende em volta do item, e não de ponta a ponta",
+    )
+    checar(
+        item_er.fonte_do_item().pointSizeF() > janela.fonte("titulo", ui=False).pointSizeF()
+        and not item_er.fonte_do_item().bold(),
+        "e em letra de tela de título: maior e sem negrito",
+    )
+
+    janela.campo_jogo.setCurrentText("Genérico / Outro")
+    aplicacao.processEvents()
+    checar(
+        tela_menu.gramatica == "" and tela_menu._fileira.spacing() == ESPACO_MD
+        and tela_menu._fileira_widget.maximumWidth() > 10_000,
+        "no tema neutro, os cartões lado a lado de sempre",
+    )
+    tela_menu.adjustSize()
+    janela.campo_jogo.setCurrentText(jogo_menu)
+    aplicacao.processEvents()
+    janela.resize(janela.size())
+    aplicacao.processEvents()
+
 
     print("revisão com retorno")
     # Um caderno SÓ desta seção: responder cartões reagenda as palavras, e as
@@ -1419,7 +1713,11 @@ def main() -> int:
     )
     janela._cursor_mudou(None)
 
-    # -- O cartão da tela inicial inclina em direção ao cursor.
+    # -- O cartão da tela inicial inclina em direção ao cursor. Cartão é a
+    # gramática do tema neutro; nos jogos, a tela é o menu deles.
+    jogo_3d = janela.campo_jogo.currentText()
+    janela.campo_jogo.setCurrentText("Genérico / Outro")
+    aplicacao.processEvents()
     cartao_3d = janela.conversa.tela_inicial.cartao_caderno
     borda_direita = QPointF(cartao_3d.width() - 2.0, cartao_3d.height() / 2)
     QApplication.sendEvent(
@@ -1449,6 +1747,8 @@ def main() -> int:
     QApplication.sendEvent(
         cartao_3d, QFocusEvent(QEvent.Type.FocusOut, Qt.FocusReason.TabFocusReason)
     )
+    janela.campo_jogo.setCurrentText(jogo_3d)
+    aplicacao.processEvents()
 
     # -- Atmosfera desligada: nada disso existe.
     janela.campo_atmosfera.setCurrentText("Desligada")
@@ -2106,6 +2406,10 @@ def main() -> int:
 
     atmosfera_decifra = janela.campo_atmosfera.currentText()
     janela.campo_atmosfera.setCurrentText("Completa")
+    # O embaralho é a chegada das letras da Night City (ver "cada jogo tem o
+    # seu ritmo"); é nela que ele se confere.
+    jogo_decifra = janela.campo_jogo.currentText()
+    janela.campo_jogo.setCurrentText("Cyberpunk 2077")
     aplicacao.processEvents()
 
     suporte = QWidget()
@@ -2215,8 +2519,172 @@ def main() -> int:
     checar(tela_decifra.titulo.decifrando, "e chega com o título se decifrando")
     aguardar(lambda: not tela_decifra.titulo.decifrando)
 
+    janela.campo_jogo.setCurrentText(jogo_decifra)
     janela.campo_atmosfera.setCurrentText(atmosfera_decifra)
     aplicacao.processEvents()
+
+    print("cada jogo tem o seu ritmo")
+    import re as re_ritmo
+
+    from PySide6.QtCore import QEasingCurve as CurvaRitmo
+
+    from pipboy.interface import componentes as componentes_ritmo
+    from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_RITMO
+    from pipboy.interface.componentes import (
+        CHEGADAS_DAS_LETRAS,
+        chegada_das_letras,
+        definir_chegada_das_letras,
+    )
+    from pipboy.interface.movimento import (
+        CURVAS_DO_RITMO,
+        Transicao,
+        curva_do_ritmo,
+        em_degraus,
+        no_ritmo,
+        tempo_do_ritmo,
+    )
+
+    receitas_ritmo = {n: (r.tempo, r.curva, r.letras) for n, r in RECEITAS_RITMO.items()}
+    checar(
+        all(c in CURVAS_DO_RITMO and le in CHEGADAS_DAS_LETRAS for _, c, le in receitas_ritmo.values()),
+        "todo jogo pede uma curva e uma chegada de letras que existem",
+    )
+    checar(
+        len(set(receitas_ritmo.values())) == len(receitas_ritmo),
+        "nenhum jogo repete o ritmo de outro — tempo, curva e chegada juntos",
+    )
+    checar(
+        receitas_ritmo["Elden Ring"][0] > 1.4 > 0.8 > receitas_ritmo["FPS / Multiplayer"][0]
+        and receitas_ritmo["Genérico / Outro"] == (1.0, "suave", "decifrar"),
+        "a alta fantasia anda devagar, o visor depressa, e o neutro no tempo de sempre",
+    )
+    checar(
+        sum(1 for _, _, le in receitas_ritmo.values() if le == "decifrar") == 2,
+        "o embaralho de terminal fica com a Night City e o neutro, e não com os dez",
+    )
+
+    atmosfera_ritmo = janela.campo_atmosfera.currentText()
+    jogo_ritmo = janela.campo_jogo.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    janela.campo_jogo.setCurrentText("Elden Ring")
+    aplicacao.processEvents()
+    checar(
+        tempo_do_ritmo() == 1.7 and curva_do_ritmo() == CurvaRitmo.Type.InOutSine
+        and chegada_das_letras() == "revelar",
+        "no Elden Ring, o ritmo é solene e as letras se revelam",
+    )
+    transicao_ritmo = Transicao(janela, 200, lambda _v: None, reduzir=lambda: False)
+    transicao_ritmo.ir(1.0)
+    checar(
+        transicao_ritmo._animacao.duration() == 340
+        and transicao_ritmo._animacao.easingCurve().type() == CurvaRitmo.Type.InOutSine,
+        f"uma transição de 200 ms leva 340 e anda solene ({transicao_ritmo._animacao.duration()})",
+    )
+    transicao_ritmo.saltar(0.0)
+    janela.campo_jogo.setCurrentText("GTA")
+    aplicacao.processEvents()
+    transicao_ritmo.ir(1.0)
+    checar(
+        curva_do_ritmo() == CurvaRitmo.Type.OutBack
+        and transicao_ritmo._animacao.easingCurve().type() == CurvaRitmo.Type.OutQuint
+        and transicao_ritmo._animacao.duration() == 160,
+        "no GTA, passa do ponto — menos numa intensidade, onde passar de 100% é defeito",
+    )
+    transicao_ritmo.saltar(0.0)
+    botao_ritmo = janela.botao_enviar
+    entrar(botao_ritmo, 10, 10)
+    checar(
+        botao_ritmo._anim_hover.duration() == no_ritmo(botao_ritmo.DURACAO_HOVER) == 128,
+        f"e a luz do botão acende no tempo do jogo ({botao_ritmo._anim_hover.duration()} ms)",
+    )
+    sair(botao_ritmo)
+    janela.campo_jogo.setCurrentText("Fallout")
+    aplicacao.processEvents()
+    botao_ritmo._set_hover(0.37)
+    checar(
+        em_degraus(0.37) == 0.4 and em_degraus(1.0) == 1.0 and em_degraus(0.0) == 0.0
+        and botao_ritmo._hover == 0.4,
+        "no terminal, a luz anda aos saltos, como um fósforo redesenhado",
+    )
+    janela.campo_jogo.setCurrentText("Skyrim")
+    aplicacao.processEvents()
+    botao_ritmo._set_hover(0.37)
+    checar(botao_ritmo._hover == 0.37, "e nos outros jogos, contínua")
+    botao_ritmo._set_hover(0.0)
+
+    # As letras: cada chegada desenha diferente, sempre com TODAS no lugar.
+    suporte_ritmo = QWidget()
+    rotulo_ritmo = componentes_ritmo.RotuloDecifravel("Que a graça ilumine", suporte_ritmo)
+    rotulo_ritmo.setStyleSheet("color: #e0c080;")
+    suporte_ritmo.resize(420, 40)
+    suporte_ritmo.show()
+    aplicacao.processEvents()
+    texto_ritmo = "Que a graça ilumine"
+
+    def quadro_de(estilo: str, fracao: float) -> str:
+        definir_chegada_das_letras(estilo, "#ff6a00")
+        rotulo_ritmo.decifrar()
+        rotulo_ritmo._animacao.pause()
+        rotulo_ritmo._animacao.setCurrentTime(int(rotulo_ritmo._animacao.duration() * fracao))
+        return rotulo_ritmo.desenhado
+
+    def so_letras(marcacao: str) -> str:
+        import html as html_ritmo
+
+        return html_ritmo.unescape(re_ritmo.sub("<[^>]+>", "", marcacao))
+
+    sinais_ritmo = {
+        "datilografar": "background-color",
+        "escrever": "rgba(224,192,128,0.000)",
+        "revelar": "rgba(224,192,128,0.",
+        "acender": "rgba(224,192,128,0.250)",
+        "varrer": "rgba(255,106,0,1.000)",
+    }
+    faltas_ritmo = []
+    for estilo_ritmo, sinal_ritmo in sinais_ritmo.items():
+        fracao_ritmo = 0.05 if estilo_ritmo == "acender" else 0.35
+        quadro = quadro_de(estilo_ritmo, fracao_ritmo)
+        if not (
+            rotulo_ritmo.estilo == estilo_ritmo and sinal_ritmo in quadro
+            and so_letras(quadro) == texto_ritmo and rotulo_ritmo.text() == texto_ritmo
+            and rotulo_ritmo.accessibleName() == texto_ritmo
+        ):
+            faltas_ritmo.append(f"{estilo_ritmo}: {quadro[:90]!r}")
+        rotulo_ritmo._animacao.resume()
+        if not (aguardar(lambda: not rotulo_ritmo.decifrando) and rotulo_ritmo.desenhado == texto_ritmo):
+            faltas_ritmo.append(f"{estilo_ritmo}: não terminou no texto simples")
+    checar(
+        not faltas_ritmo,
+        f"cada chegada desenha do seu jeito, com todas as letras no lugar e o texto real intacto ({faltas_ritmo})",
+    )
+    alfas_revelar = [
+        float(a) for a in re_ritmo.findall(r"rgba\(224,192,128,([0-9.]+)\)", quadro_de("revelar", 0.35))
+    ]
+    rotulo_ritmo._animacao.stop()
+    rotulo_ritmo._terminar()
+    checar(
+        any(0.0 < a < 1.0 for a in alfas_revelar) and 0.0 in alfas_revelar and 1.0 in alfas_revelar,
+        f"o revelar é uma onda: letras acesas, meio acesas e ainda apagadas ({sorted(set(alfas_revelar))})",
+    )
+    checar(
+        min(alfa for _, alfa in componentes_ritmo._PISCADAS) >= 0.25,
+        "o neon falha, mas nunca apaga de todo: piscar forte é agressão",
+    )
+    definir_chegada_das_letras("revelar")
+    entrar(rotulo_ritmo, 5, 5)
+    checar(not rotulo_ritmo.decifrando, "a chegada lenta não se repete sob o cursor: some o que se veio ler")
+    sair(rotulo_ritmo)
+    definir_chegada_das_letras("datilografar")
+    entrar(rotulo_ritmo, 5, 5)
+    checar(rotulo_ritmo.decifrando, "a rápida, sim: o terminal redatilografa o nome sob o cursor")
+    sair(rotulo_ritmo)
+    aguardar(lambda: not rotulo_ritmo.decifrando)
+    suporte_ritmo.deleteLater()
+
+    janela.campo_jogo.setCurrentText(jogo_ritmo)
+    janela.campo_atmosfera.setCurrentText(atmosfera_ritmo)
+    aplicacao.processEvents()
+
 
     print("o caderno responde ao cursor")
     from dataclasses import replace as substituir
@@ -3369,6 +3837,138 @@ def main() -> int:
         "e a 'Desligada' o apaga",
     )
 
+    print("cada jogo mira do seu jeito")
+    from PySide6.QtGui import QColor as CorMira
+
+    from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_MIRA
+    from pipboy.interface.atmosfera import MIRAS, pintar_mira, pintar_onda
+
+    miras = {nome: r.mira for nome, r in RECEITAS_MIRA.items()}
+    checar(all(m == "" or m in MIRAS for m in miras.values()), "todo jogo pede uma mira que existe")
+    proprias_mira = [m for m in miras.values() if m]
+    checar(
+        len(proprias_mira) == len(set(proprias_mira)) == 9 and miras["Genérico / Outro"] == "",
+        f"nove jogos miram do seu jeito, nenhum copia outro, e o neutro fica com o anel ({proprias_mira})",
+    )
+
+    def retrato_da_mira(estilo: str, raio: float, crescido: float) -> QImage:
+        imagem_mira = QImage(120, 120, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem_mira.fill(0)
+        pintor_mira = QPainter(imagem_mira)
+        pintar_mira(pintor_mira, estilo, QPointF(60.0, 60.0), raio, CorMira("#ff8800"), crescido)
+        pintor_mira.end()
+        return imagem_mira
+
+    retratos_mira = {m: retrato_da_mira(m, 13.0, 0.0) for m in MIRAS}
+    iguais_mira = sorted(
+        (a, b) for a in retratos_mira for b in retratos_mira
+        if a < b and retratos_mira[a] == retratos_mira[b]
+    )
+    checar(not iguais_mira, f"e cada mira desenha diferente das outras ({iguais_mira})")
+    checar(
+        all(retrato_da_mira(m, 22.0, 1.0) != retratos_mira[m] for m in MIRAS),
+        "sobre o que é clicável, toda mira cresce",
+    )
+
+    # Sem rastro: com a mira de cada jogo — solta, crescida e com ondas de
+    # clique em várias idades —, nada se pinta fora da caixa que o quadro
+    # manda repintar. O que vazasse ficaria na tela atrás do cursor.
+    vazadas = []
+    for jogo_mira in TEMAS_CURSOR:
+        for sobre in (False, True):
+            cena_mira = CenarioCursor()
+            # Só o anel e as ondas: partículas, tremulação e as faixas de
+            # interferência pedem repintura por conta própria, e uma faixa
+            # passando por cima esconderia o que a mira vazasse.
+            cena_mira.definir(
+                TEMAS_CURSOR[jogo_mira],
+                trocar_campos(
+                    atmosfera_de(jogo_mira), densidade=0, interferencia=0.0, tremulacao=0.0
+                ),
+            )
+            cena_mira.redimensionar(600, 400)
+            cena_mira.definir_cursor(QPointF(300.0, 200.0), sobre_clicavel=sobre)
+            for idade_mira in range(40):
+                # Longe do cursor: a caixa de uma onda perto dele cobriria o
+                # que a mira vazasse, e o vazamento passaria sem ser visto.
+                if idade_mira in (0, 6, 14):
+                    cena_mira.pulsar(QPointF(100.0 + idade_mira, 320.0))
+                cena_mira.avancar(0.016)
+                if idade_mira % 8 == 3:
+                    acesos, fora = vazamento(
+                        cena_mira._pintar_anel_e_ondas, cena_mira._caixas_vivas(), 600, 400
+                    )
+                    if acesos == 0 or fora:
+                        vazadas.append(f"{jogo_mira}/{'clicável' if sobre else 'solta'}: {fora}")
+    checar(not vazadas, f"nenhuma mira nem onda deixa rastro fora da caixa repintada ({vazadas[:3]})")
+
+    # O clique responde na língua da mira.
+    def retrato_da_onda(estilo: str, progresso: float) -> QImage:
+        imagem_onda = QImage(120, 120, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem_onda.fill(0)
+        pintor_onda = QPainter(imagem_onda)
+        pintar_onda(
+            pintor_onda, estilo, QPointF(60.0, 60.0), progresso, CorMira("#3388ff"), CorMira("#dd2222")
+        )
+        pintor_onda.end()
+        return imagem_onda
+
+    acerto = retrato_da_onda("cruz", 0.3)
+    na_diagonal = sum(acerto.pixelColor(60 + d, 60 + d).alpha() for d in range(8, 20))
+    no_eixo = sum(acerto.pixelColor(60 + d, 60).alpha() for d in range(6, 30))
+    checar(
+        na_diagonal > 0 and no_eixo == 0,
+        f"no visor, o clique é o marcador de acerto: traços na diagonal, nada nos eixos ({na_diagonal}, {no_eixo})",
+    )
+    marca_x = retrato_da_onda("olho_morto", 0.3)
+    centro_x = marca_x.pixelColor(60, 60)
+    checar(
+        centro_x.alpha() > 0 and centro_x.red() > centro_x.green() + 60,
+        f"no velho oeste, o X vermelho do Dead Eye marca onde se clicou ({centro_x.name()})",
+    )
+    checar(
+        retrato_da_onda("colchetes", 0.3) != retrato_da_onda("", 0.3)
+        and retrato_da_onda("graca", 0.3) == retrato_da_onda("", 0.3),
+        "no terminal a onda é um quadrado; nos outros, a onda redonda de sempre",
+    )
+
+    # Abraçando um botão, a mira vira o contorno dele, como sempre.
+    def anel_abracando(jogo: str) -> tuple[int, int]:
+        cena_abraco = CenarioCursor()
+        cena_abraco.definir(TEMAS_CURSOR["FPS / Multiplayer"], atmosfera_de(jogo))
+        cena_abraco.redimensionar(600, 400)
+        cena_abraco.definir_cursor(QPointF(300.0, 200.0), sobre_clicavel=True)
+        cena_abraco.definir_abraco((RetanguloAbraco(250.0, 180.0, 120.0, 40.0), 8.0))
+        for _ in range(60):
+            cena_abraco.avancar(0.033)
+        return vazamento(cena_abraco._pintar_anel_e_ondas, [], 600, 400)
+
+    checar(
+        anel_abracando("FPS / Multiplayer") == anel_abracando("Genérico / Outro"),
+        "abraçando um botão, a mira do jogo vira o contorno dele — o mesmo do anel de sempre",
+    )
+
+    def anel_solto(jogo: str) -> QImage:
+        cena_solta = CenarioCursor()
+        cena_solta.definir(TEMAS_CURSOR["FPS / Multiplayer"], atmosfera_de(jogo))
+        cena_solta.redimensionar(600, 400)
+        cena_solta.definir_cursor(QPointF(300.0, 200.0))
+        for _ in range(60):
+            cena_solta.avancar(0.033)
+        imagem_solta = QImage(600, 400, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem_solta.fill(0)
+        pintor_solto = QPainter(imagem_solta)
+        cena_solta._pintar_anel_e_ondas(pintor_solto)
+        pintor_solto.end()
+        return imagem_solta
+
+    solto_fps = anel_solto("FPS / Multiplayer")
+    checar(
+        solto_fps != anel_solto("Genérico / Outro")
+        and solto_fps.pixelColor(300, 200).alpha() > 0,
+        "solto, o cursor do visor é a cruz com o ponto no centro, e não o anel",
+    )
+
     print("cada ambiente tem uma camada só dele")
     # As camadas de assinatura são o que impede um ambiente de ser outro com
     # outra cor. A régua (ferramentas/distancia_dos_temas.py) media 2,87 entre
@@ -3380,6 +3980,9 @@ def main() -> int:
         "horizonte": "GTA",
         "arranhoes": "Red Dead",
         "cantoneiras": "FPS / Multiplayer",
+        "digitais": "Fallout",
+        "constelacao": "Skyrim",
+        "estencil": "FPS / Multiplayer",
     }
     for campo, dono in assinaturas.items():
         donos = sorted(
@@ -3452,10 +4055,73 @@ def main() -> int:
         f"os riscos da película são verticais ({colunas_risco} colunas, {linhas_risco} linhas)",
     )
 
-    # -- Todas as quatro obedecem à intensidade da atmosfera, como as antigas.
+    # -- As digitais ficam onde um polegar encosta: cantos e bordas, nunca no
+    #    meio da conversa — e fracas, porque são vidro sujo, e não mancha.
+    vidro_sujo = alfas_da_camada("_camada_digitais", "Fallout")
+    meio_sujo = sum(
+        vidro_sujo[y * 900 + x] for y in range(150, 450) for x in range(225, 675)
+    )
+    checar(
+        sum(vidro_sujo) > 0 and meio_sujo == 0 and max(vidro_sujo) <= 40,
+        f"as digitais ficam nas bordas do vidro, e fracas ({meio_sujo} no meio, máx {max(vidro_sujo)})",
+    )
+
+    # -- A constelação é um céu encostado à direita, no alto: fora do texto.
+    ceu_norte = alfas_da_camada("_camada_constelacao", "Skyrim")
+    fora_do_ceu = sum(
+        ceu_norte[y * 900 + x] for y in range(600) for x in range(900)
+        if x < 900 * 0.70 or y > 600 * 0.62
+    )
+    checar(
+        sum(ceu_norte) > 0 and fora_do_ceu == 0,
+        f"a constelação fica no alto, encostada à direita, longe do texto ({fora_do_ceu})",
+    )
+
+    # -- O estêncil tem PONTES: a falha vertical que o molde deixa na letra.
+    #    Sem elas, é só um número grande. Conferido onde as pontes passam, e
+    #    não pela forma das letras: sem as fontes do sistema, cada letra da
+    #    suíte é uma caixa, e a geometria muda de máquina para máquina.
+    molde = alfas_da_camada("_camada_estencil", "FPS / Multiplayer")
+    colunas_tinta = [x for x in range(900) if any(molde[y * 900 + x] for y in range(0, 600, 2))]
+    linhas_tinta = [y for y in range(600) if any(molde[y * 900 + x] for x in range(0, 900, 2))]
+    checar(
+        bool(colunas_tinta) and max(colunas_tinta) > 900 * 0.85 and min(linhas_tinta) > 600 * 0.5,
+        "a marcação do esquadrão fica embaixo, encostada à direita",
+    )
+    _, _, pontes_molde = CenarioVisor.molde_do_estencil(900, 600, TEMAS_VISOR["FPS / Multiplayer"])
+    tinta_nas_pontes = sum(
+        molde[y * 900 + x]
+        for ponte in pontes_molde
+        for y in range(int(ponte.top()) + 1, int(ponte.bottom()) - 1)
+        for x in range(int(ponte.left()) + 1, int(ponte.right()))
+        if 0 <= x < 900 and 0 <= y < 600
+    )
+    checar(
+        len(pontes_molde) >= 3 and tinta_nas_pontes == 0,
+        f"e as letras vêm cortadas pelas pontes do molde ({len(pontes_molde)} pontes, "
+        f"{tinta_nas_pontes} de tinta nelas)",
+    )
+
+    # -- E as três do material entram no vidro de verdade, o que a janela
+    #    pinta por cima de tudo — e não só quando chamadas na mão.
+    for campo, jogo in (
+        ("digitais", "Fallout"), ("constelacao", "Skyrim"), ("estencil", "FPS / Multiplayer"),
+    ):
+        com_camada = CenarioVisor()
+        com_camada.definir(TEMAS_VISOR[jogo], RECEITAS_VISOR[jogo])
+        sem_camada = CenarioVisor()
+        sem_camada.definir(TEMAS_VISOR[jogo], trocar_campos(RECEITAS_VISOR[jogo], **{campo: 0.0}))
+        checar(
+            com_camada._compor_vidro(600, 400).toImage()
+            != sem_camada._compor_vidro(600, 400).toImage(),
+            f"'{campo}' entra no vidro da janela do {jogo}",
+        )
+
+    # -- Todas obedecem à intensidade da atmosfera, como as antigas.
     for campo, jogo in (
         ("aurora", "Skyrim"), ("selo", "RPG / Aventura (geral)"),
         ("horizonte", "GTA"), ("arranhoes", "Red Dead"),
+        ("digitais", "Fallout"), ("constelacao", "Skyrim"), ("estencil", "FPS / Multiplayer"),
     ):
         cheia = sum(alfas_da_camada(f"_camada_{campo}", jogo))
         fraca = sum(alfas_da_camada(f"_camada_{campo}", jogo, forca=0.2 * getattr(
@@ -3848,6 +4514,519 @@ def main() -> int:
         not janela.lateral_recolhida and janela.coluna_lateral.width() == janela.largura_lateral,
         "sem escolha à mão, a largura volta a decidir",
     )
+
+    print("cada jogo tem o traço dos menus dele")
+    from PySide6.QtCore import QRectF as CaixaTraco
+
+    from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_TRACO
+    from pipboy.interface.ornamentos import ALTURA_DIVISORIA, DIVISORIAS, pintar_divisoria
+    from pipboy.themes import TEMAS as TEMAS_TRACO
+
+    estilos = {nome: r.divisoria for nome, r in RECEITAS_TRACO.items()}
+    checar(
+        all(estilo in DIVISORIAS for estilo in estilos.values()),
+        f"toda receita pede um traço que existe ({sorted(set(estilos.values()) - set(DIVISORIAS))})",
+    )
+    proprios = [e for e in estilos.values() if e != "linha"]
+    checar(
+        len(proprios) == len(set(proprios)) and len(proprios) >= 8,
+        f"fora o fio neutro, nenhum jogo divide o traço com outro ({len(set(proprios))} traços)",
+    )
+
+    def tinta_da_divisoria(estilo: str) -> bytes:
+        imagem = QImage(220, ALTURA_DIVISORIA, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem.fill(0)
+        pintor_traco = QPainter(imagem)
+        pintar_divisoria(
+            pintor_traco, CaixaTraco(0, 0, 220, ALTURA_DIVISORIA), estilo, TEMAS_TRACO["Elden Ring"]
+        )
+        pintor_traco.end()
+        return bytes(imagem.constBits())
+
+    desenhos = {estilo: tinta_da_divisoria(estilo) for estilo in DIVISORIAS}
+    checar(
+        all(any(desenho[3::4]) for desenho in desenhos.values()),
+        "todo traço desenha alguma coisa na faixa dele",
+    )
+    iguais = sorted(
+        (a, b) for a in desenhos for b in desenhos if a < b and desenhos[a] == desenhos[b]
+    )
+    checar(not iguais, f"e cada um desenha diferente dos outros ({iguais})")
+
+    # Os títulos de seção falam na fonte do JOGO, com o espaçamento dele.
+    janela.campo_jogo.setCurrentText("Elden Ring")
+    aplicacao.processEvents()
+    titulo_secao = janela._rotulos_secao[0]
+    checar(
+        titulo_secao.font().family() == janela.fonte("secao", ui=False).family()
+        and titulo_secao.font().letterSpacing()
+        == 1.0 + RECEITAS_TRACO["Elden Ring"].espacamento_titulo,
+        f"o título de seção vem na fonte e no espaçamento do jogo ({titulo_secao.font().family()})",
+    )
+    # A regra do nome do ambiente, e não o resultado: no backend offscreen da
+    # suíte não há fonte nenhuma, e a métrica de reserva é larga demais para
+    # qualquer título caber — o resultado depende da máquina, a regra não.
+    # Um nome que cabe fica com as letras afastadas do jogo.
+    atmosfera_traco = janela._atmosfera
+    janela._atmosfera = RECEITAS_TRACO["Elden Ring"]
+    checar(
+        janela._ajustar_marca("AB").letterSpacing()
+        == RECEITAS_TRACO["Elden Ring"].espacamento_titulo,
+        "o nome do ambiente leva o espaçamento do jogo quando cabe",
+    )
+
+    # Onde o espaçamento não cabe, ele cede, e o tamanho da letra é preservado.
+    janela._atmosfera = trocar_campos(
+        RECEITAS_TRACO["Skyrim"], espacamento_titulo=40.0
+    )
+    fonte_cede = janela._ajustar_marca("PERGAMINHO DO DOVAHKIIN")
+    checar(
+        fonte_cede.letterSpacing() == 0.0,
+        "um espaçamento que não cabe cede, em vez de cortar o nome",
+    )
+    janela._atmosfera = atmosfera_traco
+    janela.campo_jogo.setCurrentText("Fallout")
+    janela._aplicar_tema()
+    aplicacao.processEvents()
+
+    print("a conversa ganha a moldura do jogo")
+    from PySide6.QtCore import QRectF as CaixaMoldura
+    from PySide6.QtGui import QFont as FonteLinha
+    from PySide6.QtGui import QFontMetrics as MetricaLinha
+
+    from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_MOLDURA
+    from pipboy.interface.componentes import largura_de_uma_linha
+    from pipboy.interface.ornamentos import FAIXA_MOLDURA, MOLDURAS, pintar_moldura
+    from pipboy.themes import TEMAS as TEMAS_MOLDURA
+
+    molduras = {nome: r.moldura for nome, r in RECEITAS_MOLDURA.items()}
+    checar(
+        all(m == "" or m in MOLDURAS for m in molduras.values()),
+        "toda receita pede uma moldura que existe, ou nenhuma",
+    )
+    com_moldura = [m for m in molduras.values() if m]
+    checar(
+        len(com_moldura) == len(set(com_moldura)) == 7,
+        f"sete jogos ganham moldura própria, e nenhum divide a sua ({len(set(com_moldura))})",
+    )
+    checar(
+        all(not molduras[n] for n in ("Fallout", "FPS / Multiplayer", "Genérico / Outro")),
+        "o terminal e o visor já têm a deles, e o neutro existe para não ter",
+    )
+
+    def tinta_da_moldura(estilo: str) -> bytes:
+        imagem = QImage(400, 300, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem.fill(0)
+        pintor_moldura = QPainter(imagem)
+        pintar_moldura(pintor_moldura, CaixaMoldura(0, 0, 400, 300), estilo, TEMAS_MOLDURA["GTA"])
+        pintor_moldura.end()
+        return bytes(imagem.constBits())
+
+    retratos = {estilo: tinta_da_moldura(estilo) for estilo in MOLDURAS}
+    faixa = int(FAIXA_MOLDURA)
+    invasoras = []
+    for estilo, retrato in retratos.items():
+        alfas_moldura = retrato[3::4]
+        miolo = sum(
+            alfas_moldura[y * 400 + x]
+            for y in range(faixa, 300 - faixa)
+            for x in range(faixa, 400 - faixa)
+        )
+        if miolo or not any(alfas_moldura):
+            invasoras.append(estilo)
+    checar(
+        not invasoras,
+        f"toda moldura desenha rente à borda e deixa o miolo para a conversa ({invasoras})",
+    )
+    iguais_moldura = sorted(
+        (a, b) for a in retratos for b in retratos if a < b and retratos[a] == retratos[b]
+    )
+    checar(not iguais_moldura, f"e cada uma desenha diferente das outras ({iguais_moldura})")
+
+    moldura_painel = janela.moldura_painel
+    janela.campo_jogo.setCurrentText("Elden Ring")
+    aplicacao.processEvents()
+    checar(
+        not moldura_painel.isHidden()
+        and moldura_painel.geometry() == janela.conversa.geometry()
+        and moldura_painel.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents),
+        "a moldura cobre o painel da conversa, e nenhum clique mora nela",
+    )
+    janela.resize(janela.width() + 40, janela.height())
+    aplicacao.processEvents()
+    checar(
+        moldura_painel.geometry() == janela.conversa.geometry(),
+        "e acompanha o painel quando a janela muda de tamanho",
+    )
+    janela.resize(janela.width() - 40, janela.height())
+    janela.campo_jogo.setCurrentText("Fallout")
+    aplicacao.processEvents()
+    checar(moldura_painel.isHidden(), "no terminal, que não tem moldura de painel, ela some")
+
+    # A largura de uma linha conta o que a itálica pende além do avanço.
+    italica = FonteLinha(janela.fonte("vocab", ui=False))
+    italica.setItalic(True)
+    metrica_linha = MetricaLinha(italica)
+    texto_linha = "⊕ wasteland — terra devastada"
+    checar(
+        largura_de_uma_linha(metrica_linha, texto_linha)
+        > max(metrica_linha.horizontalAdvance(texto_linha),
+              metrica_linha.boundingRect(texto_linha).width()),
+        "a largura de uma linha cobre a tinta, e não só o quanto a caneta anda",
+    )
+
+    print("cada jogo marca o escolhido do seu jeito")
+    from PySide6.QtCore import QRectF as CaixaSelecao
+    from PySide6.QtGui import QColor
+    from PySide6.QtGui import QPainterPath as CaminhoSelecao
+
+    from pipboy import design as design_selecao
+    from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_SELECAO
+    from pipboy.interface.ornamentos import SELECOES, estilo_de_selecao, pintar_selecao
+    from pipboy.themes import TEMAS as TEMAS_SELECAO
+    from pipboy.themes import paleta_de
+
+    selecoes = {nome: r.selecao for nome, r in RECEITAS_SELECAO.items()}
+    checar(
+        all(e == "" or e in SELECOES for e in selecoes.values()),
+        "toda receita pede uma marca de escolhido que existe, ou a de sempre",
+    )
+    proprias_sel = [e for e in selecoes.values() if e]
+    checar(
+        len(proprias_sel) == len(set(proprias_sel)) == 9,
+        f"nove jogos marcam o escolhido do seu jeito, e nenhum copia outro ({len(set(proprias_sel))})",
+    )
+    checar(
+        selecoes["Red Dead"] == "pincelada" and selecoes["Fallout"] == "invertida",
+        "o velho oeste passa a pincelada vermelha; o terminal, a barra invertida",
+    )
+
+    def retrato_da_selecao(estilo: str, jogo: str, largura: int = 240, altura: int = 34):
+        """A marca sobre um chip desligado: devolve a imagem e a cor do rótulo."""
+        paleta_sel = paleta_de(TEMAS_SELECAO[jogo])
+        imagem = QImage(largura, altura, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem.fill(QColor(paleta_sel["surface_alta"]))
+        pintor_sel = QPainter(imagem)
+        caixa_sel = CaixaSelecao(0.5, 0.5, largura - 1, altura - 1)
+        caminho_sel = CaminhoSelecao()
+        caminho_sel.addRect(caixa_sel)
+        cor_sel = pintar_selecao(pintor_sel, caixa_sel, caminho_sel, estilo, paleta_sel)
+        pintor_sel.end()
+        return imagem, cor_sel
+
+    base_vazia = QImage(240, 34, QImage.Format.Format_ARGB32_Premultiplied)
+    base_vazia.fill(QColor(paleta_de(TEMAS_SELECAO["GTA"])["surface_alta"]))
+    retratos_sel = {e: retrato_da_selecao(e, "GTA")[0] for e in SELECOES}
+    checar(
+        all(r != base_vazia for r in retratos_sel.values()),
+        "toda marca desenha alguma coisa",
+    )
+    iguais_sel = sorted(
+        (a, b) for a in retratos_sel for b in retratos_sel
+        if a < b and retratos_sel[a] == retratos_sel[b]
+    )
+    checar(not iguais_sel, f"e cada uma desenha diferente das outras ({iguais_sel})")
+    checar(
+        retrato_da_selecao("pincelada", "Red Dead")[0]
+        == retrato_da_selecao("pincelada", "Red Dead")[0],
+        "a pincelada é a mesma a cada repintura: o botão não treme",
+    )
+
+    # O rótulo continua legível sobre a marca — medido nos PIXELS pintados,
+    # onde o texto cai: no meio (chip, centrado) e a um quarto (linha da
+    # paleta, alinhada à esquerda).
+    ilegiveis = []
+    for jogo_sel, estilo_sel in selecoes.items():
+        if not estilo_sel:
+            continue
+        imagem_sel, cor_sel = retrato_da_selecao(estilo_sel, jogo_sel)
+        assert cor_sel is not None
+        for x_sel in (60, 120):
+            fundo_sel = imagem_sel.pixelColor(x_sel, 17).name()
+            razao = design_selecao.contraste(cor_sel.name(), fundo_sel)
+            if razao < 4.5:
+                ilegiveis.append(f"{jogo_sel}@{x_sel}: {razao:.2f}")
+    checar(not ilegiveis, f"o rótulo é legível (AA) sobre a marca de todo jogo ({ilegiveis})")
+
+    # A marca em uso segue o jogo, e o chip ligado a pinta.
+    janela.campo_jogo.setCurrentText("Red Dead")
+    aplicacao.processEvents()
+    checar(estilo_de_selecao() == "pincelada", "no Red Dead, a marca em vigor é a pincelada")
+    chip_sel = janela.chip_busca
+    marcado_antes = chip_sel.isChecked()
+    chip_sel.setChecked(True)
+    imagem_chip = chip_sel.grab().toImage()
+    meio_chip = imagem_chip.pixelColor(imagem_chip.width() // 3, imagem_chip.height() // 2)
+    checar(
+        meio_chip.red() > meio_chip.green() + 40 and meio_chip.red() > meio_chip.blue() + 40,
+        f"e a chave ligada aparece pintada de vermelho ({meio_chip.name()})",
+    )
+    # E o rótulo passa a ser escrito na cor que a marca devolveu — a legível
+    # sobre a tinta. Sem isso, a pincelada sairia certa e o texto, na cor
+    # apagada do chip desligado, sumiria dentro dela.
+    _, cor_rotulo = retrato_da_selecao("pincelada", "Red Dead")
+    assert cor_rotulo is not None
+    na_cor = sum(
+        1
+        for y in range(imagem_chip.height())
+        for x in range(imagem_chip.width())
+        if abs(imagem_chip.pixelColor(x, y).red() - cor_rotulo.red())
+        + abs(imagem_chip.pixelColor(x, y).green() - cor_rotulo.green())
+        + abs(imagem_chip.pixelColor(x, y).blue() - cor_rotulo.blue()) < 45
+    )
+    # Poucos pixels bastam: sem as fontes do sistema, a suíte desenha numa
+    # das fontes embutidas, de traço fino, e só o miolo das hastes chega à
+    # cor cheia. A cor apagada do chip desligado fica a ~200 desta — não
+    # entra na conta com folga nenhuma.
+    checar(na_cor > 2, f"e o rótulo é escrito na cor legível sobre a tinta ({na_cor} px)")
+    chip_sel.setChecked(marcado_antes)
+    janela.campo_jogo.setCurrentText("Genérico / Outro")
+    aplicacao.processEvents()
+    checar(estilo_de_selecao() == "", "no tema neutro, a marca é a de sempre")
+    janela.campo_jogo.setCurrentText("Fallout")
+    aplicacao.processEvents()
+
+    print("o botão principal veste o jogo")
+    from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_PRINCIPAL
+    from pipboy.interface.ornamentos import SELECOES as MARCAS_PRINCIPAL
+    from pipboy.interface.ornamentos import estilo_do_principal
+
+    principais = {nome: r.botao_principal for nome, r in RECEITAS_PRINCIPAL.items()}
+    checar(
+        all(e == "" or e in MARCAS_PRINCIPAL for e in principais.values()),
+        "todo botão principal veste uma marca que existe, ou a placa de sempre",
+    )
+    checar(
+        principais["Red Dead"] == "pincelada"
+        and not principais["Fallout"] and not principais["Cyberpunk 2077"],
+        "no velho oeste ele é pincelada; no terminal e no Cyberpunk, a placa já é a cara do jogo",
+    )
+
+    acao = janela.botao_acao
+    janela._definir_controles(ativa=False)
+    janela.campo_jogo.setCurrentText("Red Dead")
+    aplicacao.processEvents()
+    checar(estilo_do_principal() == "pincelada", "no Red Dead, o principal passa a ser pincelado")
+    checar(
+        acao._cores()[0].alpha() == 0,
+        "e sem placa em volta: a tinta vai direto na tela, e não num adesivo",
+    )
+    imagem_acao = acao.grab().toImage()
+    meio_acao = imagem_acao.pixelColor(imagem_acao.width() // 3, imagem_acao.height() // 2)
+    checar(
+        meio_acao.red() > meio_acao.green() + 40,
+        f"o botão de partir aparece em tinta vermelha ({meio_acao.name()})",
+    )
+    janela._definir_controles(ativa=True)
+    aplicacao.processEvents()
+    checar(
+        acao.variante == "perigo" and acao._cores()[0].alpha() == 255,
+        "com a sessão no ar, o botão de parar volta a ser a placa de alerta",
+    )
+    janela._definir_controles(ativa=False)
+    janela.campo_jogo.setCurrentText("Fallout")
+    aplicacao.processEvents()
+    checar(
+        estilo_do_principal() == "" and acao._cores()[0].name() == janela.tema.primary,
+        "no terminal, a placa cheia no verde do fósforo continua",
+    )
+
+    print("cada jogo anuncia a palavra nova do seu jeito")
+    from PySide6.QtCore import QRectF as CaixaAviso
+
+    from pipboy import design as design_aviso
+    from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_AVISO
+    from pipboy.interface.avisos import (
+        AVISOS,
+        MANCHETES,
+        AvisoDePalavra,
+        Contexto,
+        Recado,
+        pintar_aviso,
+    )
+    from pipboy.interface.ornamentos import FAIXA_MOLDURA as FAIXA_AVISO
+    from pipboy.themes import TEMAS as TEMAS_AVISO
+
+    anuncios = {nome: r.aviso for nome, r in RECEITAS_AVISO.items()}
+    checar(all(e in AVISOS for e in anuncios.values()), "todo jogo pede um anúncio que existe")
+    proprios_av = [e for e in anuncios.values() if e]
+    checar(
+        len(proprios_av) == len(set(proprios_av)) == 9,
+        f"nove jogos anunciam a palavra do seu jeito, e nenhum copia outro ({len(set(proprios_av))})",
+    )
+    checar(anuncios["Genérico / Outro"] == "", "e o neutro fica com o cartão discreto")
+    checar(
+        set(MANCHETES) == set(AVISOS) and len(set(MANCHETES.values())) == len(MANCHETES),
+        "cada anúncio tem o próprio título",
+    )
+
+    LARG_AV, ALT_AV = 760, 460
+
+    def retrato_do_aviso(
+        estilo: str, jogo: str, *, letras: bool = True, papel: str = "screen",
+        recado: Recado | None = None, entrada: float = 1.0,
+    ):
+        """O anúncio sobre um painel liso de ``papel``: imagem, área declarada, contexto."""
+        tema_av = TEMAS_AVISO[jogo]
+        imagem_av = QImage(LARG_AV, ALT_AV, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem_av.fill(QColor(getattr(tema_av, papel)))
+        contexto_av = Contexto(
+            tema_av, tema_av.font_candidates[0], "Segoe UI", letras=letras, entrada=entrada
+        )
+        pintor_av = QPainter(imagem_av)
+        area_av = pintar_aviso(
+            pintor_av, CaixaAviso(0, 0, LARG_AV, ALT_AV), estilo,
+            recado or Recado("ammo", "munição"), contexto_av,
+        )
+        pintor_av.end()
+        return imagem_av, area_av, contexto_av
+
+    def tinta_do_aviso(imagem_av, jogo: str, papel: str = "screen"):
+        """A caixa dos pixels que o anúncio mudou, e quantos caem fora do permitido."""
+        base = QColor(getattr(TEMAS_AVISO[jogo], papel)).rgb()
+        xs, ys, na_borda, no_pe = [], [], 0, 0
+        for y in range(0, ALT_AV, 2):
+            for x in range(0, LARG_AV, 2):
+                if imagem_av.pixel(x, y) == base:
+                    continue
+                xs.append(x)
+                ys.append(y)
+                if x < FAIXA_AVISO or x >= LARG_AV - FAIXA_AVISO or y < FAIXA_AVISO:
+                    na_borda += 1
+                if y > ALT_AV * 0.62:
+                    no_pe += 1
+        if not xs:
+            return None, na_borda, no_pe
+        return CaixaAviso(min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)), na_borda, no_pe
+
+    fora_da_area, na_moldura, no_pe_av, vazios = [], [], [], []
+    for jogo_av, estilo_av in anuncios.items():
+        # O quadro zero da chegada é o pior: o título do GTA chega 45% maior,
+        # a medalha do visor carimba grande, o tranco do Cyberpunk desloca.
+        for entrada_av in (0.0, 0.3, 1.0):
+            imagem_av, area_av, _ = retrato_do_aviso(estilo_av, jogo_av, entrada=entrada_av)
+            tinta_av, borda_av, pe_av = tinta_do_aviso(imagem_av, jogo_av)
+            if tinta_av is None:
+                vazios.append(jogo_av)
+                continue
+            if not area_av.adjusted(-3, -3, 3, 3).contains(tinta_av):
+                fora_da_area.append(f"{jogo_av}@{entrada_av}")
+            if entrada_av == 1.0 and borda_av:
+                na_moldura.append(f"{jogo_av}: {borda_av}")
+            if pe_av:
+                no_pe_av.append(f"{jogo_av}@{entrada_av}: {pe_av}")
+    checar(not vazios, f"todo anúncio desenha alguma coisa ({vazios})")
+    checar(
+        not fora_da_area,
+        f"a área que o anúncio declara cobre a tinta, também no meio da chegada ({fora_da_area})",
+    )
+    checar(not na_moldura, f"e fica dentro da moldura do painel ({na_moldura})")
+    checar(
+        not no_pe_av,
+        f"e longe do pé, onde mora a fala nova e a anotação da palavra ({no_pe_av})",
+    )
+
+    retratos_av = {e: retrato_do_aviso(e, "Genérico / Outro")[0] for e in AVISOS}
+    iguais_av = sorted(
+        (a, b) for a in retratos_av for b in retratos_av if a < b and retratos_av[a] == retratos_av[b]
+    )
+    checar(not iguais_av, f"no mesmo tema, cada anúncio desenha diferente dos outros ({iguais_av})")
+
+    # A letra lê sobre o que o anúncio pintou embaixo dela — medido nos PIXELS
+    # do véu, com as letras desligadas, sobre a tela vazia e sobre o pior
+    # fundo possível: uma fala clara passando por baixo.
+    ilegiveis_av = []
+    for jogo_av, estilo_av in anuncios.items():
+        for papel_av in ("screen", "primary"):
+            imagem_av, _, contexto_av = retrato_do_aviso(
+                estilo_av, jogo_av, letras=False, papel=papel_av
+            )
+            for caixa_av, cor_av, texto_av in contexto_av.escritos:
+                y_av = min(ALT_AV - 1, max(0, round(caixa_av.center().y())))
+                pior_av = 21.0
+                x_av = caixa_av.left() + 1
+                while x_av < caixa_av.right() - 1:
+                    fundo_av = imagem_av.pixelColor(min(LARG_AV - 1, max(0, round(x_av))), y_av)
+                    pior_av = min(pior_av, design_aviso.contraste(cor_av.name(), fundo_av.name()))
+                    x_av += 3
+                if pior_av < 4.5:
+                    ilegiveis_av.append(f"{jogo_av}/{papel_av} '{texto_av}': {pior_av:.2f}")
+    checar(
+        not ilegiveis_av,
+        f"toda letra de anúncio é legível (AA), até sobre uma fala clara ({ilegiveis_av[:4]})",
+    )
+
+    _, _, contexto_longo = retrato_do_aviso(
+        "graca", "Elden Ring",
+        recado=Recado("a phrase so long it would never fit a banner across this panel", "x" * 90),
+    )
+    checar(
+        all(c.left() >= FAIXA_AVISO and c.right() <= LARG_AV - FAIXA_AVISO
+            for c, _, _ in contexto_longo.escritos),
+        "a palavra longa é encurtada, e não estoura a faixa",
+    )
+
+    escrito_meio = [t for _, _, t in retrato_do_aviso("terminal", "Fallout", entrada=0.3)[2].escritos
+                    if t.startswith(">")]
+    escrito_fim = [t for _, _, t in retrato_do_aviso("terminal", "Fallout", entrada=1.0)[2].escritos
+                   if t.startswith(">")]
+    checar(
+        escrito_meio and escrito_fim == ["> ammo"] and len(escrito_meio[0]) < len("> ammo"),
+        f"o terminal datilografa o termo durante a chegada ({escrito_meio} → {escrito_fim})",
+    )
+
+    # Na janela: o evento que a sessão publica acende o anúncio do jogo em vigor.
+    atmosfera_aviso = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    janela.campo_jogo.setCurrentText("Red Dead")
+    aplicacao.processEvents()
+    aviso = janela.aviso_de_palavra
+    checar(isinstance(aviso, AvisoDePalavra) and not aviso.isVisible(), "em repouso, não há anúncio")
+    store.registrar("dynamite", "dinamite", "", "Red Dead")
+    janela._tratar_evento(EventoUi(TipoEvento.VOCAB_ADDED, payload=store.total()))
+    checar(
+        aviso.isVisible() and aviso.recado is not None and aviso.recado.termo == "dynamite"
+        and aviso.recado.traducao == "dinamite" and aviso.estilo == "cartaz",
+        "a palavra salva é anunciada sobre a conversa, no cartaz do velho oeste",
+    )
+    checar(
+        aviso.geometry() == janela.conversa.geometry()
+        and aviso.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents),
+        "por cima do painel inteiro, e transparente ao mouse",
+    )
+    checar(aguardar(lambda: not aviso.isVisible(), 6000), "e some sozinho")
+
+    janela._tratar_evento(EventoUi(TipoEvento.VOCAB_ADDED, payload=store.total()))
+    checar(not aviso.isVisible(), "reencontro e quiz, que não mudam o total, não anunciam nada")
+
+    recolhida_antes = janela.lateral_recolhida
+    if not recolhida_antes:
+        janela.alternar_lateral()
+    aplicacao.processEvents()
+    store.registrar("lasso", "laço", "", "Red Dead")
+    janela._tratar_evento(EventoUi(TipoEvento.VOCAB_ADDED, payload=store.total()))
+    checar(
+        aviso.isVisible() and aviso.recado is not None and aviso.recado.termo == "lasso",
+        "com a coluna recolhida, sem o contador à vista, o anúncio continua",
+    )
+    if not recolhida_antes:
+        janela.alternar_lateral()
+    janela.campo_jogo.setCurrentText("GTA")
+    aplicacao.processEvents()
+    checar(not aviso.isVisible(), "trocar de jogo recolhe o anúncio do jogo anterior")
+
+    janela.campo_atmosfera.setCurrentText("Desligada")
+    aplicacao.processEvents()
+    store.registrar("bounty", "recompensa", "", "Red Dead")
+    janela._tratar_evento(EventoUi(TipoEvento.VOCAB_ADDED, payload=store.total()))
+    checar(not aviso.isVisible(), "com a atmosfera desligada, a palavra entra sem anúncio")
+
+    for termo_av in ("dynamite", "lasso", "bounty"):
+        store.remover(termo_av)
+    janela.caderno_mudou()
+    janela.campo_atmosfera.setCurrentText(atmosfera_aviso)
+    janela.campo_jogo.setCurrentText("Fallout")
+    aplicacao.processEvents()
 
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()

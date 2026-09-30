@@ -27,6 +27,7 @@ from ..config import ConfigurationError, Preferences, salvar_chave
 from ..themes import GameTheme, paleta_de, theme_for
 from .atmosfera import atmosfera_de
 from .componentes import Botao, caminho_forma
+from .fontes import ajuste_optico, compor_titulo, registrar_fontes, tem_negrito
 
 LARGURA = 560
 ENDERECO_CHAVE = "https://aistudio.google.com/apikey"
@@ -38,14 +39,25 @@ class _ProvedorMinimo:
     def __init__(self) -> None:
         self.tema: GameTheme = theme_for(Preferences.load().jogo)
         self.atmosfera = atmosfera_de(self.tema.name)
+        registrar_fontes()
         self._instaladas = set(QFontDatabase.families())
 
     def fonte(self, papel: str, *, ui: bool = True) -> QFont:
+        # A mesma regra de Janela.fonte: títulos na letra de título, leitura
+        # no corpo aparente da referência, negrito só se a família o tem.
         tipo = design.TIPO[papel]
-        candidatas = self.tema.ui_font_candidates if ui else self.tema.font_candidates
+        if ui:
+            candidatas = self.tema.ui_font_candidates
+        elif papel == "display":
+            candidatas = self.tema.display_candidates
+        else:
+            candidatas = self.tema.font_candidates
         familia = next((f for f in candidatas if f in self._instaladas), candidatas[-1])
-        fonte = QFont(familia, tipo.tamanho)
-        fonte.setBold(tipo.peso == "bold")
+        ajuste = 1.0 if papel == "display" else ajuste_optico(familia)
+        fonte = QFont(familia, max(1, round(tipo.tamanho * ajuste)))
+        fonte.setBold(tipo.peso == "bold" and tem_negrito(familia))
+        if papel == "display" and not ui:
+            compor_titulo(fonte, self.tema)
         fonte.setItalic(tipo.estilo == "italic")
         return fonte
 

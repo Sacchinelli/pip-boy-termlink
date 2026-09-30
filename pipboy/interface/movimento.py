@@ -37,6 +37,66 @@ from PySide6.QtWidgets import QGraphicsEffect, QWidget
 
 from .. import design
 
+# ------------------------------------------------------------------- Ritmo
+# Cada jogo se move num tempo. Uma marca se reconhece até pelo movimento —
+# quanto demora e como para —, e aqui todos se moviam no mesmo: 140, 220 e
+# 340 ms, sempre desacelerando igual. A luz que acende no botão da Terra
+# Intermédia tinha a pressa da do visor tático. Agora a janela declara o
+# ritmo do jogo em vigor, e as peças que todo mundo usa — a ``Transicao``, a
+# entrada em cascata, a luz do ``Botao`` — perguntam por ele na hora de andar:
+#
+# * "solene" entra e sai devagar (a alta fantasia, que não tem pressa);
+# * "seco" chega rápido e para sem folga (o visor e a Night City);
+# * "mola" passa do ponto e volta (o GTA, que é espalhafatoso);
+# * "degraus" anda aos saltos, como uma tela de fósforo que redesenha em
+#   varreduras (o terminal) — só onde o salto não atrapalha, a luz e a
+#   entrada; um ímã aos saltos seria defeito, e não estilo;
+# * "suave", o desacelerar de sempre, do tema neutro.
+CURVAS_DO_RITMO: dict[str, QEasingCurve.Type] = {
+    "suave": QEasingCurve.Type.OutCubic,
+    "solene": QEasingCurve.Type.InOutSine,
+    "seco": QEasingCurve.Type.OutQuart,
+    "mola": QEasingCurve.Type.OutBack,
+    "degraus": QEasingCurve.Type.Linear,
+}
+# Em quantos saltos anda o que anda em degraus.
+DEGRAUS = 5
+_RITMO: list[Any] = [1.0, "suave"]
+
+
+def definir_ritmo(tempo: float, curva: str) -> None:
+    """O ritmo em vigor: um fator de duração e o nome de uma curva."""
+    _RITMO[0] = max(0.2, float(tempo))
+    _RITMO[1] = curva if curva in CURVAS_DO_RITMO else "suave"
+
+
+def tempo_do_ritmo() -> float:
+    return float(_RITMO[0])
+
+
+def curva_do_ritmo(*, sem_passar: bool = False) -> QEasingCurve.Type:
+    """A curva do jogo. ``sem_passar`` troca a mola por uma chegada firme.
+
+    Passar do ponto é bonito numa posição e defeito numa intensidade: uma
+    luz a 110% ou uma opacidade acima de 1 não existem.
+    """
+    nome = str(_RITMO[1])
+    if sem_passar and nome == "mola":
+        return QEasingCurve.Type.OutQuint
+    return CURVAS_DO_RITMO[nome]
+
+
+def no_ritmo(ms: int) -> int:
+    """Uma duração da escala de ``design``, no tempo do jogo."""
+    return max(1, round(ms * tempo_do_ritmo()))
+
+
+def em_degraus(valor: float) -> float:
+    """O valor aos saltos quando o ritmo é de degraus; intacto nos outros."""
+    if _RITMO[1] != "degraus" or valor <= 0.0 or valor >= 1.0:
+        return valor
+    return round(valor * DEGRAUS) / DEGRAUS
+
 
 class Transicao(QObject):
     """Progresso de 0 a 1 que pode mudar de destino a qualquer momento.
@@ -55,15 +115,17 @@ class Transicao(QObject):
         ao_mudar: Callable[[float], None],
         *,
         reduzir: Callable[[], bool],
-        curva: QEasingCurve.Type = QEasingCurve.Type.OutCubic,
+        curva: QEasingCurve.Type | None = None,
     ) -> None:
         super().__init__(dono)
         self.valor = 0.0
         self._duracao = duracao
         self._ao_mudar = ao_mudar
         self._reduzir = reduzir
+        # Sem curva pedida, a do jogo em vigor — lida a cada ``ir``, e não
+        # guardada: trocar de jogo muda o ritmo das transições que já existem.
+        self._curva = curva
         self._animacao = QVariantAnimation(self)
-        self._animacao.setEasingCurve(curva)
         self._animacao.valueChanged.connect(self._definir)
 
     def ir(self, destino: float) -> None:
@@ -76,7 +138,10 @@ class Transicao(QObject):
             # hora. O que some é o trajeto, não o destino.
             self._definir(destino)
             return
-        self._animacao.setDuration(max(1, round(self._duracao * distancia)))
+        self._animacao.setEasingCurve(
+            self._curva if self._curva is not None else curva_do_ritmo(sem_passar=True)
+        )
+        self._animacao.setDuration(max(1, round(no_ritmo(self._duracao) * distancia)))
         self._animacao.setStartValue(self.valor)
         self._animacao.setEndValue(destino)
         self._animacao.start()
@@ -128,9 +193,12 @@ class EfeitoEntrada(QGraphicsEffect):
         # é outro efeito e tenta abrir um segundo pintor no mesmo dispositivo:
         # "A paint device can only be painted by one painter at a time".
         imagem = self.sourcePixmap(Qt.CoordinateSystem.LogicalCoordinates)
+        # No ritmo do jogo: aos saltos no terminal; passando do ponto e
+        # voltando no GTA — a posição pode passar, a opacidade não.
+        progresso = em_degraus(self._progresso)
         pintor.save()
-        pintor.setOpacity(self._progresso)
-        pintor.drawPixmap(QPointF(0.0, (1.0 - self._progresso) * self.SUBIDA), imagem)
+        pintor.setOpacity(max(0.0, min(1.0, progresso)))
+        pintor.drawPixmap(QPointF(0.0, (1.0 - progresso) * self.SUBIDA), imagem)
         pintor.restore()
 
 
@@ -149,12 +217,12 @@ def animar_entrada(widgets: Sequence[QWidget], *, reduzir: bool) -> None:
         efeito = EfeitoEntrada(widget)
         widget.setGraphicsEffect(efeito)
         grupo = QSequentialAnimationGroup(widget)
-        grupo.addPause(ordem * design.ESCALONAMENTO)
+        grupo.addPause(no_ritmo(ordem * design.ESCALONAMENTO))
         subida = QPropertyAnimation(efeito, b"progresso", grupo)
-        subida.setDuration(design.DURACAO_LENTA)
+        subida.setDuration(no_ritmo(design.DURACAO_LENTA))
         subida.setStartValue(0.0)
         subida.setEndValue(1.0)
-        subida.setEasingCurve(QEasingCurve.Type.OutCubic)
+        subida.setEasingCurve(curva_do_ritmo())
         grupo.addAnimation(subida)
 
         def encerrar(alvo: QWidget = widget, proprio: EfeitoEntrada = efeito) -> None:

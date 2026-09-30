@@ -39,7 +39,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QScrollArea,
-    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -47,6 +46,7 @@ from PySide6.QtWidgets import (
 from ..constants import DEFAULT_GAME_AUDIO_GAIN
 from ..profiles import MODOS, NIVEIS, VOZES, personas_for
 from ..themes import TEMAS
+from .avisos import AvisoDePalavra
 from .componentes import (
     Botao,
     CampoSelecao,
@@ -58,6 +58,7 @@ from .componentes import (
 )
 from .conversa import Conversa
 from .moldura import BarraDeTitulo
+from .ornamentos import Divisoria, MolduraDoPainel
 
 if TYPE_CHECKING:  # pragma: no cover
     from .janela import Janela
@@ -259,6 +260,8 @@ class Palco:
     botao_mudo: Botao
     botao_acao: Botao
     conversa: Conversa
+    moldura_painel: MolduraDoPainel
+    aviso_de_palavra: AvisoDePalavra
     entrada_texto: QLineEdit
     botao_enviar: Botao
 
@@ -399,14 +402,15 @@ def _lateral(janela: Janela, alvo: QWidget) -> Lateral:
         linha = QHBoxLayout()
         linha.setContentsMargins(0, 0, 0, 0)
         linha.setSpacing(10)
+        # Os títulos de seção falam na fonte do JOGO, e o fio ao lado tem o
+        # traço dos menus dele (ver ornamentos). Títulos são identidade, como
+        # a marca; os controles embaixo continuam na família neutra — é a
+        # mesma fronteira que já separava a fala do assistente dos botões.
         rotulo = RotuloDecifravel(titulo.upper(), objectName="secao")
-        rotulo.setFont(janela.fonte("secao"))
+        rotulo.setFont(janela.fonte_de_secao())
         rotulos_secao.append(rotulo)
         linha.addWidget(rotulo)
-        regua = QFrame(objectName="regua")
-        regua.setFixedHeight(1)
-        regua.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        linha.addWidget(regua, 1)
+        linha.addWidget(Divisoria(janela), 1)
         # Sem destino, o título ainda não entra em layout nenhum: quem o pediu
         # o encaixa (é o caso do resumo da sessão, que monta o próprio bloco).
         if destino is not None:
@@ -745,11 +749,16 @@ def _palco(janela: Janela, alvo: QWidget) -> Palco:
 
     conversa = Conversa(janela)
     coluna.addWidget(conversa, 1)
+    # A moldura do jogo em volta da conversa: por cima do painel, rente à
+    # borda dele, transparente ao mouse. Ver ornamentos.MolduraDoPainel.
+    moldura_painel = MolduraDoPainel(janela, conversa)
+    # E o anúncio da palavra nova, na mesma camada de cima. Ver avisos.
+    aviso_de_palavra = AvisoDePalavra(janela, conversa)
 
     linha = QHBoxLayout()
     linha.setSpacing(8)
     entrada_texto = QLineEdit(objectName="entrada")
-    entrada_texto.setPlaceholderText("Perguntar por texto…")
+    entrada_texto.setPlaceholderText(janela.tema.convite)
     entrada_texto.setFont(janela.fonte("corpo"))
     entrada_texto.setToolTip("Perguntar sem falar. Ctrl+L traz o cursor para cá.")
     entrada_texto.setAccessibleName("Perguntar por texto")
@@ -767,5 +776,6 @@ def _palco(janela: Janela, alvo: QWidget) -> Palco:
     return Palco(
         pilula=pilula, medidor=medidor, rotulo_meta=rotulo_meta,
         botao_mudo=botao_mudo, botao_acao=botao_acao, conversa=conversa,
+        moldura_painel=moldura_painel, aviso_de_palavra=aviso_de_palavra,
         entrada_texto=entrada_texto, botao_enviar=botao_enviar,
     )

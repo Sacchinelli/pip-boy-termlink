@@ -29,15 +29,17 @@ from ..config import Preferences
 from ..themes import theme_for
 from .atmosfera import atmosfera_de
 from .componentes import caminho_forma
+from .fontes import registrar_fontes, tem_negrito
 
 LARGURA, ALTURA = 520, 300
 
 
 def _fonte_do_tema(candidatas: tuple[str, ...], tamanho: int, *, negrito: bool) -> QFont:
+    registrar_fontes()
     instaladas = set(QFontDatabase.families())
     familia = next((f for f in candidatas if f in instaladas), candidatas[-1])
     fonte = QFont(familia, tamanho)
-    fonte.setBold(negrito)
+    fonte.setBold(negrito and tem_negrito(familia))
     return fonte
 
 
@@ -70,7 +72,7 @@ def criar_abertura() -> QSplashScreen:
     # Marca no centro ótico (um pouco acima do geométrico), subtítulo embaixo.
     cor_marca = design.garantir_contraste(tema.primary, tema.screen)
     pintor.setPen(QColor(cor_marca))
-    pintor.setFont(_fonte_do_tema(tema.font_candidates, 24, negrito=True))
+    pintor.setFont(_fonte_do_tema(tema.display_candidates, 24, negrito=True))
     pintor.drawText(
         QRectF(24, ALTURA * 0.30, LARGURA - 48, 44),
         Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
