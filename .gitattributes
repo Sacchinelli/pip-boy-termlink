@@ -11,6 +11,8 @@
 
 # Binários: nunca converter, nunca tentar juntar.
 *.png binary
+*.ttf binary
+*.otf binary
 *.ico binary
 *.exe binary
 *.wav binary
