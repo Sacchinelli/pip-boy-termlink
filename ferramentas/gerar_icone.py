@@ -4,7 +4,7 @@ Uso:  py ferramentas/gerar_icone.py
 
 O repositório não guarda binário nenhum — o ``.ico`` é um artefato de build,
 escrito em ``build/pipboy.ico`` e consumido pelo ``pip_boy.spec``. O desenho
-vem de ``pipboy.interface.icone``, o mesmo usado pela janela em execução:
+vem de ``pipboy.interface.icone_do_programa``, o mesmo usado pela janela em execução:
 gerar aqui e desenhar lá nunca divergem porque são a mesma função.
 """
 
@@ -24,11 +24,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QBuffer, QIODevice  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from pipboy.interface.icone import TAMANHOS, pintar_icone  # noqa: E402
+from pipboy.interface.icone_do_programa import TAMANHOS, pintar_icone_do_programa  # noqa: E402
 
 
 def _png(tamanho: int) -> bytes:
-    mapa = pintar_icone(tamanho)
+    mapa = pintar_icone_do_programa(tamanho)
     buffer = QBuffer()
     buffer.open(QIODevice.OpenModeFlag.WriteOnly)
     mapa.save(buffer, "PNG")

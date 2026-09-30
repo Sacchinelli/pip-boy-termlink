@@ -295,7 +295,7 @@ pip-boy-termlink/
 │       ├── janela.py     # Composição da janela e ciclo de vida
 │       ├── moldura.py    # Barra de título temática e redimensionamento
 │       ├── abertura.py   # Cartão de arranque no tema do último jogo
-│       ├── icone.py      # Ícone do app, desenhado por código
+│       ├── icone_do_programa.py # Ícone do programa (barra de tarefas e .exe)
 │       ├── estilo.py     # Folha de estilo derivada do tema (função pura)
 │       ├── preferencias.py# Vínculo entre a coluna lateral e o arquivo
 │       ├── conversa.py   # O diálogo em bolhas

@@ -17,7 +17,7 @@ from typing import Any
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
-from .icone import criar_icone
+from .icone_do_programa import criar_icone
 
 
 def criar_bandeja(janela: Any) -> QSystemTrayIcon | None:
