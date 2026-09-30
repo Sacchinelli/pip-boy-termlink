@@ -19,8 +19,11 @@ Nada disso é enviado a nenhum servidor deste projeto — não existe servidor d
 projeto. O único destino externo é a Live API do Gemini, sujeita aos termos do
 Google.
 
-**O registro nunca contém a chave inteira.** `AppConfiguration.redacted_key()`
-mostra apenas os quatro primeiros e os quatro últimos caracteres.
+**O registro nunca contém a chave inteira.** Todo destino do log passa por um
+formatador que mascara qualquer chave do Google na linha já escrita — mensagem,
+argumentos e traço de pilha —, deixando só os quatro primeiros e os quatro
+últimos caracteres. O objeto de configuração também deixa a chave fora do
+próprio `repr`.
 
 ## Se você for relatar um defeito
 
@@ -56,8 +59,11 @@ Dois cuidados que a ferramenta não consegue automatizar:
 
 ## Reportar uma vulnerabilidade
 
-Abra um issue descrevendo o problema **sem** incluir chaves, tokens ou dados
-pessoais. Se a falha for sensível o bastante para não caber num issue público,
-diga isso no issue e combine outro canal antes de dar detalhes.
+**Em privado**, pela aba *Security* do repositório, em *Report a vulnerability*
+(ou direto em
+<https://github.com/Sacchinelli/pip-boy-termlink/security/advisories/new>). O
+relato fica visível só para quem mantém o projeto até ser corrigido. Nunca abra
+uma issue pública para uma falha de segurança — e nunca inclua chaves, tokens
+ou dados pessoais, nem no relato privado.
 
 Este é um projeto pessoal, sem equipe e sem compromisso de prazo de resposta.

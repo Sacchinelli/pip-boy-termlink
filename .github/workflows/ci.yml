@@ -13,10 +13,12 @@ on:
   pull_request:
 
 # Um push novo no mesmo PR torna a rodada anterior inútil; ela é cancelada em
-# vez de ocupar um runner Windows até o fim.
+# vez de ocupar um runner Windows até o fim. Na main, não: cada commit dela
+# fica com o próprio resultado, e um merge logo depois de outro não deixa o
+# anterior marcado como "cancelado" no histórico.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   verificar:

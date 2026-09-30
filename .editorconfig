@@ -1,0 +1,32 @@
+# O que qualquer editor precisa saber para não sujar um arquivo deste projeto.
+# O .gitattributes cuida do fim de linha no repositório; isto cuida do que o
+# editor grava na cópia de trabalho.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.py]
+max_line_length = 100
+
+[*.{yml,yaml}]
+indent_size = 2
+
+# Duas quebras no fim de uma linha de Markdown são quebra de linha, não sujeira.
+[*.md]
+trim_trailing_whitespace = false
+
+[*.{bat,cmd,ps1}]
+end_of_line = crlf
+
+# O Windows PowerShell 5.1 lê .ps1 sem BOM na página de código ANSI: todo acento
+# vira mojibake, as aspas se desbalanceiam e o script para de compilar, com o
+# erro apontando para linhas que estão certas. A maioria dos editores grava sem
+# BOM por padrão — é por isso que a regra mora aqui, e não só na memória.
+[*.ps1]
+charset = utf-8-bom

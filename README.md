@@ -1,8 +1,12 @@
 # Pip-Boy TermLink
 
+[![CI](https://github.com/Sacchinelli/pip-boy-termlink/actions/workflows/ci.yml/badge.svg)](https://github.com/Sacchinelli/pip-boy-termlink/actions/workflows/ci.yml)
+
 Tutor de inglês por voz, em tempo real, para quem joga em inglês. O programa ouve seu microfone (e opcionalmente o áudio do próprio jogo), responde em português por voz usando a Live API do Gemini, e guarda automaticamente cada palavra que ensina num caderno de vocabulário que você pode consultar, revisar e exportar.
 
 > Projeto não oficial, sem afiliação com os estúdios dos jogos citados ou com o Google.
+
+O que mudou em cada versão está no [CHANGELOG](CHANGELOG.md); como contribuir, no [CONTRIBUTING](CONTRIBUTING.md); o que o programa toca e como relatar uma falha de segurança, no [SECURITY](SECURITY.md).
 
 ## O que ele faz
 
@@ -301,6 +305,14 @@ pip-boy-termlink/
 ├── diagnostico.py        # Confere a máquina: Python, chave, áudio, fontes
 ├── pip_boy.spec          # Receita do executável (PyInstaller)
 ├── pyproject.toml        # Metadados, ruff e mypy
+├── requirements.txt      # O que o programa precisa
+├── requirements-dev.txt  # E as ferramentas de verificação, com versão fixa
+├── CHANGELOG.md          # O que mudou em cada versão
+├── CONTRIBUTING.md       # Convenções: commits, PRs, verificações
+├── SECURITY.md           # Os dados que o programa toca; relato de falhas
+├── .github/
+│   ├── workflows/        # CI (ci.yml) e auditoria semanal das dependências
+│   └── ISSUE_TEMPLATE/   # Formulários de defeito e de ideia
 ├── ferramentas/
 │   ├── criar_atalho.py        # Põe o atalho do programa na área de trabalho
 │   ├── gerar_icone.py         # Renderiza o .ico do build (nenhum binário no repo)
@@ -375,8 +387,8 @@ pip-boy-termlink/
 │   └── test_interface.py # A janela inteira, no backend offscreen do Qt
 ├── .claude/skills/
 │   └── rodar-pipboy/     # Como subir e dirigir o app — o que teste algum vê
-├── .env.example
-└── requirements.txt
+├── .editorconfig         # Codificação e fim de linha, para qualquer editor
+└── .env.example
 ```
 
 ## Segurança e privacidade

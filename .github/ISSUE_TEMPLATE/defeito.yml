@@ -1,0 +1,48 @@
+name: Algo não funciona
+description: Um defeito — o programa fez o que não devia, ou não fez o que devia.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Obrigado por relatar. Antes de colar qualquer coisa aqui, lembre que
+        este repositório é **público**: nada de chave, nome de usuário ou
+        conversa que você não queira publicar.
+  - type: textarea
+    id: aconteceu
+    attributes:
+      label: O que aconteceu
+      description: E o que você esperava que acontecesse.
+    validations:
+      required: true
+  - type: textarea
+    id: passos
+    attributes:
+      label: Como reproduzir
+      placeholder: |
+        1. Escolhi o jogo …
+        2. Cliquei em …
+        3. Apareceu …
+  - type: input
+    id: jogo
+    attributes:
+      label: Jogo escolhido no programa
+      placeholder: Fallout, Skyrim, Genérico…
+  - type: textarea
+    id: diagnostico
+    attributes:
+      label: Saída do diagnóstico
+      description: >
+        Rode `py diagnostico.py` na pasta do programa e cole o resultado. Ele
+        diz a versão do Python, das bibliotecas, do áudio e das fontes — e
+        nunca mostra a chave inteira.
+      render: text
+  - type: textarea
+    id: registro
+    attributes:
+      label: Trecho do pipboy.log (opcional)
+      description: >
+        Fica em %LOCALAPPDATA%\PipBoyTermLink. A chave aparece mascarada, mas o
+        registro contém a transcrição da sessão: leia e apague o que não
+        quiser publicar.
+      render: text
