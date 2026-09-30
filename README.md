@@ -56,8 +56,6 @@ Cada ambiente tem também uma **atmosfera** — varredura, grão, vinheta, part�
 
 **Cada ambiente tem uma camada que só ele tem.** É o que impede um jogo de ser outro com outra cor, e foi a régua que mostrou onde isso faltava: *Skyrim* media 2,87 do tema neutro, e a rádio pirata do *GTA* media 4,57 do grimório do *RPG* — dois fundos escuros parecidos e nada que dissesse de que jogo eram. Hoje a crônica nórdica tem a **aurora** cruzando o alto do céu, o grimório tem o **selo** arcano desenhado na página, a rádio tem a **linha do horizonte** de neon com o brilho subindo dela, o velho oeste tem os **riscos** verticais de uma película gasta e o visor tático tem as **cantoneiras**. Nenhuma delas custa por quadro: todas vão no pixmap do vidro, que só se refaz ao mudar de tamanho ou de tema. As paletas foram junto — gelo no lugar do ardósia, beringela no lugar do índigo, ouro sobre quase preto — e o par mais parecido da tabela passou de **2,87 para 5,27**.
 
-**E cada jogo tem o traço dos menus dele.** Paleta, fonte e atmosfera diziam de que jogo era a janela; os componentes não — o fio que separa as seções da coluna era o mesmo risco cinza nos dez ambientes. Agora os títulos de seção falam na fonte do jogo, com o espaçamento entre letras dos menus dele, e o fio ao lado tem o ornamento que quem jogou reconhece: a filigrana dourada que some no escuro (Elden Ring), o fio duplo de pedra terminado num losango vazado (Skyrim), a argola do medalhão abrindo um fio de ferro (Witcher), a régua dupla dos cartazes de procurado (Red Dead), o tubo de neon do rosa ao ciano (GTA), o barramento de dados recortado (Cyberpunk), o fio de iluminura (RPG) e a escala de um visor (FPS). E o painel da conversa — a maior superfície da janela — ganha a moldura que os menus do jogo poriam em volta do que importa: filigranas de ouro no alto e no pé (Elden Ring), uma placa de pedra com cravos nos cantos (Skyrim), cantoneiras de ferro com rebite (Witcher), a moldura dupla do cartaz de procurado (Red Dead), o letreiro de neon no pé (GTA), cantos chanfrados com o barramento de dados (Cyberpunk) e a página de manuscrito com arabescos (RPG). Tudo rente à borda, sem passar por cima da conversa. E o caderno e o histórico vestem o jogo também: cada um tem o nome que o jogo daria — as *Holotapes* e os *Registros* do Pip-Boy, o *Tomo de palavras* e as *Graças visitadas*, as *Palavras de poder* e as *Missões* do norte, o *Glossário* e os *Contratos* do bruxo, o *Diário* e as *Trilhas percorridas* do oeste, a *Agenda* e as *Mensagens* do celular, os *Fragmentos* e os *Braindances* da Night City, o *Grimório* e as *Crônicas*, o *Arsenal* e os *Relatórios* do visor —, com o ícone do jogo ao lado e a função escrita miúda ("caderno de vocabulário") para ninguém se perder; a lista de palavras e a transcrição ganham a moldura do jogo, montando quando a janela abre; e a transcrição fala no formato da conversa — entre colchetes no terminal, com o canal no visor, com o nome em destaque na legenda. E a revisão e o progresso acontecem no lugar do jogo em que já se treina e já se mede: revisar é o *Teste G.O.A.T.* e o progresso é o *STAT* do Pip-Boy; *Memorizar magias* numa graça e o *Nível de runas*; a *Muralha de palavras* e as *Habilidades* do norte; a *Meditação* e o painel de *Personagem* do bruxo; *Cartas na mesa* e os *Desafios* do oeste; o *Ensaio do golpe* e as *Estatísticas* do GTA; o *Protocolo de invasão* e a *Reputação* da Night City; o *Teste de perícia* e a *Ficha de personagem*; o *Estande de tiro* e a *Carreira* do visor — cada um com o objeto dele ao lado do título (a folha de respostas e o mostrador de ponteiro, a pedra de brilho e a Árvore Térrea, a muralha e a constelação, o relógio da meditação e as duas espadas, as cartas em leque e a estrela de xerife, o quadro do golpe e as barras, a matriz de código e os degraus, o dado de vinte faces e a ficha, o alvo e as divisas), a função escrita miúda ao lado e a moldura do jogo se montando em volta do cartão e dos gráficos. E a moldura ENTRA quando o jogo entra — na primeira vez que a janela aparece e a cada troca de jogo —, do jeito dos menus dele, pelo princípio das molduras que se "montam" em fases dos menus de ficção científica: o circuito da Night City corre pela borda a partir de dois cantos opostos, as ferragens do bruxo são cravadas quina por quina, o cartaz do velho oeste desenrola da esquerda para a direita, o letreiro de neon parte apagado e falha antes de firmar, e a Terra Intermédia, o norte e o grimório surgem devagar. Com a atmosfera desligada, ela aparece pronta. E o item escolhido — o filtro ligado do caderno, a sessão aberta no histórico, a chave acesa, a linha que o Enter executaria na paleta — se marca do jeito do jogo: a **pincelada vermelha** atrás do item (Red Dead), a barra invertida do fósforo (Fallout), a faixa de luz dourada entre dois fios (Elden Ring), dois losangos vazados (Skyrim), a brasa acesa na borda (Witcher), o letreiro rosa com o tubo ciano (GTA), a aba chanfrada (Cyberpunk), o sublinhado de manuscrito (RPG) e a mira travada (FPS) — sempre com o rótulo em contraste AA contra o que foi pintado. E o botão que dá a partida veste a mesma marca: *PARTIR* é uma pincelada vermelha pintada direto no papel, sem placa por baixo (Red Dead); *INVOCAR* acende entre fios de ouro (Elden Ring), *DESPERTAR* entre losangos (Skyrim), *RASTREAR* com a brasa na borda (Witcher), *LIGAR* como letreiro (GTA) e *DESBRAVAR* sublinhado de manuscrito (RPG). No terminal, no Cyberpunk e no tático, a placa cheia de sempre já é a cara do jogo, e ficou. E cada jogo fala com a própria voz nos textos que eram iguais nos dez: a tela inicial abre com uma frase dele (*A trilha está aberta*, *Link neural estável*), o botão de partida tem verbo próprio (*INICIALIZAR* no terminal, *DESBRAVAR* no RPG) e o campo de texto convida do jeito do jogo — o prompt do terminal, a mensagem deixada no chão da Terra Intermédia, o canal do esquadrão —, sem mudar o nome que o leitor de tela anuncia. E a tela inicial é o menu do jogo, na gramática dele: revisar, caderno e histórico viram as abas sobre um fio do Pip-Boy, do celular do GTA e do lobby tático; a pilha de itens no meio da tela, em letra grande, das telas de título do Elden Ring, do Skyrim e do RPG; ou a coluna de pausa encostada à esquerda do Red Dead, do Witcher e do Cyberpunk — com o título e o texto encostando junto, e o valor de cada linha na ponta direita. O item sob o cursor, ou sob o foco de quem navega por Tab, acende com a marca de escolhido do jogo; o título, o detalhe e a tecla de cada um continuam lá, e o leitor de tela ouve os mesmos nomes. Só o tema neutro fica com os três cartões lado a lado. E a conversa fala do jeito do jogo: no terminal não há balão, é um registro — a fala do aparelho ao lado de uma calha de fósforo, a do jogador depois do prompt `>`, os dois carimbados entre colchetes; na alta fantasia e no velho oeste, a fala vira legenda de diálogo, com o nome de quem fala em destaque e a sombra que nasce do lado dele; no GTA, mensagem de celular, com o balão enviado na cor do neon e a ponta do lado de quem mandou; na Night City, holochamada de canto chanfrado com a barra de canal; no visor, o chat do esquadrão, com o canal na frente do nome ("[ESQUADRÃO] COMANDO"). A letra continua em AA contra o que fica atrás dela em todos, e as palavras do tutor continuam tocáveis. E no pé da tela vem a dica do dia, como numa tela de carregamento, na voz do jogo: a *Dica da Vault-Tec*, otimista além do razoável; a *mensagem deixada* no chão da Terra Intermédia, no formato que os jogadores usam ("tente...", "adiante..."); a *nota do bestiário*; a *dica do parceiro*; o *conselho do mestre*; a *dica tática*. Metade ensina inglês — os arcaísmos do Elden Ring, as letras que o sotaque do oeste engole, os *callouts* de uma partida —, metade ensina o programa. As que citam um atalho global usam a tecla configurada, e somem quando os atalhos globais não existem. E cada jogo se move no seu tempo: as transições, a luz dos botões e a entrada em cascata andam solenes e devagar na alta fantasia, secas e depressa no visor e na Night City, passando do ponto e voltando no GTA e aos saltos no terminal, como um fósforo redesenhado em varreduras. Os títulos também chegam do jeito do jogo, em vez do embaralho de terminal que antes era de todos: o terminal os datilografa atrás de um cursor em bloco, a Terra Intermédia e o norte os revelam numa onda de luz, o velho oeste e o manuscrito os escrevem letra a letra com a tinta assentando, o neon do GTA falha duas vezes antes de firmar (sem nunca apagar de todo), o visor os varre com a borda da leitura em laranja, e só a Night City e o tema neutro ficam com o embaralho. E três aparelhos ganham o material deles no vidro da janela: a tela do Pip-Boy tem digitais e gordura nos cantos, onde um polegar encosta num aparelho de pulso — o último acabamento que a equipe de arte da Bethesda conta ter dado a ele —; o céu do norte ganha, sobre uma nebulosa pintada, a constelação do Guerreiro, como no menu de habilidades do Skyrim; e o visor tático ganha, grande e apagada no canto, a marcação do esquadrão pintada com molde, com as pontes do estêncil cortando as letras, como as telas do Battlefield 6. Tudo fraco e longe do texto: vidro usado, e não mancha. E o anel que persegue o cursor — o elemento mais presente da janela, e antes o mesmo círculo nos dez — vira a mira do jogo: os colchetes do terminal, o anel de ouro com quatro losangos da Terra Intermédia, os dois arcos abertos do norte, a argola do medalhão, o ponto miúdo do revólver do velho oeste, o tubo de neon, o octógono chanfrado da Night City, a bússola do grimório e a cruz do visor. O clique responde na mesma língua: o marcador de acerto em diagonal no visor, o X vermelho com que o Dead Eye marca o alvo no velho oeste, um quadrado em varredura no terminal. Sobre um botão, a mira cede ao contorno dele, como sempre, esmaecendo de uma para o outro. E as duas portas da janela — o caderno e o histórico — deixam de ser um retângulo riscado e um relógio iguais nos dez: são o objeto de cada coisa no jogo, desenhado no traço dele — a holotape e o terminal do Pip-Boy, o tomo com fecho e o brilho de uma graça, o tomo com a escrita dos dragões e o pergaminho enrolado, o bestiário com o medalhão e o aviso de contrato pregado no quadro, o diário com correia e a fogueira do acampamento, o celular e a roda das rádios, o fragmento de dados e o braindance, o grimório e a ampulheta, as plaquetas de identificação e a prancheta do relatório de missão. E a palavra que o tutor salva no caderno ganha o anúncio que o jogo daria, por cima da conversa e longe do pé dela, onde está a fala nova: a caixa do terminal com o termo datilografado atrás do cursor em bloco (Fallout), a faixa escura que atravessa o painel com a palavra em ouro surgindo devagar (Elden Ring), a palavra descoberta entre dois fios que crescem para os lados (Skyrim), o *Glossário atualizado* ao lado do medalhão (Witcher), o *Diário atualizado* escrito numa pincelada vermelha (Red Dead), o letreiro de missão cumprida em itálico de neon (GTA), o dado recebido com um tranco de interferência (Cyberpunk), a fita de conquista que se desenrola (RPG) e a medalha laranja do abate, que carimba ao chegar (FPS). Some sozinho em menos de quatro segundos, não pega clique nenhum e, com a atmosfera desligada, não aparece — a anotação na conversa já diz o que entrou. Tudo desenhado com QPainter sobre a paleta do tema — o que se evoca é o estilo dos menus, e não a marca de ninguém.
-
 O ambiente de **FPS** foi o primeiro a ser refeito com a régua na mão. Ele media 3,97 de distância do tema deliberadamente *neutro* (`ferramentas/distancia_dos_temas.py`) — era o tema neutro com uma grade por cima, e a grade era a identidade inteira dele. Hoje é um campo de batalha moderno: grafite com fundo de **oliva** no lugar do cinza-azulado de escritório, **laranja de sinalização**, pó de escombro no ar, ruído de rádio em rajadas e uma camada nova — **cantoneiras**, os colchetes de canto e os tiques de meio de borda que dizem *equipamento apontado para alguma coisa*, onde papel milimetrado não dizia. O botão diz **DESDOBRAR** e **EXTRAIR**, o assistente é o líder do seu esquadrão, e o blip virou o estalo grave de um canal de rádio abrindo. O vizinho mais próximo dele passou de 3,97 (Genérico) para 8,82 (Fallout).
 
 Na primeira execução, quem tem **"Efeitos de animação" desligado no Windows** recebe a atmosfera já em **Desligada**, com um aviso no registro dizendo de onde isso veio e como reverter. Quem desliga essa opção do sistema já disse uma vez, para o computador inteiro, que animação lhe faz mal; perguntar de novo na forma de uma janela que cintila é ignorar uma resposta já dada. É **Desligada**, e não Discreta, porque o que o sistema pede é menos *animação* e só esse nível para de fato a partícula, a cintilação e as transições — atender pela metade um pedido de acessibilidade é não atender. E o sistema decide apenas o **padrão**: assim que você escolher um nível, ele é seu, mesmo contrariando o Windows.
@@ -65,6 +63,41 @@ Na primeira execução, quem tem **"Efeitos de animação" desligado no Windows*
 Ao lado dela, **Tamanho do texto** (Padrão, Grande, Maior) multiplica a rampa tipográfica inteira — e junto com ela a coluna lateral, que é uma coluna de texto e só trocaria "pequeno demais" por "cortado" se ficasse parada. Vale na janela, no caderno, no histórico e na cápsula, porque toda a tipografia do programa passa por um ponto só. Os dois controles de apresentação são os **únicos que continuam livres durante a sessão**: o travamento existe para o que vai na abertura da conexão (jogo, nível, microfone), e letra e atmosfera não vão a lugar nenhum — quem precisa de letra maior para ler a conversa precisa disso durante a conversa, não depois dela.
 
 O jogo escolhido define quatro coisas de uma vez: a aparência, o contexto linguístico enviado ao modelo (que inglês esperar naquele título), o nome do assistente no registro e a primeira persona da lista — a persona temática. As personas gerais (Assistente Amigável, Instrutor Rígido, Professor Nativo) continuam disponíveis em qualquer jogo.
+
+### O que muda de um jogo para outro
+
+Paleta, fonte e atmosfera diziam de que jogo era a janela; o resto era igual nos dez. Hoje quase todo elemento fala a língua dos menus do jogo. Tudo desenhado com QPainter sobre a paleta do tema — o que se evoca é o estilo dos menus, e não a marca de ninguém.
+
+#### A primeira tela
+
+- **O menu do jogo.** A tela inicial é o menu do jogo, na gramática dele: revisar, caderno e histórico viram as abas sobre um fio do Pip-Boy, do celular do GTA e do lobby tático; a pilha de itens no meio da tela, em letra grande, das telas de título do Elden Ring, do Skyrim e do RPG; ou a coluna de pausa encostada à esquerda do Red Dead, do Witcher e do Cyberpunk — com o título e o texto encostando junto, e o valor de cada linha na ponta direita. O item sob o cursor, ou sob o foco de quem navega por Tab, acende com a marca de escolhido do jogo; o título, o detalhe e a tecla de cada um continuam lá, e o leitor de tela ouve os mesmos nomes. Só o tema neutro fica com os três cartões lado a lado.
+- **A voz do jogo.** Cada jogo fala com a própria voz nos textos que eram iguais nos dez: a tela inicial abre com uma frase dele (*A trilha está aberta*, *Link neural estável*), o botão de partida tem verbo próprio (*INICIALIZAR* no terminal, *DESBRAVAR* no RPG) e o campo de texto convida do jeito do jogo — o prompt do terminal, a mensagem deixada no chão da Terra Intermédia, o canal do esquadrão —, sem mudar o nome que o leitor de tela anuncia.
+- **A dica do dia.** No pé da tela vem a dica do dia, como numa tela de carregamento, na voz do jogo: a *Dica da Vault-Tec*, otimista além do razoável; a *mensagem deixada* no chão da Terra Intermédia, no formato que os jogadores usam ("tente...", "adiante..."); a *nota do bestiário*; a *dica do parceiro*; o *conselho do mestre*; a *dica tática*. Metade ensina inglês — os arcaísmos do Elden Ring, as letras que o sotaque do oeste engole, os *callouts* de uma partida —, metade ensina o programa. As que citam um atalho global usam a tecla configurada, e somem quando os atalhos globais não existem.
+
+#### O traço dos menus
+
+- **As divisórias.** O fio que separa as seções da coluna era o mesmo risco cinza nos dez ambientes. Agora os títulos de seção falam na fonte do jogo, com o espaçamento entre letras dos menus dele, e o fio ao lado tem o ornamento que quem jogou reconhece: a filigrana dourada que some no escuro (Elden Ring), o fio duplo de pedra terminado num losango vazado (Skyrim), a argola do medalhão abrindo um fio de ferro (Witcher), a régua dupla dos cartazes de procurado (Red Dead), o tubo de neon do rosa ao ciano (GTA), o barramento de dados recortado (Cyberpunk), o fio de iluminura (RPG) e a escala de um visor (FPS).
+- **A moldura da conversa.** O painel da conversa — a maior superfície da janela — ganha a moldura que os menus do jogo poriam em volta do que importa: filigranas de ouro no alto e no pé (Elden Ring), uma placa de pedra com cravos nos cantos (Skyrim), cantoneiras de ferro com rebite (Witcher), a moldura dupla do cartaz de procurado (Red Dead), o letreiro de neon no pé (GTA), cantos chanfrados com o barramento de dados (Cyberpunk) e a página de manuscrito com arabescos (RPG). Tudo rente à borda, sem passar por cima da conversa.
+- **A moldura que se monta.** A moldura ENTRA quando o jogo entra — na primeira vez que a janela aparece e a cada troca de jogo —, do jeito dos menus dele, pelo princípio das molduras que se "montam" em fases dos menus de ficção científica: o circuito da Night City corre pela borda a partir de dois cantos opostos, as ferragens do bruxo são cravadas quina por quina, o cartaz do velho oeste desenrola da esquerda para a direita, o letreiro de neon parte apagado e falha antes de firmar, e a Terra Intermédia, o norte e o grimório surgem devagar. Com a atmosfera desligada, ela aparece pronta.
+- **O item escolhido.** O item escolhido — o filtro ligado do caderno, a sessão aberta no histórico, a chave acesa, a linha que o Enter executaria na paleta — se marca do jeito do jogo: a **pincelada vermelha** atrás do item (Red Dead), a barra invertida do fósforo (Fallout), a faixa de luz dourada entre dois fios (Elden Ring), dois losangos vazados (Skyrim), a brasa acesa na borda (Witcher), o letreiro rosa com o tubo ciano (GTA), a aba chanfrada (Cyberpunk), o sublinhado de manuscrito (RPG) e a mira travada (FPS) — sempre com o rótulo em contraste AA contra o que foi pintado.
+- **O botão de partida.** O botão que dá a partida veste a mesma marca: *PARTIR* é uma pincelada vermelha pintada direto no papel, sem placa por baixo (Red Dead); *INVOCAR* acende entre fios de ouro (Elden Ring), *DESPERTAR* entre losangos (Skyrim), *RASTREAR* com a brasa na borda (Witcher), *LIGAR* como letreiro (GTA) e *DESBRAVAR* sublinhado de manuscrito (RPG). No terminal, no Cyberpunk e no tático, a placa cheia de sempre já é a cara do jogo, e ficou.
+
+#### Movimento, cursor e material
+
+- **O ritmo e os títulos.** Cada jogo se move no seu tempo: as transições, a luz dos botões e a entrada em cascata andam solenes e devagar na alta fantasia, secas e depressa no visor e na Night City, passando do ponto e voltando no GTA e aos saltos no terminal, como um fósforo redesenhado em varreduras. Os títulos também chegam do jeito do jogo, em vez do embaralho de terminal que antes era de todos: o terminal os datilografa atrás de um cursor em bloco, a Terra Intermédia e o norte os revelam numa onda de luz, o velho oeste e o manuscrito os escrevem letra a letra com a tinta assentando, o neon do GTA falha duas vezes antes de firmar (sem nunca apagar de todo), o visor os varre com a borda da leitura em laranja, e só a Night City e o tema neutro ficam com o embaralho.
+- **A mira.** O anel que persegue o cursor — o elemento mais presente da janela, e antes o mesmo círculo nos dez — vira a mira do jogo: os colchetes do terminal, o anel de ouro com quatro losangos da Terra Intermédia, os dois arcos abertos do norte, a argola do medalhão, o ponto miúdo do revólver do velho oeste, o tubo de neon, o octógono chanfrado da Night City, a bússola do grimório e a cruz do visor. O clique responde na mesma língua: o marcador de acerto em diagonal no visor, o X vermelho com que o Dead Eye marca o alvo no velho oeste, um quadrado em varredura no terminal. Sobre um botão, a mira cede ao contorno dele, como sempre, esmaecendo de uma para o outro.
+- **O vidro de cada aparelho.** Três aparelhos ganham o material deles no vidro da janela: a tela do Pip-Boy tem digitais e gordura nos cantos, onde um polegar encosta num aparelho de pulso — o último acabamento que a equipe de arte da Bethesda conta ter dado a ele —; o céu do norte ganha, sobre uma nebulosa pintada, a constelação do Guerreiro, como no menu de habilidades do Skyrim; e o visor tático ganha, grande e apagada no canto, a marcação do esquadrão pintada com molde, com as pontes do estêncil cortando as letras, como as telas do Battlefield 6. Tudo fraco e longe do texto: vidro usado, e não mancha.
+
+#### A conversa
+
+- **O formato da fala.** A conversa fala do jeito do jogo: no terminal não há balão, é um registro — a fala do aparelho ao lado de uma calha de fósforo, a do jogador depois do prompt `>`, os dois carimbados entre colchetes; na alta fantasia e no velho oeste, a fala vira legenda de diálogo, com o nome de quem fala em destaque e a sombra que nasce do lado dele; no GTA, mensagem de celular, com o balão enviado na cor do neon e a ponta do lado de quem mandou; na Night City, holochamada de canto chanfrado com a barra de canal; no visor, o chat do esquadrão, com o canal na frente do nome ("[ESQUADRÃO] COMANDO"). A letra continua em AA contra o que fica atrás dela em todos, e as palavras do tutor continuam tocáveis.
+- **O anúncio de palavra nova.** A palavra que o tutor salva no caderno ganha o anúncio que o jogo daria, por cima da conversa e longe do pé dela, onde está a fala nova: a caixa do terminal com o termo datilografado atrás do cursor em bloco (Fallout), a faixa escura que atravessa o painel com a palavra em ouro surgindo devagar (Elden Ring), a palavra descoberta entre dois fios que crescem para os lados (Skyrim), o *Glossário atualizado* ao lado do medalhão (Witcher), o *Diário atualizado* escrito numa pincelada vermelha (Red Dead), o letreiro de missão cumprida em itálico de neon (GTA), o dado recebido com um tranco de interferência (Cyberpunk), a fita de conquista que se desenrola (RPG) e a medalha laranja do abate, que carimba ao chegar (FPS). Some sozinho em menos de quatro segundos, não pega clique nenhum e, com a atmosfera desligada, não aparece — a anotação na conversa já diz o que entrou.
+
+#### As janelas
+
+- **As portas.** As duas portas da janela — o caderno e o histórico — deixam de ser um retângulo riscado e um relógio iguais nos dez: são o objeto de cada coisa no jogo, desenhado no traço dele — a holotape e o terminal do Pip-Boy, o tomo com fecho e o brilho de uma graça, o tomo com a escrita dos dragões e o pergaminho enrolado, o bestiário com o medalhão e o aviso de contrato pregado no quadro, o diário com correia e a fogueira do acampamento, o celular e a roda das rádios, o fragmento de dados e o braindance, o grimório e a ampulheta, as plaquetas de identificação e a prancheta do relatório de missão.
+- **O caderno e o histórico.** O caderno e o histórico vestem o jogo também: cada um tem o nome que o jogo daria — as *Holotapes* e os *Registros* do Pip-Boy, o *Tomo de palavras* e as *Graças visitadas*, as *Palavras de poder* e as *Missões* do norte, o *Glossário* e os *Contratos* do bruxo, o *Diário* e as *Trilhas percorridas* do oeste, a *Agenda* e as *Mensagens* do celular, os *Fragmentos* e os *Braindances* da Night City, o *Grimório* e as *Crônicas*, o *Arsenal* e os *Relatórios* do visor —, com o ícone do jogo ao lado e a função escrita miúda ("caderno de vocabulário") para ninguém se perder; a lista de palavras e a transcrição ganham a moldura do jogo, montando quando a janela abre; e a transcrição fala no formato da conversa — entre colchetes no terminal, com o canal no visor, com o nome em destaque na legenda.
+- **A revisão e o progresso.** A revisão e o progresso acontecem no lugar do jogo em que já se treina e já se mede: revisar é o *Teste G.O.A.T.* e o progresso é o *STAT* do Pip-Boy; *Memorizar magias* numa graça e o *Nível de runas*; a *Muralha de palavras* e as *Habilidades* do norte; a *Meditação* e o painel de *Personagem* do bruxo; *Cartas na mesa* e os *Desafios* do oeste; o *Ensaio do golpe* e as *Estatísticas* do GTA; o *Protocolo de invasão* e a *Reputação* da Night City; o *Teste de perícia* e a *Ficha de personagem*; o *Estande de tiro* e a *Carreira* do visor — cada um com o objeto dele ao lado do título (a folha de respostas e o mostrador de ponteiro, a pedra de brilho e a Árvore Térrea, a muralha e a constelação, o relógio da meditação e as duas espadas, as cartas em leque e a estrela de xerife, o quadro do golpe e as barras, a matriz de código e os degraus, o dado de vinte faces e a ficha, o alvo e as divisas), a função escrita miúda ao lado e a moldura do jogo se montando em volta do cartão e dos gráficos.
 
 ### Tipografia de cada jogo
 
@@ -264,55 +297,78 @@ Os dois bancos abrem em **WAL** (`pipboy/banco.py`). Não é ajuste fino: cada f
 ```text
 pip-boy-termlink/
 ├── pip_boy.py            # Lançador
+├── diagnostico.py        # Confere a máquina: Python, chave, áudio, fontes
 ├── pip_boy.spec          # Receita do executável (PyInstaller)
 ├── pyproject.toml        # Metadados, ruff e mypy
 ├── ferramentas/
-│   ├── criar_atalho.py   # Põe o atalho do programa na área de trabalho
-│   ├── cobertura_de_glifos.py # Quanto da tipografia é da fonte do tema
-│   ├── gerar_icone.py    # Renderiza o .ico do build (nenhum binário no repo)
+│   ├── criar_atalho.py        # Põe o atalho do programa na área de trabalho
+│   ├── gerar_icone.py         # Renderiza o .ico do build (nenhum binário no repo)
+│   ├── verificar_segredos.py  # Nada de segredo entre os arquivos rastreados
 │   ├── verificar_glifos.py    # Todo símbolo do código existe nas fontes?
-│   └── verificar_segredos.py  # Nada de segredo entre os arquivos rastreados
+│   ├── cobertura_de_glifos.py # Quanto da tipografia é da fonte do tema
+│   ├── distancia_dos_temas.py # O quanto os dez ambientes se parecem (ΔE)
+│   └── mutantes.py            # Planta defeitos e confere se a suíte pega
 ├── pipboy/
 │   ├── __init__.py       # Logging, abertura e ponto de entrada
-│   ├── constants.py      # Taxas de amostragem e temporizações
-│   ├── banco.py          # Conexões SQLite (WAL), carimbos em UTC, dobra da busca
-│   ├── crash.py          # Rede de segurança: exceção vira log + aviso
-│   ├── deteccao.py       # Reconhece o jogo aberto pela lista de processos
-│   ├── historico.py      # Banco de transcrições de sessões
-│   ├── revisao.py        # Rodada de revisão offline (a lógica, sem Qt)
-│   ├── sons.py           # Síntese dos blips (NumPy → WAV), por tema
-│   ├── design.py         # Escala tipográfica, espaçamento e cor
-│   ├── themes.py         # Ambiente de cada jogo: paleta, fonte, textos
+│   │
+│   │   # Núcleo — sem Qt, testável a seco
 │   ├── config.py         # .env, pasta de dados, preferências
-│   ├── profiles.py       # Personas, níveis, modos e o prompt
+│   ├── constants.py      # Taxas de amostragem e temporizações
+│   ├── crash.py          # Rede de segurança: exceção vira log + aviso
 │   ├── events.py         # Mensagens entre threads
-│   ├── dsp.py            # Reamostragem, mixagem, medição (NumPy)
-│   ├── audio.py          # Dispositivos, captura, portão de voz, loopback
-│   ├── vocabulary.py     # Banco SQLite e exportação
-│   ├── tools.py          # Function calling
+│   ├── profiles.py       # Personas, níveis, modos e o prompt
 │   ├── session.py        # Sessão Live, reconexão, transcrição
+│   ├── tools.py          # Function calling
+│   ├── audio.py          # Dispositivos, captura, portão de voz, loopback
+│   ├── dsp.py            # Reamostragem, mixagem, medição (NumPy)
+│   ├── deteccao.py       # Reconhece o jogo aberto pela lista de processos
+│   ├── banco.py          # Conexões SQLite (WAL), carimbos em UTC, dobra da busca
+│   ├── vocabulary.py     # O caderno: banco, repetição espaçada, exportação
+│   ├── revisao.py        # A rodada de revisão e a conferência da escrita
+│   ├── nivel.py          # O nível do caderno (XP), lido do próprio caderno
+│   ├── historico.py      # Banco de transcrições e dias de estudo
+│   ├── themes.py         # Ambiente de cada jogo: paleta, fontes, textos, nomes
+│   ├── dicas.py          # A dica do dia, na voz de cada jogo
+│   ├── sons.py           # Síntese dos sons (NumPy → WAV), na voz de cada jogo
+│   ├── design.py         # Escala tipográfica, espaçamento e cor
+│   ├── texto.py          # Concordância de número ("1 palavra", "3 palavras")
+│   ├── fontes/           # Fontes livres embutidas (OFL), cada uma com a licença
+│   │
 │   └── interface/        # Camada de apresentação (Qt)
-│       ├── janela.py     # Composição da janela e ciclo de vida
+│       │   # A janela e o que a sustenta
+│       ├── janela.py     # Composição da janela principal e ciclo de vida
+│       ├── montagem.py   # Construção dos widgets da janela principal
+│       ├── atalhos.py    # Atalhos de teclado — os locais e os globais
+│       ├── relogios.py   # Os relógios da janela: o que corre, e quando para
+│       ├── preferencias.py # Vínculo entre a coluna lateral e o arquivo
 │       ├── moldura.py    # Barra de título temática e redimensionamento
-│       ├── abertura.py   # Cartão de arranque no tema do último jogo
-│       ├── icone_do_programa.py # Ícone do programa (barra de tarefas e .exe)
 │       ├── estilo.py     # Folha de estilo derivada do tema (função pura)
-│       ├── preferencias.py# Vínculo entre a coluna lateral e o arquivo
-│       ├── conversa.py   # O diálogo em bolhas
-│       ├── tela_inicial.py# O que a conversa mostra antes de haver conversa
-│       ├── caderno.py    # Visualizador do vocabulário salvo
-│       ├── revisao.py    # Cartões de revisão offline
-│       ├── progresso.py  # Painel de progresso com gráficos
-│       ├── historico.py  # Visualizador das sessões gravadas
+│       ├── fontes.py     # Fontes embutidas e a regra única de escolha da letra
+│       │   # Peças
+│       ├── componentes.py # Botão, chip, medidor, cápsula, bolha, títulos
+│       ├── movimento.py  # Transições, entrada em cascata e o ritmo de cada jogo
+│       ├── cursor.py     # A resposta ao cursor e os botões que ele puxa
+│       │   # A cara de cada jogo
+│       ├── atmosfera.py  # Cenário procedural: materiais, partículas, mira
+│       ├── ornamentos.py # Divisórias, molduras e a marca do item escolhido
+│       ├── icones.py     # Os objetos de cada jogo, desenhados (as quatro portas)
+│       ├── avisos.py     # O anúncio de palavra nova, do jeito de cada jogo
+│       │   # Telas
+│       ├── abertura.py   # Cartão de arranque no tema do último jogo
+│       ├── boas_vindas.py # Primeira execução: pedir a chave, no tema
+│       ├── tela_inicial.py # O menu do jogo antes de haver conversa
+│       ├── conversa.py   # A conversa, no formato de fala de cada jogo
+│       ├── paleta.py     # A paleta de comandos (Ctrl+K)
+│       ├── caderno.py    # O caderno de vocabulário
+│       ├── revisao.py    # Os cartões de revisão: lembrar e escrever
+│       ├── progresso.py  # O painel de progresso: nível, gráficos, previsão
+│       ├── historico.py  # As conversas gravadas
 │       ├── compacto.py   # A cápsula sempre-no-topo do modo compacto
-│       ├── bandeja.py    # Ícone e menu na bandeja do sistema
-│       ├── campainha.py  # Quem toca os blips sintetizados
-│       ├── boas_vindas.py# Primeira execução: pedir a chave, no tema
 │       ├── dialogo.py    # Caixas de confirmação e aviso, no tema
-│       ├── componentes.py# Botão, chip, medidor, cápsula, bolha, transição
-│       ├── movimento.py  # Progresso animável e entrada em cascata
-│       ├── cursor.py     # Onde está o cursor, e os botões que ele puxa
-│       └── atmosfera.py  # Cenário procedural de cada jogo
+│       │   # Sistema
+│       ├── campainha.py  # Quem toca os sons sintetizados
+│       ├── bandeja.py    # Ícone e menu na bandeja do sistema
+│       └── icone_do_programa.py # O ícone da barra de tarefas e do .exe
 ├── tests/
 │   ├── test_nucleo.py    # Lógica: sem hardware, sem rede, sem efeito colateral
 │   └── test_interface.py # A janela inteira, no backend offscreen do Qt
