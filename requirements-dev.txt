@@ -1,0 +1,17 @@
+# Ferramentas de verificação, com versão FIXA — o que o CI e quem desenvolve
+# usam para dizer "verde".
+#
+# Com versão solta, um lançamento novo do ruff ou do mypy (uma regra a mais,
+# uma inferência mais estrita) deixava o CI vermelho sem que ninguém tivesse
+# mudado uma linha do programa, e o mesmo commit passava numa máquina e
+# falhava na outra. Atualizar estas versões é uma mudança como outra
+# qualquer: um commit, com o que a versão nova apontou já corrigido nele.
+#
+# As dependências do programa continuam em requirements.txt, com o piso de
+# versão de sempre: é o que quem instala pelo código-fonte recebe.
+-r requirements.txt
+
+ruff==0.16.2
+mypy==2.3.0
+# Só para ferramentas/cobertura_de_glifos.py (lê a tabela cmap das fontes).
+fonttools==4.63.0

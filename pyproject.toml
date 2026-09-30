@@ -19,6 +19,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Faixas de versão para quem instala o extra. As versões EXATAS que o CI usa
+# para dizer "verde" estão em requirements-dev.txt.
 dev = [
     "ruff>=0.16",
     "mypy>=1.14",

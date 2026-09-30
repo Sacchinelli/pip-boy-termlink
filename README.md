@@ -132,9 +132,10 @@ Trocar de jogo dissolve o ambiente antigo sobre o novo em vez de estalar de um p
 
 ## Qualidade verificada por ferramenta
 
-O código passa limpo por três verificadores, e a suíte de testes cobre o núcleo inteiro:
+O código passa limpo por três verificadores, e a suíte de testes cobre o núcleo inteiro. As ferramentas têm versão fixa em `requirements-dev.txt` — as mesmas do CI, para o verde daqui ser o verde de lá:
 
 ```powershell
+py -m pip install -r requirements-dev.txt        # o programa e as ferramentas
 py -m ruff check .                                # lint (zero apontamentos)
 py -m mypy pipboy pip_boy.py diagnostico.py       # tipos, modo estrito
 py tests/test_nucleo.py                           # ~400 testes sem hardware
