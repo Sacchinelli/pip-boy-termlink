@@ -1,0 +1,355 @@
+"""As peças de movimento que não são componentes: progresso e entrada.
+
+O ``Botao`` nasceu com a própria receita de animação escrita à mão, e ela
+serviu enquanto só ele se mexia. Quando o cartão do caderno passou a reagir a
+quem chega, a receita precisaria ser copiada duas vezes no mesmo arquivo — e
+copiada sem o detalhe que faltava nela, a duração proporcional. Aqui ela vira
+peça, junto da entrada em cascata, que é a outra coisa que mais de uma janela
+vai querer.
+
+A regra que atravessa as duas: anima-se o que é PINTURA — cor, luz, opacidade,
+deslocamento desenhado. Nada aqui mexe em geometria de layout, porque um
+elemento que cresce ou anda de verdade empurra os vizinhos e tira do lugar o
+alvo do próximo clique.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Sequence
+from typing import Any
+
+from PySide6.QtCore import (
+    Property,
+    QAbstractAnimation,
+    QEasingCurve,
+    QObject,
+    QPoint,
+    QPointF,
+    QPropertyAnimation,
+    QRect,
+    QRectF,
+    QSequentialAnimationGroup,
+    Qt,
+    QVariantAnimation,
+)
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPixmap
+from PySide6.QtWidgets import QGraphicsEffect, QWidget
+
+from .. import design
+
+
+class Transicao(QObject):
+    """Progresso de 0 a 1 que pode mudar de destino a qualquer momento.
+
+    A diferença para a receita do ``Botao`` está em ``ir``: a duração é
+    PROPORCIONAL à distância que falta. Sem isso, passar o cursor de raspão por
+    um cartão — acender até 20% e sair — gasta a duração inteira para apagar
+    20%, e a luz fica grudada atrás do mouse. É o detalhe que separa fluido de
+    atrasado.
+    """
+
+    def __init__(
+        self,
+        dono: QObject,
+        duracao: int,
+        ao_mudar: Callable[[float], None],
+        *,
+        reduzir: Callable[[], bool],
+        curva: QEasingCurve.Type = QEasingCurve.Type.OutCubic,
+    ) -> None:
+        super().__init__(dono)
+        self.valor = 0.0
+        self._duracao = duracao
+        self._ao_mudar = ao_mudar
+        self._reduzir = reduzir
+        self._animacao = QVariantAnimation(self)
+        self._animacao.setEasingCurve(curva)
+        self._animacao.valueChanged.connect(self._definir)
+
+    def ir(self, destino: float) -> None:
+        self._animacao.stop()
+        distancia = abs(destino - self.valor)
+        if distancia < 0.001:
+            return
+        if self._reduzir():
+            # Movimento reduzido não é "sem resposta": o estado final chega na
+            # hora. O que some é o trajeto, não o destino.
+            self._definir(destino)
+            return
+        self._animacao.setDuration(max(1, round(self._duracao * distancia)))
+        self._animacao.setStartValue(self.valor)
+        self._animacao.setEndValue(destino)
+        self._animacao.start()
+
+    def saltar(self, valor: float) -> None:
+        """Vai direto ao valor, interrompendo o que estiver em curso."""
+        self._animacao.stop()
+        self._definir(valor)
+
+    def _definir(self, valor: Any) -> None:
+        self.valor = float(valor)
+        self._ao_mudar(self.valor)
+
+
+class EfeitoEntrada(QGraphicsEffect):
+    """Desenha o widget subindo e aparecendo, sem mexer na geometria dele.
+
+    Um ``QGraphicsOpacityEffect`` faz só metade: aparece no lugar. Mover o
+    widget de verdade brigaria com o layout, que o devolve ao lugar na próxima
+    passagem. Aqui o deslocamento existe só na pintura — o layout nem fica
+    sabendo — e o efeito é descartado ao fim, pela razão documentada em
+    ``Bolha.animar_entrada``: efeito pendurado custa uma superfície fora da
+    tela em toda repintura.
+    """
+
+    SUBIDA = 14.0
+
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._progresso = 0.0
+
+    def _get_progresso(self) -> float:
+        return self._progresso
+
+    def _set_progresso(self, valor: float) -> None:
+        self._progresso = valor
+        self.update()
+
+    progresso = Property(float, _get_progresso, _set_progresso)
+
+    def boundingRectFor(self, retangulo: QRectF | QRect) -> QRectF:
+        # Só para baixo: o widget parte de SUBIDA px abaixo do lugar final.
+        # Não estender para cima mantém a imagem da fonte ancorada em (0, 0).
+        return QRectF(retangulo).adjusted(0, 0, 0, self.SUBIDA)
+
+    def draw(self, pintor: QPainter) -> None:
+        # Sempre pela imagem, inclusive no último quadro. ``drawSource`` pinta
+        # os filhos com o MESMO pintor, e um Botao lá dentro tem a auréola, que
+        # é outro efeito e tenta abrir um segundo pintor no mesmo dispositivo:
+        # "A paint device can only be painted by one painter at a time".
+        imagem = self.sourcePixmap(Qt.CoordinateSystem.LogicalCoordinates)
+        pintor.save()
+        pintor.setOpacity(self._progresso)
+        pintor.drawPixmap(QPointF(0.0, (1.0 - self._progresso) * self.SUBIDA), imagem)
+        pintor.restore()
+
+
+def animar_entrada(widgets: Sequence[QWidget], *, reduzir: bool) -> None:
+    """Cascata: cada widget sobe e aparece ``ESCALONAMENTO`` ms após o anterior.
+
+    A ordem conduz o olho de cima para baixo, que é a ordem de leitura. Todos
+    juntos seriam um clarão; um de cada vez, devagar, seriam uma espera.
+
+    Quem chama decide QUANTOS: só o que cabe na tela merece entrada. Um widget
+    fora da vista pagaria efeito e animação para ninguém ver.
+    """
+    if reduzir:
+        return
+    for ordem, widget in enumerate(widgets):
+        efeito = EfeitoEntrada(widget)
+        widget.setGraphicsEffect(efeito)
+        grupo = QSequentialAnimationGroup(widget)
+        grupo.addPause(ordem * design.ESCALONAMENTO)
+        subida = QPropertyAnimation(efeito, b"progresso", grupo)
+        subida.setDuration(design.DURACAO_LENTA)
+        subida.setStartValue(0.0)
+        subida.setEndValue(1.0)
+        subida.setEasingCurve(QEasingCurve.Type.OutCubic)
+        grupo.addAnimation(subida)
+
+        def encerrar(alvo: QWidget = widget, proprio: EfeitoEntrada = efeito) -> None:
+            # Uma segunda entrada pode ter trocado o efeito no meio desta; só se
+            # remove o que ainda é nosso.
+            if alvo.graphicsEffect() is proprio:
+                # None limpa o efeito — aceito pelo Qt, ainda ausente nas stubs.
+                alvo.setGraphicsEffect(None)  # type: ignore[arg-type]
+
+        grupo.finished.connect(encerrar)
+        grupo.start(QAbstractAnimation.DeletionPolicy.DeleteWhenStopped)
+
+
+class ImagemQueSai(QWidget):
+    """A fotografia do que estava na tela, indo embora por cima do que chegou.
+
+    É a ``TransicaoDeTema`` com direção: além de esmaecer, a imagem anda. Quem
+    chama fotografa ANTES de trocar o conteúdo, troca, e cria esta peça por
+    cima — o conteúdo novo já está no lugar e a foto do antigo sai deslizando.
+    Não intercepta o mouse, e se destrói ao fim.
+
+    Quem respeita o movimento reduzido é o chamador: sem movimento, não se
+    cria a peça e a troca acontece num quadro.
+    """
+
+    def __init__(
+        self,
+        parent: QWidget,
+        retrato: QPixmap,
+        *,
+        deslocamento: QPointF,
+        duracao: int = design.DURACAO_MEDIA,
+    ) -> None:
+        super().__init__(parent)
+        self._retrato = retrato
+        self._deslocamento = deslocamento
+        self._progresso = 0.0
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setGeometry(parent.rect())
+
+        self._animacao = QVariantAnimation(self)
+        self._animacao.setStartValue(0.0)
+        self._animacao.setEndValue(1.0)
+        self._animacao.setDuration(duracao)
+        self._animacao.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._animacao.valueChanged.connect(self._avancar)
+        self._animacao.finished.connect(self.deleteLater)
+        self.show()
+        self.raise_()
+        self._animacao.start()
+
+    def _avancar(self, valor: Any) -> None:
+        self._progresso = float(valor)
+        self.update()
+
+    def paintEvent(self, _evento: Any) -> None:
+        pintor = QPainter(self)
+        # A foto some mais rápido do que anda: sem isso, no meio do caminho as
+        # duas camadas de texto ficam igualmente legíveis e embaralhadas.
+        pintor.setOpacity(max(0.0, 1.0 - self._progresso * 1.6))
+        pintor.drawPixmap(self._deslocamento * self._progresso, self._retrato)
+        pintor.end()
+
+
+class Crescimento(QObject):
+    """Uma linha do tempo para itens DESENHADOS que entram escalonados.
+
+    ``animar_entrada`` escalona widgets; as barras de um gráfico não são
+    widgets, são retângulos de um mesmo ``paintEvent``. Aqui há um relógio só
+    e cada barra pergunta o próprio progresso — ``progresso(i)`` já vem com a
+    curva aplicada e com o atraso do item embutido. Um relógio para oito barras,
+    e não oito animações.
+
+    ``atraso`` desloca a linha do tempo inteira: é como três gráficos da mesma
+    tela entram um depois do outro sem se conhecerem.
+    """
+
+    ESCALONAMENTO = 30
+
+    def __init__(
+        self,
+        dono: QWidget,
+        itens: int,
+        *,
+        reduzir: Callable[[], bool],
+        atraso: int = 0,
+        duracao: int = design.DURACAO_LENTA,
+    ) -> None:
+        super().__init__(dono)
+        self._dono = dono
+        self._itens = max(1, itens)
+        self._reduzir = reduzir
+        self._atraso = atraso
+        self._duracao = duracao
+        self._curva = QEasingCurve(QEasingCurve.Type.OutCubic)
+        self._total = atraso + duracao + self.ESCALONAMENTO * (self._itens - 1)
+        # Antes de iniciar, tudo está no lugar final: um gráfico fotografado
+        # sem nunca ter aparecido não pode sair vazio.
+        self._t = float(self._total)
+        self._animacao = QVariantAnimation(self)
+        self._animacao.setStartValue(0.0)
+        self._animacao.setEndValue(float(self._total))
+        self._animacao.setDuration(self._total)
+        self._animacao.valueChanged.connect(self._avancar)
+
+    @property
+    def ativo(self) -> bool:
+        return self._animacao.state() == QAbstractAnimation.State.Running
+
+    @property
+    def atraso(self) -> int:
+        return self._atraso
+
+    def iniciar(self) -> None:
+        self._animacao.stop()
+        if self._reduzir():
+            self._avancar(float(self._total))
+            return
+        self._t = 0.0
+        self._animacao.start()
+
+    def progresso(self, indice: int) -> float:
+        inicio = self._atraso + self.ESCALONAMENTO * indice
+        fracao = (self._t - inicio) / self._duracao
+        return self._curva.valueForProgress(max(0.0, min(1.0, fracao)))
+
+    def _avancar(self, valor: Any) -> None:
+        self._t = float(valor)
+        self._dono.update()
+
+
+class SinalFlutuante(QWidget):
+    """Um recado curtíssimo que sobe de um ponto e some sozinho.
+
+    Feito para o "+1" que sai do contador do caderno quando a sessão salva uma
+    palavra: o número ao lado muda de "3 termos" para "4 termos" num quadro, e
+    uma mudança de um caractere num canto da tela não se vê. O sinal é o que
+    leva o olho até ela.
+
+    Fica parado e cheio no começo — é o instante em que precisa ser lido — e só
+    então esmaece enquanto termina de subir. Não intercepta o mouse e se
+    destrói ao fim. Quem respeita o movimento reduzido é o chamador.
+    """
+
+    SUBIDA = 16.0
+    DURACAO = 1200
+    # Fração do tempo em que o sinal fica totalmente visível antes de esmaecer.
+    LEITURA = 0.45
+
+    def __init__(
+        self, parent: QWidget, texto: str, *, ancora: QPoint, cor: str, fonte: QFont
+    ) -> None:
+        super().__init__(parent)
+        self.texto = texto
+        self._cor = QColor(cor)
+        self._progresso = 0.0
+        self._curva = QEasingCurve(QEasingCurve.Type.OutCubic)
+        self.setFont(fonte)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        metricas = QFontMetrics(fonte)
+        # O ponto de ancoragem é o topo da linha de texto no destino final; o
+        # widget se estende SUBIDA pixels abaixo dele, de onde o texto parte.
+        self._altura_texto = metricas.height()
+        self.setGeometry(
+            ancora.x(), ancora.y(),
+            metricas.horizontalAdvance(texto) + 4, self._altura_texto + round(self.SUBIDA),
+        )
+
+        self._animacao = QVariantAnimation(self)
+        self._animacao.setStartValue(0.0)
+        self._animacao.setEndValue(1.0)
+        self._animacao.setDuration(self.DURACAO)
+        self._animacao.valueChanged.connect(self._avancar)
+        self._animacao.finished.connect(self.deleteLater)
+        self.show()
+        self.raise_()
+        self._animacao.start()
+
+    def _avancar(self, valor: Any) -> None:
+        self._progresso = float(valor)
+        self.update()
+
+    def paintEvent(self, _evento: Any) -> None:
+        subida = self._curva.valueForProgress(self._progresso)
+        if self._progresso <= self.LEITURA:
+            opacidade = 1.0
+        else:
+            opacidade = 1.0 - (self._progresso - self.LEITURA) / (1.0 - self.LEITURA)
+        pintor = QPainter(self)
+        pintor.setOpacity(max(0.0, opacidade))
+        pintor.setPen(self._cor)
+        pintor.setFont(self.font())
+        pintor.drawText(
+            QRectF(0.0, self.SUBIDA * (1.0 - subida), self.width(), self._altura_texto),
+            int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            self.texto,
+        )
+        pintor.end()

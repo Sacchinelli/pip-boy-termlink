@@ -226,6 +226,213 @@ def main() -> int:
     aplicacao.processEvents()
     checar(len(caderno._cartoes) == 2, "voltar para 'todos os jogos' devolve a lista")
 
+    print("microinterações do caderno")
+    # A atmosfera é fixada em Completa pelo mesmo motivo do relógio de quadros:
+    # num runner sem "efeitos de animação" ela nasce Desligada, as transições
+    # daqui virariam saltos, e as checagens passariam a medir a máquina.
+    from collections.abc import Callable
+
+    from PySide6.QtCore import QEvent, QEventLoop, QPointF, QTimer, qInstallMessageHandler
+    from PySide6.QtGui import QEnterEvent, QFocusEvent, QMouseEvent
+    from PySide6.QtWidgets import QLabel, QWidget
+
+    import pipboy.interface.caderno as mod_caderno
+    import pipboy.interface.janela as mod_exportar
+    from pipboy.interface.componentes import Botao
+    from pipboy.interface.movimento import EfeitoEntrada
+
+    def esperar(ms: int) -> None:
+        laco = QEventLoop()
+        QTimer.singleShot(ms, laco.quit)
+        laco.exec()
+
+    def aguardar(condicao: Callable[[], bool], limite_ms: int = 4000) -> bool:
+        # Espera pelo ESTADO, não por um tempo fixo: o runner de CI é mais
+        # lento que qualquer máquina de desenvolvimento, e um "espera 400 ms"
+        # que aqui sobra lá falta.
+        for _ in range(limite_ms // 50):
+            if condicao():
+                return True
+            esperar(50)
+        return bool(condicao())
+
+    def entrar(alvo: QWidget, x: float, y: float) -> None:
+        ponto = QPointF(x, y)
+        QApplication.sendEvent(alvo, QEnterEvent(ponto, ponto, QPointF(alvo.mapToGlobal(ponto))))
+
+    def sair(alvo: QWidget) -> None:
+        QApplication.sendEvent(alvo, QEvent(QEvent.Type.Leave))
+
+    atmosfera_caderno = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    aplicacao.processEvents()
+
+    # Trocar de filtro, logo acima, já dispara uma cascata. Sem esperá-la
+    # acabar, a checagem da REABERTURA enxergaria os efeitos da troca e
+    # passaria mesmo com a reabertura sem animação nenhuma.
+    aguardar(lambda: all(c.graphicsEffect() is None for c in caderno._cartoes))
+    caderno.hide()
+    caderno.show()
+    checar(
+        all(isinstance(c.graphicsEffect(), EfeitoEntrada) for c in caderno._cartoes),
+        "reabrir o caderno faz os cartões entrarem em cascata",
+    )
+    checar(
+        aguardar(lambda: all(c.graphicsEffect() is None for c in caderno._cartoes)),
+        "e nenhum efeito fica pendurado quando a entrada termina",
+    )
+
+    cartao = caderno._cartoes[0]
+    acoes = cartao._acoes
+    avisos_qt: list[str] = []
+    qInstallMessageHandler(lambda _tipo, _contexto, mensagem: avisos_qt.append(mensagem))
+    try:
+        entrar(cartao, 40, 20)
+        checar(
+            cartao._intencao.isActive() and cartao._revelacao.valor == 0.0,
+            "chegar ao cartão arma a intenção sem revelar as ações de cara",
+        )
+        checar(
+            acoes.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents),
+            "e ação invisível não recebe clique",
+        )
+        # O movimento cai sobre um FILHO: é o caso que congelava a luz.
+        rotulo = next(r for r in cartao.findChildren(QLabel) if r.text() == cartao._entrada.traducao)
+        centro = QPointF(rotulo.rect().center())
+        QApplication.sendEvent(
+            rotulo,
+            QMouseEvent(
+                QEvent.Type.MouseMove, centro, QPointF(rotulo.mapToGlobal(centro)),
+                Qt.MouseButton.NoButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+            ),
+        )
+        esperado = QPointF(rotulo.mapTo(cartao, centro.toPoint()))
+        checar(
+            cartao._holofote.cursor == esperado,
+            f"o cursor sobre a tradução ainda conduz a luz ({cartao._holofote.cursor} vs {esperado})",
+        )
+        checar(
+            aguardar(lambda: cartao._revelacao.valor == 1.0 and cartao._holofote.valor == 1.0),
+            "parado no cartão, a luz acende e as ações aparecem",
+        )
+        checar(
+            not acoes.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents),
+            "e passam a aceitar clique",
+        )
+        avisos_qt.clear()
+        cartao.update()
+        acoes.update()
+        esperar(80)
+        checar(
+            not [a for a in avisos_qt if "ainter" in a],
+            f"repintar o cartão aceso não briga por pintor ({avisos_qt[:2]})",
+        )
+        sair(cartao)
+        checar(aguardar(lambda: cartao._revelacao.valor == 0.0), "sair esconde as ações")
+
+        # O foco é ENTREGUE, e não pedido com setFocus: a esta altura do roteiro
+        # o backend offscreen não tem janela ativa nenhuma, e um setFocus sem
+        # janela ativa guarda o pedido sem nunca emitir o evento. O que se prova
+        # aqui é a reação do cartão ao Tab, não o gerenciador de janelas.
+        corrigir = acoes.findChildren(Botao)[1]
+        QApplication.sendEvent(
+            corrigir, QFocusEvent(QEvent.Type.FocusIn, Qt.FocusReason.TabFocusReason)
+        )
+        checar(
+            aguardar(lambda: cartao._revelacao.valor == 1.0),
+            "Tab até uma ação revela as ações sem mouse nenhum",
+        )
+        QApplication.sendEvent(
+            corrigir, QFocusEvent(QEvent.Type.FocusOut, Qt.FocusReason.TabFocusReason)
+        )
+        checar(aguardar(lambda: cartao._revelacao.valor == 0.0), "e o foco saindo esconde de novo")
+    finally:
+        qInstallMessageHandler(None)
+
+    # -- Exportar confirma no próprio botão. Antes, o resultado ia só para o
+    #    registro da janela principal, escondido atrás do caderno.
+    exportar = caderno.botao_exportar
+    largura_exportar = exportar.width()
+    dica_exportar = exportar.toolTip()
+    destino_exportar = dados / "exportado.txt"
+    salvar_original = mod_exportar.QFileDialog.getSaveFileName
+    try:
+        mod_exportar.QFileDialog.getSaveFileName = staticmethod(  # type: ignore[assignment]
+            lambda *a, **k: ("", "")
+        )
+        exportar.click()
+        checar(exportar.estado == "ocioso", "cancelar o seletor não confirma nada")
+        mod_exportar.QFileDialog.getSaveFileName = staticmethod(  # type: ignore[assignment]
+            lambda *a, **k: (str(destino_exportar), "")
+        )
+        exportar.click()
+        aplicacao.processEvents()
+        checar(
+            destino_exportar.exists() and exportar.estado == "concluido",
+            "exportar confirma no botão que foi clicado",
+        )
+        checar(
+            f"{store.total()} termos exportados" in exportar.toolTip(),
+            f"e a dica diz quanto foi escrito ({exportar.toolTip()})",
+        )
+        checar(exportar.width() == largura_exportar, "sem mudar a largura do botão")
+        checar(
+            aguardar(lambda: exportar.estado == "ocioso"),
+            "a confirmação volta sozinha",
+        )
+        checar(exportar.toolTip() == dica_exportar, "e devolve a dica original")
+    finally:
+        mod_exportar.QFileDialog.getSaveFileName = salvar_original  # type: ignore[assignment]
+
+    # -- Remover esmaece e fecha o buraco SEM devolver a lista ao topo.
+    extras = [f"scrap {i:02d}" for i in range(14)]
+    for termo in extras:
+        store.registrar(termo, "sucata", "Scrap metal everywhere.", "Fallout")
+    caderno.atualizar()
+    barra = caderno.rolagem.verticalScrollBar()
+    checar(aguardar(lambda: barra.maximum() > 0), "com dezesseis palavras a lista rola")
+    barra.setValue(barra.maximum())
+    # A ordem da lista é a do caderno, não a de inserção: o alvo é procurado
+    # entre as palavras de apoio, para não levar junto uma das verdadeiras.
+    removido = next(c for c in reversed(caderno._cartoes) if c._entrada.termo in extras)
+    confirmar_original = mod_caderno.confirmar_remocao
+    try:
+        mod_caderno.confirmar_remocao = lambda *a, **k: True  # type: ignore[assignment]
+        caderno._remover(removido._entrada)
+        checar(
+            removido.graphicsEffect() is not None,
+            "remover esmaece o cartão em vez de sumir num quadro",
+        )
+        checar(
+            aguardar(lambda: len(caderno._cartoes) == len(extras) + 1),
+            "e a lista se fecha sobre ele",
+        )
+        aplicacao.processEvents()
+        checar(barra.value() > 0, f"sem devolver a rolagem ao topo ({barra.value()})")
+    finally:
+        mod_caderno.confirmar_remocao = confirmar_original  # type: ignore[assignment]
+        for termo in extras:
+            store.remover(termo)
+        caderno.atualizar()
+        aplicacao.processEvents()
+    checar(len(caderno._cartoes) == 2, "as palavras de apoio saem sem deixar rastro")
+
+    # -- Atmosfera desligada: o estado final chega, o trajeto não.
+    janela.campo_atmosfera.setCurrentText("Desligada")
+    aplicacao.processEvents()
+    cartao = caderno._cartoes[0]
+    entrar(cartao, 40, 20)
+    checar(cartao._holofote.valor == 1.0, "com a atmosfera desligada a luz chega sem trajeto")
+    sair(cartao)
+    caderno.hide()
+    caderno.show()
+    checar(
+        all(c.graphicsEffect() is None for c in caderno._cartoes),
+        "e o caderno abre sem cascata",
+    )
+    janela.campo_atmosfera.setCurrentText(atmosfera_caderno)
+    aplicacao.processEvents()
+
     # -- Correção: a borracha que faltava ao lado do "×". A caixa é
     #    substituída pelo mesmo motivo do QFileDialog acima — ela bloqueia
     #    esperando alguém digitar; o resto do caminho é o de produção.
@@ -469,11 +676,601 @@ def main() -> int:
     janela._visor_historico.close()
     visor.close()
 
+    print("tela inicial")
+    # O que a conversa mostra antes de haver conversa. O modelo, a chave e os
+    # atalhos globais eram anotações soltas no pé do painel; agora moram aqui.
+    from pipboy.events import Tag as TagInicial
+    from pipboy.interface.tela_inicial import tecla_legivel
+
+    tela = janela.conversa.tela_inicial
+    janela.conversa.limpar()
+    aplicacao.processEvents()
+    checar(not tela.isHidden(), "com a conversa vazia, a tela inicial está à vista")
+    checar(
+        not any("Atalhos globais" in texto for texto, _, _ in janela.conversa._mensagens),
+        "os atalhos globais não são mais anotação solta na conversa",
+    )
+    checar(
+        janela._configuration.model in tela.diagnostico.text(),
+        "o modelo em uso aparece no rodapé da tela inicial",
+    )
+    checar(
+        tecla_legivel("ctrl+alt+p") == "Ctrl+Alt+P" and tecla_legivel("f12") == "F12",
+        "as teclas do .env são escritas como se leem numa tecla",
+    )
+
+    janela.conversa.atualizar_inicial()
+    checar(
+        str(store.total()) in tela.cartao_caderno.detalhe,
+        f"o cartão do caderno traz o total de agora ({tela.cartao_caderno.detalhe})",
+    )
+    checar(
+        tela.cartao_revisar.destaque == (store.pendentes() > 0),
+        "o cartão de revisar se destaca só quando há palavra vencida",
+    )
+    store.registrar("scrap", "sucata", "", "Fallout")
+    janela.caderno_mudou()
+    checar(
+        str(store.total()) in tela.cartao_caderno.detalhe,
+        "uma palavra nova no caderno atualiza o cartão na hora",
+    )
+    store.remover("scrap")
+    janela.caderno_mudou()
+    checar(
+        janela.conversa.tela_inicial.corpo.text().count(janela.tema.assistant_name.replace("-", "‑")) == 1,
+        "o texto chama o assistente pelo nome do tema",
+    )
+
+    # Nenhum destes cartões gasta a chave: abrem janelas locais.
+    tela.cartao_caderno.click()
+    aplicacao.processEvents()
+    checar(janela._caderno is not None and janela._caderno.isVisible(), "o cartão abre o caderno")
+    janela._caderno.close()
+    tela.cartao_historico.click()
+    aplicacao.processEvents()
+    checar(
+        janela._visor_historico is not None and janela._visor_historico.isVisible(),
+        "e o outro abre o histórico",
+    )
+    janela._visor_historico.close()
+
+    # A luz dos cartões é a mesma do caderno.
+    ponto = QPointF(40, 12)
+    QApplication.sendEvent(
+        tela.cartao_caderno, QEnterEvent(ponto, ponto, QPointF(tela.cartao_caderno.mapToGlobal(ponto)))
+    )
+    checar(
+        aguardar(lambda: tela.cartao_caderno._holofote.valor == 1.0),
+        "passar o mouse acende o cartão",
+    )
+    QApplication.sendEvent(tela.cartao_caderno, QEvent(QEvent.Type.Leave))
+    QApplication.sendEvent(
+        tela.cartao_historico, QFocusEvent(QEvent.Type.FocusIn, Qt.FocusReason.TabFocusReason)
+    )
+    checar(
+        aguardar(lambda: tela.cartao_historico._holofote.valor == 1.0),
+        "e chegar pelo Tab acende do mesmo jeito",
+    )
+    QApplication.sendEvent(
+        tela.cartao_historico, QFocusEvent(QEvent.Type.FocusOut, Qt.FocusReason.TabFocusReason)
+    )
+
+    # Anotação do sistema convive com a tela; sessão e fala a tiram de cena.
+    janela._registrar("aviso qualquer", TagInicial.SISTEMA)
+    checar(not tela.isHidden(), "uma anotação do sistema não esconde a tela inicial")
+    janela._definir_controles(ativa=True)
+    checar(tela.isHidden(), "iniciar a sessão tira a tela de cena")
+    atmosfera_inicial = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    aplicacao.processEvents()
+    janela._definir_controles(ativa=False)
+    checar(not tela.isHidden(), "encerrar sem ter falado nada a traz de volta")
+    checar(
+        any(isinstance(b.graphicsEffect(), EfeitoEntrada) for b in tela._blocos),
+        "e ela volta em cascata",
+    )
+    checar(
+        aguardar(lambda: all(b.graphicsEffect() is None for b in tela._blocos)),
+        "sem deixar efeito pendurado",
+    )
+    janela._registrar("Hello, wastelander.", TagInicial.ASSISTENTE, "PIP-BOY")
+    checar(tela.isHidden(), "a primeira fala tira a tela de cena")
+    janela._definir_controles(ativa=False)
+    checar(tela.isHidden(), "e ela não volta enquanto houver conversa")
+    janela.conversa.limpar()
+    checar(not tela.isHidden(), "limpar a conversa devolve a tela")
+    janela.campo_atmosfera.setCurrentText(atmosfera_inicial)
+    aplicacao.processEvents()
+
+    # Troca de tema: o glifo e o botão são os do jogo novo.
+    tema_antes = janela.campo_jogo.currentText()
+    janela._trocar_jogo("Cyberpunk 2077")
+    aplicacao.processEvents()
+    checar(tela.glifo.text() == "▚", f"o glifo acompanha o tema ({tela.glifo.text()})")
+    checar("CONECTAR" in tela.corpo.text(), "e o texto usa o nome do botão daquele tema")
+    janela._trocar_jogo(tema_antes)
+    aplicacao.processEvents()
+
+    # Estreita e com letra grande, os cartões empilham em vez de cortar o título.
+    # O que se confere é a REGRA, e não um resultado fixo: sem fontes no
+    # backend offscreen o texto mede diferente do Windows, e "cabe lado a
+    # lado" passaria a depender da máquina que roda a suíte.
+    from pipboy.design import ESPACO_MD
+
+    def fileira_coerente() -> bool:
+        cartoes = (tela.cartao_revisar, tela.cartao_caderno, tela.cartao_historico)
+        necessaria = 3 * max(c.largura_ideal() for c in cartoes) + 2 * ESPACO_MD
+        return tela.empilhada == (necessaria > min(tela.width(), tela.LARGURA_MAX))
+
+    tamanho_antes = janela.size()
+    escala_antes = janela.campo_tamanho_texto.currentText()
+    janela.resize(980, 620)
+    aplicacao.processEvents()
+    checar(fileira_coerente(), "no tamanho mínimo, a fileira segue a conta de largura")
+    ideal_padrao = tela.cartao_revisar.largura_ideal()
+    janela.campo_tamanho_texto.setCurrentText("Maior")
+    aplicacao.processEvents()
+    checar(
+        tela.cartao_revisar.largura_ideal() > ideal_padrao,
+        "com letra maior, cada cartão pede mais largura",
+    )
+    checar(aguardar(fileira_coerente), "e a fileira refaz a conta sozinha")
+    # Só o redimensionamento, sem trocar letra nem tema: é o caso de quem
+    # arrasta a borda da janela. O teto de largura sai do caminho para que
+    # "larga" seja larga de verdade com qualquer métrica de fonte.
+    tela.LARGURA_MAX = 100_000
+    tela.resize(100_000, tela.height())
+    checar(not tela.empilhada, "larga o bastante, os três voltam a ficar lado a lado")
+    tela.resize(260, tela.height())
+    checar(tela.empilhada, "estreita a ponto de não caber, a fileira empilha")
+    del tela.LARGURA_MAX
+    janela.campo_tamanho_texto.setCurrentText(escala_antes)
+    janela.resize(tamanho_antes)
+    aplicacao.processEvents()
+
+    print("revisão com retorno")
+    # Um caderno SÓ desta seção: responder cartões reagenda as palavras, e as
+    # do caderno principal ainda são contadas mais adiante.
+    from pipboy.interface.movimento import ImagemQueSai
+    from pipboy.interface.revisao import JanelaRevisao, quando_volta
+
+    caderno_revisao = VocabularyStore(dados / "revisao-com-retorno.sqlite3")
+    caderno_revisao.registrar("wasteland", "terra devastada", "Welcome to the wasteland.", "Fallout")
+    caderno_revisao.registrar("to scavenge", "vasculhar", "", "Fallout")
+    caderno_revisao.registrar("bounty", "recompensa", "A bounty on your head.", "Red Dead")
+
+    checar(
+        (quando_volta(0), quando_volta(1), quando_volta(4))
+        == ("na próxima rodada", "amanhã", "em 4 dias"),
+        "os dias até a volta são ditos como se diz",
+    )
+
+    atmosfera_revisao = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    aplicacao.processEvents()
+    avisos_revisao: list[str] = []
+    qInstallMessageHandler(lambda _t, _c, mensagem: avisos_revisao.append(mensagem))
+    rodada_ui = JanelaRevisao(janela, caderno_revisao, parent=janela)
+    try:
+        rodada_ui.show()
+        aplicacao.processEvents()
+        checar(rodada_ui._barra.isVisible(), "a barra da rodada aparece com cartões na fila")
+        checar(rodada_ui._dica.isVisible(), "antes de revelar, o verso pede para tentar lembrar")
+        altura_frente = rodada_ui.height()
+        posicao_botoes = rodada_ui._botao_revelar.mapTo(rodada_ui, rodada_ui._botao_revelar.rect().topLeft()).y()
+
+        primeiro = rodada_ui._rodada.atual
+        assert primeiro is not None
+        rodada_ui._revelar()
+        aplicacao.processEvents()
+        checar(
+            not rodada_ui._dica.isVisible() and rodada_ui._traducao.text() == primeiro.traducao,
+            "revelar troca a dica pela resposta",
+        )
+        checar(
+            isinstance(rodada_ui._traducao.graphicsEffect(), EfeitoEntrada),
+            "e a resposta entra subindo em vez de aparecer",
+        )
+        posicao_resposta = rodada_ui._botao_acertei.mapTo(rodada_ui, rodada_ui._botao_acertei.rect().topLeft()).y()
+        checar(
+            rodada_ui.height() == altura_frente and posicao_resposta == posicao_botoes,
+            f"revelar não empurra os botões ({posicao_botoes} → {posicao_resposta})",
+        )
+
+        rodada_ui._responder(True)
+        aplicacao.processEvents()
+        checar(rodada_ui._barra.resultados == [True], "acertar pinta o primeiro segmento")
+        checar(
+            primeiro.termo in rodada_ui._recado.toolTip() and "volta" in rodada_ui._recado.toolTip(),
+            f"e o recado diz quando a palavra volta ({rodada_ui._recado.toolTip()})",
+        )
+        checar(
+            len(rodada_ui._cartao.findChildren(ImagemQueSai)) == 1,
+            "o cartão respondido sai deslizando por cima do próximo",
+        )
+        checar(
+            aguardar(lambda: not rodada_ui._cartao.findChildren(ImagemQueSai)),
+            "e a foto dele some sozinha",
+        )
+
+        segundo = rodada_ui._rodada.atual
+        assert segundo is not None
+        rodada_ui._revelar()
+        rodada_ui._responder(False)
+        aplicacao.processEvents()
+        checar(rodada_ui._barra.resultados == [True, False], "errar pinta o segmento seguinte")
+        checar(
+            rodada_ui._recado.toolTip() == f"{segundo.termo} volta na próxima rodada",
+            f"e a palavra errada volta na próxima rodada ({rodada_ui._recado.toolTip()})",
+        )
+
+        rodada_ui._revelar()
+        rodada_ui._responder(False)
+        aplicacao.processEvents()
+        checar(
+            rodada_ui._termo.text() == "1 acerto · 2 erros",
+            f"o resumo conjuga acerto no singular ({rodada_ui._termo.text()})",
+        )
+        checar(
+            rodada_ui._meta.text() == "2 palavras ainda vencidas.",
+            f"e as vencidas no plural, sem parênteses ({rodada_ui._meta.text()})",
+        )
+        checar(rodada_ui.height() == altura_frente, "o resumo cabe na mesma altura do cartão")
+        aguardar(lambda: not rodada_ui._cartao.findChildren(ImagemQueSai))
+        avisos_revisao.clear()
+        rodada_ui.update()
+        esperar(80)
+        checar(
+            not [a for a in avisos_revisao if "ainter" in a],
+            f"repintar a revisão não briga por pintor ({avisos_revisao[:2]})",
+        )
+
+        # Nova rodada zera a barra; atmosfera desligada troca sem foto.
+        rodada_ui._nova_rodada()
+        checar(rodada_ui._barra.resultados == [], "nova rodada recomeça a barra")
+        janela.campo_atmosfera.setCurrentText("Desligada")
+        aplicacao.processEvents()
+        rodada_ui._revelar()
+        rodada_ui._responder(True)
+        checar(
+            not rodada_ui._cartao.findChildren(ImagemQueSai),
+            "com a atmosfera desligada o cartão troca num quadro",
+        )
+        checar(rodada_ui._recado.toolTip() != "", "mas o recado continua dizendo o que houve")
+    finally:
+        qInstallMessageHandler(None)
+        rodada_ui.close()
+        caderno_revisao.close()
+        janela.campo_atmosfera.setCurrentText(atmosfera_revisao)
+        aplicacao.processEvents()
+
+    print("progresso que responde")
+    from datetime import date as Data
+
+    from PySide6.QtGui import QMouseEvent as EventoMouse
+
+    from pipboy.interface.progresso import (
+        JanelaProgresso,
+        descrever_semana,
+        segundas_do_grafico,
+    )
+
+    # A virada do ano é o caso que um rótulo "dd/mm" não resolve sozinho.
+    segundas = segundas_do_grafico(3, Data(2026, 1, 1))
+    checar(
+        segundas == [Data(2025, 12, 15), Data(2025, 12, 22), Data(2025, 12, 29)],
+        f"as segundas das barras atravessam a virada do ano ({segundas})",
+    )
+    semanas_teste = [("15/12", 1), ("22/12", 7), ("29/12", 7)]
+    checar(
+        descrever_semana(semanas_teste, 2, segundas)
+        == ("29/12 – 04/01 · esta semana", "7 palavras novas, igual à anterior"),
+        "a ficha da semana corrente diz o intervalo e compara com a anterior",
+    )
+    checar(
+        descrever_semana(semanas_teste, 1, segundas)[1] == "7 palavras novas, 6 a mais que a anterior",
+        "e diz quanto cresceu",
+    )
+    checar(
+        descrever_semana(semanas_teste, 0, segundas)[1] == "1 palavra nova",
+        "a primeira barra não tem com quem se comparar, e fala no singular",
+    )
+
+    def mover_em(alvo: QWidget, x: float, y: float) -> None:
+        ponto = QPointF(x, y)
+        QApplication.sendEvent(
+            alvo,
+            EventoMouse(
+                QEvent.Type.MouseMove, ponto, QPointF(alvo.mapToGlobal(ponto)),
+                Qt.MouseButton.NoButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+            ),
+        )
+
+    atmosfera_progresso = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    aplicacao.processEvents()
+    nunca_aberto = JanelaProgresso(janela, store, parent=janela)
+    checar(
+        nunca_aberto.grafico_semanas.crescimento.progresso(7) == 1.0,
+        "um painel fotografado sem nunca ter aparecido não sai com as barras vazias",
+    )
+    nunca_aberto.deleteLater()
+
+    # A linha do tempo lida em instantes fixos, sem relógio nenhum.
+    from pipboy.interface.movimento import Crescimento
+
+    linha_do_tempo = Crescimento(janela, 2, reduzir=lambda: False, atraso=120, duracao=300)
+    linha_do_tempo._avancar(100.0)
+    checar(linha_do_tempo.progresso(0) == 0.0, "antes do atraso, nada cresceu")
+    linha_do_tempo._avancar(420.0)
+    checar(
+        linha_do_tempo.progresso(0) == 1.0 and linha_do_tempo.progresso(1) < 1.0,
+        "no fim da duração o primeiro chegou e o segundo, escalonado, ainda não",
+    )
+    linha_do_tempo.deleteLater()
+
+    avisos_progresso: list[str] = []
+    qInstallMessageHandler(lambda _t, _c, mensagem: avisos_progresso.append(mensagem))
+    painel = JanelaProgresso(janela, store, parent=janela)
+    try:
+        painel.show()
+        checar(
+            painel.grafico_semanas.crescimento.ativo
+            and painel.grafico_semanas.crescimento.progresso(0) < 1.0,
+            "abrir o painel faz as barras crescerem",
+        )
+        jogos_atraso = painel.grafico_jogos.crescimento.atraso if painel.grafico_jogos else 10**6
+        checar(
+            painel.grafico_semanas.crescimento.atraso
+            < painel.regua.crescimento.atraso
+            < jogos_atraso,
+            "cada gráfico começa depois do de cima, na ordem de leitura",
+        )
+        checar(
+            aguardar(lambda: not painel.grafico_semanas.crescimento.ativo
+                     and painel.grafico_semanas.crescimento.progresso(7) == 1.0),
+            "até chegarem ao tamanho certo",
+        )
+
+        grafico = painel.grafico_semanas
+        mover_em(grafico, grafico.width() * (2.5 / 8), grafico.height() / 2)
+        checar(grafico.apontado == 2, f"o cursor sobre a terceira barra a aponta ({grafico.apontado})")
+        checar(aguardar(lambda: grafico._destaque.valor == 1.0), "e o destaque acende")
+        QApplication.sendEvent(grafico, QEvent(QEvent.Type.Leave))
+        checar(grafico.apontado is None, "sair do gráfico solta o apontado")
+        # Lido ANTES de o laço de eventos rodar: um destaque que sumisse num
+        # quadro já estaria em zero aqui.
+        checar(grafico._destaque.valor > 0.0, "e o destaque apaga em vez de sumir num quadro")
+        checar(aguardar(lambda: grafico._destaque.valor == 0.0), "até apagar de todo")
+
+        altura_regua = painel.regua.height()
+        mover_em(painel.regua, painel.regua.width() * 0.02, 6)
+        checar(
+            painel.regua.explicacao.startswith("Novas:"),
+            f"apontar um trecho da régua explica a categoria ({painel.regua.explicacao})",
+        )
+        aplicacao.processEvents()
+        checar(
+            painel.regua.height() == altura_regua
+            and painel.regua.retangulo_explicacao().bottom() <= painel.regua.height(),
+            "a explicação cabe no lugar reservado, sem mudar a altura da régua",
+        )
+
+        jogos_painel = painel.grafico_jogos
+        assert jogos_painel is not None
+        checar(
+            "%" not in jogos_painel.rotulo_de_valor(0),
+            "fora do cursor, a barra de um jogo mostra só o número",
+        )
+        mover_em(jogos_painel, 10, 5)
+        checar(
+            jogos_painel.apontado == 0 and "% do caderno" in jogos_painel.rotulo_de_valor(0),
+            f"sob o cursor, mostra a fatia do caderno ({jogos_painel.rotulo_de_valor(0)})",
+        )
+        avisos_progresso.clear()
+        painel.update()
+        esperar(80)
+        checar(
+            not [a for a in avisos_progresso if "ainter" in a],
+            f"repintar o painel apontado não gera aviso ({avisos_progresso[:2]})",
+        )
+    finally:
+        qInstallMessageHandler(None)
+        painel.close()
+
+    janela.campo_atmosfera.setCurrentText("Desligada")
+    aplicacao.processEvents()
+    calmo = JanelaProgresso(janela, store, parent=janela)
+    calmo.show()
+    checar(
+        not calmo.grafico_semanas.crescimento.ativo
+        and calmo.grafico_semanas.crescimento.progresso(7) == 1.0,
+        "com a atmosfera desligada as barras já abrem no tamanho certo",
+    )
+    calmo.close()
+    janela.campo_atmosfera.setCurrentText(atmosfera_progresso)
+    aplicacao.processEvents()
+
+    print("histórico que orienta")
+    # Uma conversa longa o bastante para a fala marcada ficar fora da tela.
+    sessao_longa = historico.iniciar_sessao(jogo="Fallout")
+    for numero in range(24):
+        historico.registrar_fala(
+            sessao_longa, autor="VOCÊ", tag="usuario", texto=f"pergunta de aquecimento {numero}"
+        )
+    historico.registrar_fala(sessao_longa, autor="", tag="vocab", texto="⊕ scrap — sucata")
+
+    atmosfera_historico = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    aplicacao.processEvents()
+
+    from pipboy.interface.historico import JanelaHistorico
+
+    def fala_a_vista(visor_alvo: JanelaHistorico) -> bool:
+        linha = visor_alvo.linha_marcada
+        if linha is None:
+            return False
+        vista = visor_alvo._rolagem_falas.viewport()
+        topo = linha.mapTo(vista, linha.rect().topLeft()).y()
+        return bool(topo >= 0 and topo + linha.height() <= vista.height())
+
+    janela.abrir_conversa(sessao_longa, "scrap")
+    visor = janela._visor_historico
+    assert visor is not None
+    # Lido antes de o laço rodar: uma cascata aqui ainda estaria em curso.
+    primeira_fala = visor._pilha_falas.itemAt(0).widget()
+    checar(
+        primeira_fala is not None and primeira_fala.graphicsEffect() is None,
+        "chegando a uma fala, a coluna não anima em cascata por cima da rolagem",
+    )
+    checar(
+        visor._itens_lista[sessao_longa].isChecked()
+        and not any(b.isChecked() for s, b in visor._itens_lista.items() if s != sessao_longa),
+        "a sessão aberta fica marcada na lista, e só ela",
+    )
+    checar(
+        aguardar(lambda: fala_a_vista(visor)),
+        "a transcrição rola até a fala marcada, que estava fora da tela",
+    )
+    checar(
+        aguardar(lambda: visor.linha_marcada is not None and visor.linha_marcada.pulsando),
+        "e a fala pulsa ao chegar",
+    )
+
+    visor._itens_lista[sessao_longa].click()
+    checar(
+        visor._itens_lista[sessao_longa].isChecked(),
+        "clicar na sessão já aberta não a desmarca",
+    )
+    outra = next(s for s in historico.listar_sessoes() if s.id != sessao_longa)
+    visor._abrir_sessao(outra)
+    checar(
+        visor._itens_lista[outra.id].isChecked() and not visor._itens_lista[sessao_longa].isChecked(),
+        "abrir outra sessão move a marca",
+    )
+    primeira_fala = visor._pilha_falas.itemAt(0).widget()
+    checar(
+        primeira_fala is not None and isinstance(primeira_fala.graphicsEffect(), EfeitoEntrada),
+        "e a conversa nova entra em cascata",
+    )
+    resumo_longo = historico.sessao(sessao_longa)
+    assert resumo_longo is not None
+    visor._abrir_sessao(resumo_longo)
+    visor._busca.setText("aquecimento")
+    aplicacao.processEvents()
+    primeira_fala = visor._pilha_falas.itemAt(0).widget()
+    checar(
+        isinstance(primeira_fala, QLabel)
+        and "aquecimento" in primeira_fala.text()
+        and primeira_fala.graphicsEffect() is None,
+        "filtrar pela busca redesenha sem cascata",
+    )
+    visor._busca.clear()
+    checar(
+        visor._botao_fechar.font().pointSize() == janela.fonte("corpo_forte").pointSize(),
+        "os botões do rodapé usam a fonte dos outros botões",
+    )
+
+    janela.campo_atmosfera.setCurrentText("Desligada")
+    aplicacao.processEvents()
+    janela.abrir_conversa(sessao_longa, "scrap")
+    checar(
+        aguardar(lambda: fala_a_vista(visor)),
+        "com a atmosfera desligada a fala também chega à vista",
+    )
+    checar(
+        visor._rolagem_animada is None and visor.linha_marcada is not None
+        and not visor.linha_marcada.pulsando,
+        "mas sem rolagem animada nem pulso",
+    )
+    visor.close()
+    historico.remover_sessao(sessao_longa)
+    janela.campo_atmosfera.setCurrentText(atmosfera_historico)
+    aplicacao.processEvents()
+
+    print("palavra salva chega ao caderno")
+    # Os eventos são os mesmos que a sessão publica ao salvar uma palavra; a
+    # sessão em si não é aberta (ela gastaria a chave).
+    from PySide6.QtGui import QFontMetrics
+    from shiboken6 import isValid
+
+    from pipboy.events import Tag as TagPalavra
+    from pipboy.events import UiEvent as EventoUi
+    from pipboy.events import UiEventKind as TipoEvento
+    from pipboy.interface.movimento import SinalFlutuante
+
+    atmosfera_palavra = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    aplicacao.processEvents()
+    janela.caderno_mudou()
+    janela.sinal_do_caderno = None
+
+    store.registrar("scrap", "sucata", "", "Fallout")
+    janela._tratar_evento(
+        EventoUi(TipoEvento.LOG, text="⊕ scrap — sucata", tag=TagPalavra.VOCAB)
+    )
+    anotacao = janela.conversa._itens[-1]
+    checar(
+        isinstance(anotacao.graphicsEffect(), EfeitoEntrada),
+        "a anotação de palavra salva entra, em vez de simplesmente estar lá",
+    )
+    pilula = anotacao.findChild(QLabel)
+    checar(
+        pilula is not None
+        and pilula.minimumWidth() >= QFontMetrics(pilula.font()).horizontalAdvance("⊕ scrap — sucata"),
+        "e cabe numa linha só, sem quebrar um texto curto ao meio",
+    )
+    janela._tratar_evento(EventoUi(TipoEvento.VOCAB_ADDED, payload=store.total()))
+    sinal = janela.sinal_do_caderno
+    checar(
+        isinstance(sinal, SinalFlutuante) and sinal.texto == "+1",
+        "o contador do caderno solta um +1",
+    )
+    checar(f"{store.total()} termos" in janela.rotulo_caderno.text(), "e o número ao lado já é o novo")
+    checar(
+        sinal is not None and sinal.parentWidget() is janela.rotulo_caderno.parentWidget(),
+        "o sinal nasce ao lado do contador, na lateral",
+    )
+    checar(aguardar(lambda: not isValid(sinal)), "e some sozinho")
+
+    # Reencontro e resposta de quiz publicam o mesmo evento sem mudar o total.
+    janela.sinal_do_caderno = None
+    janela._tratar_evento(EventoUi(TipoEvento.VOCAB_ADDED, payload=store.total()))
+    checar(janela.sinal_do_caderno is None, "sem palavra nova, não há sinal")
+
+    # Palavras que nenhuma outra seção cria: "ghoul" e "raider" já estão no
+    # caderno a esta altura, e reencontrá-las não muda o total.
+    store.registrar("vertibird", "aeronave de rotor", "", "Fallout")
+    store.registrar("nuka", "refrigerante Nuka-Cola", "", "Fallout")
+    janela._tratar_evento(EventoUi(TipoEvento.VOCAB_ADDED, payload=store.total()))
+    checar(
+        janela.sinal_do_caderno is not None and janela.sinal_do_caderno.texto == "+2",
+        "duas palavras de uma vez viram +2",
+    )
+
+    janela.conversa.repintar()
+    checar(
+        janela.conversa._itens[-1].graphicsEffect() is None,
+        "a troca de tema reconstrói a anotação sem anunciá-la de novo",
+    )
+
+    janela.campo_atmosfera.setCurrentText("Desligada")
+    aplicacao.processEvents()
+    janela.sinal_do_caderno = None
+    store.registrar("stimpak", "estimulante", "", "Fallout")
+    janela._tratar_evento(EventoUi(TipoEvento.VOCAB_ADDED, payload=store.total()))
+    checar(janela.sinal_do_caderno is None, "com a atmosfera desligada o número muda sem sinal")
+
+    for termo in ("scrap", "vertibird", "nuka", "stimpak"):
+        store.remover(termo)
+    janela.conversa.limpar()
+    janela.caderno_mudou()
+    janela.campo_atmosfera.setCurrentText(atmosfera_palavra)
+    aplicacao.processEvents()
+
     print("atalhos diretos")
     # revisar_agora abre um diálogo MODAL: sem alguém para fechá-lo, o exec()
     # nunca voltaria e a suíte penduraria. O tiro agendado é esse alguém.
-    from PySide6.QtCore import QTimer
-
     def _fechar_modal() -> None:
         ativo = aplicacao.activeModalWidget()
         if ativo is not None:

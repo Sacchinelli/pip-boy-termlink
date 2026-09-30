@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 from PySide6.QtCore import (
     QEasingCurve,
     QEvent,
+    QPoint,
     QPropertyAnimation,
     Qt,
     QTimer,
@@ -61,7 +62,7 @@ from ..profiles import (
     personas_for,
 )
 from ..themes import GameTheme, paleta_de, theme_for
-from ..vocabulary import VocabularyStore
+from ..vocabulary import FILTRO_REVISAR, VocabularyStore
 from . import montagem
 from .atalhos import Atalhos, globais_disponiveis
 from .atmosfera import Cenario, atmosfera_de
@@ -88,8 +89,10 @@ from .montagem import (
     NIVEIS_ATMOSFERA,
     NIVEIS_GANHO_JOGO,
 )
+from .movimento import SinalFlutuante
 from .preferencias import Escolha, Marca, VinculoDePreferencias
 from .relogios import Batidas, Relogios
+from .tela_inicial import Resumo
 
 if TYPE_CHECKING:  # pragma: no cover
     # O módulo de áudio puxa o PyAudio, que custa 175 ms para importar. Ele não
@@ -167,6 +170,10 @@ class Janela(QWidget):
         # meia dúzia de leitores usavam getattr com padrão para contornar a
         # janela em que ela não existia.
         self._intensidade_atmosfera = 1.0
+        # O total que a lateral mostra agora. É contra ele que uma palavra
+        # salva pela sessão se mede, para o sinal dizer QUANTAS entraram.
+        self._total_no_caderno = 0
+        self.sinal_do_caderno: SinalFlutuante | None = None
         # Nasce antes de qualquer widget: `fonte()` é chamada durante a
         # montagem, e ela lê este fator.
         self._escala_texto = 1.0
@@ -224,11 +231,10 @@ class Janela(QWidget):
             self._bandeja = None
             LOGGER.exception("Bandeja indisponível — o programa segue sem ela.")
 
-        self._registrar(
-            f"Modelo {configuration.model} · chave {configuration.redacted_key()} · "
-            f"{self._store.total()} termos no caderno",
-            Tag.SISTEMA,
-        )
+        # O modelo, a chave mascarada e os atalhos globais eram as duas primeiras
+        # anotações da conversa, sozinhas no pé de um painel vazio. Moram agora
+        # no rodapé da tela inicial (ver resumo_inicial). Este aviso continua
+        # sendo anotação: é notícia de uma vez, não apresentação.
         if self._atmosfera_veio_do_sistema:
             # Sem este aviso, a primeira execução numa máquina com animação
             # desligada parece um programa sem a aparência que ele anuncia —
@@ -237,13 +243,6 @@ class Janela(QWidget):
                 "O Windows está configurado para reduzir animações, então a atmosfera "
                 "começou DESLIGADA. Para ver o ambiente completo, mude 'Atmosfera do "
                 "jogo' na coluna ao lado — a escolha fica gravada.",
-                Tag.SISTEMA,
-            )
-        if globais_disponiveis() and configuration.global_hotkeys_enabled:
-            self._registrar(
-                f"Atalhos globais: {configuration.hotkey_toggle} iniciar/parar · "
-                f"{configuration.hotkey_mute} mudo · "
-                f"{configuration.hotkey_game_audio} áudio do jogo",
                 Tag.SISTEMA,
             )
 
@@ -833,8 +832,13 @@ class Janela(QWidget):
             if self._da_sessao_atual(evento):
                 self._definir_estado(evento.text, evento.color_role)
         elif tipo is UiEventKind.VOCAB_ADDED:
+            antes = self._total_no_caderno
             self.caderno_mudou()
             self._campainha.tocar("vocab")
+            # O evento também vem de reencontro e de resposta de quiz, que não
+            # mudam o total: só palavra NOVA ganha o sinal.
+            if self._total_no_caderno > antes:
+                self._anunciar_palavras(self._total_no_caderno - antes)
         elif tipo is UiEventKind.USAGE:
             if self._da_sessao_atual(evento):
                 self._tokens = int(evento.payload or 0)
@@ -968,11 +972,13 @@ class Janela(QWidget):
 
     def _atualizar_caderno(self) -> None:
         total = self._store.total()
+        self._total_no_caderno = total
         texto = f"Caderno · {total} termos"
         vencidas = self._store.pendentes()
         if vencidas:
             texto += f"\n{vencidas} para revisar"
         self.rotulo_caderno.setText(texto)
+        self.conversa.atualizar_inicial()
 
     def _definir_controles(self, ativa: bool, pode_parar: bool = True) -> None:
         # Os dois controles de APRESENTAÇÃO seguem vivos durante a sessão. O
@@ -992,6 +998,7 @@ class Janela(QWidget):
             self._tema.stop_label if ativa else self._tema.start_label
         )
         self.botao_acao.setEnabled(not (ativa and not pode_parar))
+        self.conversa.definir_sessao_ativa(ativa)
         self.botao_mudo.setEnabled(ativa)
         self._relogios.medir_entrada(ativa)
         self._atualizar_medidor()
@@ -1255,6 +1262,36 @@ class Janela(QWidget):
                 erro,
             )
 
+    def resumo_inicial(self) -> Resumo:
+        """Os números e textos da tela inicial, lidos na hora em que ela aparece."""
+        config = self._configuration
+        globais = globais_disponiveis() and config.global_hotkeys_enabled
+        vencidas = self._store.pendentes()
+        palavra = ""
+        if vencidas:
+            primeiras = self._store.listar(filtro=FILTRO_REVISAR, limite=1)
+            palavra = primeiras[0].termo if primeiras else ""
+        try:
+            conversas = self._historico.total_sessoes()
+        except Exception:
+            conversas = 0
+        return Resumo(
+            termos=self._store.total(),
+            vencidas=vencidas,
+            conversas=conversas,
+            sequencia=self.sequencia_de_estudo(),
+            palavra=palavra,
+            atalhos=(
+                (
+                    (config.hotkey_toggle, "iniciar/parar"),
+                    (config.hotkey_mute, "mudo"),
+                    (config.hotkey_game_audio, "áudio do jogo"),
+                )
+                if globais else ()
+            ),
+            diagnostico=f"Modelo {config.model} · chave {config.redacted_key()}",
+        )
+
     def sequencia_de_estudo(self) -> int:
         try:
             return self._historico.sequencia_atual()
@@ -1328,6 +1365,29 @@ class Janela(QWidget):
                 "histórico. A palavra continua no caderno.",
             )
 
+    def _anunciar_palavras(self, novas: int) -> None:
+        """Um "+1" sobe do contador do caderno, na lateral.
+
+        A lateral é o único lugar da janela principal que mostra o tamanho do
+        caderno, e a mudança de "3 termos" para "4 termos" acontecia num quadro,
+        num texto miúdo, no canto oposto ao da conversa. O som da campainha já
+        dizia que algo foi salvo; o sinal diz ONDE aquilo foi parar.
+        """
+        rotulo = self.rotulo_caderno
+        pai = rotulo.parentWidget()
+        if self._intensidade_atmosfera <= 0.0 or pai is None or not rotulo.isVisible():
+            return
+        primeira_linha = rotulo.text().split("\n", 1)[0]
+        fonte = self.fonte("legenda")
+        fonte.setBold(True)
+        ancora = QPoint(
+            rotulo.x() + QFontMetrics(rotulo.font()).horizontalAdvance(primeira_linha) + 8,
+            rotulo.y() - 2,
+        )
+        self.sinal_do_caderno = SinalFlutuante(
+            pai, f"+{novas}", ancora=ancora, cor=self._tema.accent_text, fonte=fonte
+        )
+
     def caderno_mudou(self, aviso: str = "") -> None:
         """Ponto único de reação a uma escrita no caderno, venha de onde vier.
 
@@ -1339,20 +1399,27 @@ class Janela(QWidget):
         if aviso:
             self._registrar(aviso, Tag.SISTEMA)
 
-    def exportar_vocabulario(self) -> None:
+    def exportar_vocabulario(self) -> int | None:
+        """Pergunta o destino e exporta. Devolve quantos termos foram escritos.
+
+        ``None`` quando nada foi escrito — caderno vazio, seletor cancelado ou
+        falha de disco. É a pergunta de quem confirma o sucesso na própria
+        tela: o botão do caderno, que fica na frente do registro onde o total
+        também é anunciado.
+        """
         if self._store.total() == 0:
             avisar(
                 self, "Caderno vazio",
                 "Nada foi salvo ainda. Inicie uma sessão e pergunte o significado "
                 "de qualquer palavra em inglês: o assistente anota sozinho.",
             )
-            return
+            return None
         destino, _ = QFileDialog.getSaveFileName(
             self, "Exportar vocabulário", "vocabulario_pipboy.txt",
             "Anki / TSV (*.txt);;Markdown (*.md)",
         )
         if not destino:
-            return
+            return None
         caminho = Path(destino)
         try:
             if caminho.suffix.lower() == ".md":
@@ -1361,8 +1428,9 @@ class Janela(QWidget):
                 total = self._store.exportar_csv(caminho)
         except OSError as erro:
             avisar(self, "Falha ao exportar", str(erro), erro=True)
-            return
+            return None
         self._registrar(f"{total} termos exportados para {caminho.name}.", Tag.SISTEMA)
+        return total
 
     def importar_vocabulario(self) -> None:
         """Traz termos de um TSV para o caderno, sem tocar no que já existe."""

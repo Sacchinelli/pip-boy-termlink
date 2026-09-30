@@ -21,6 +21,7 @@ import time
 from typing import Any
 
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -33,11 +34,16 @@ from PySide6.QtWidgets import (
 
 from .. import design
 from ..events import Tag
-from .componentes import Bolha, LinhaFala
+from .componentes import Bolha, LinhaFala, TransicaoDeTema
+from .movimento import animar_entrada
+from .tela_inicial import TelaInicial
 
 # Teto de falas guardadas. Uma sessão de horas não precisa carregar o começo
 # da noite, e cada bolha é um widget de verdade.
 LIMITE_FALAS = 400
+
+# Anotações não são conversa: a tela inicial convive com elas.
+_ANOTACOES = (Tag.SISTEMA, Tag.VOCAB)
 
 
 class Conversa(QScrollArea):
@@ -69,6 +75,15 @@ class Conversa(QScrollArea):
         # pela metade. É como toda conversa se comporta, e é o que faz o
         # último turno — o único que importa — cair onde o olho já está.
         self._fluxo.addStretch(1)
+
+        # A tela inicial fica entre a mola e as anotações, e enquanto está à
+        # vista é ELA que ocupa o espaço livre: a mola cede o fator de
+        # estiramento. Some quando a sessão começa ou quando chega a primeira
+        # fala, e volta se a conversa terminar sem nenhuma.
+        self._sessao_ativa = False
+        self.tela_inicial = TelaInicial(janela)
+        self._fluxo.addWidget(self.tela_inicial, 1)
+        self._fluxo.setStretch(0, 0)
         self.setWidget(self._interno)
 
     # ------------------------------------------------------------- inserção
@@ -78,7 +93,17 @@ class Conversa(QScrollArea):
             del self._mensagens[0]
         no_fim = self._no_fim()
         self._inserir(texto, tag, autor)
+        if tag is Tag.VOCAB and self._itens:
+            # A anotação de palavra salva ENTRA, como as falas: é a notícia de
+            # que o caderno cresceu, e uma notícia que simplesmente já está lá
+            # passa por anotação de sistema. Só aqui, e não em _inserir: a
+            # repintura da troca de tema reconstrói todas as anotações, e elas
+            # não são notícia de novo.
+            animar_entrada(
+                [self._itens[-1]], reduzir=bool(self._janela.intensidade_atmosfera <= 0.0)
+            )
         self._podar()
+        self._sincronizar_inicial(animar=True)
 
         if no_fim:
             # Só depois de o layout existir: rolar antes disso não faz nada.
@@ -114,6 +139,8 @@ class Conversa(QScrollArea):
             widget.deleteLater()
         self._itens.clear()
         self._autor_anterior = None
+        if esquecer:
+            self._sincronizar_inicial(animar=True)
         self._repintar_pilha()
 
     # ---------------------------------------------------------------- peças
@@ -137,6 +164,12 @@ class Conversa(QScrollArea):
             f" border-radius: {raio}px; padding: 5px 12px;"
         )
         rotulo.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        # A largura é medida, pela mesma razão documentada na Bolha: um QLabel
+        # com quebra de linha dentro de um layout encolhe até a largura mínima,
+        # e "⊕ stimpak — estimulante médico" saía partido em duas linhas num
+        # painel com espaço de sobra. Os 24 px são o padding horizontal.
+        ideal = QFontMetrics(rotulo.font()).horizontalAdvance(texto) + 24
+        rotulo.setMinimumWidth(min(ideal, design.BOLHA_LARGURA_MAX))
 
         embrulho = QWidget()
         caixa = QHBoxLayout(embrulho)
@@ -196,6 +229,41 @@ class Conversa(QScrollArea):
         bolha.animar_entrada()
         return linha
 
+    # ------------------------------------------------------- tela inicial
+    def definir_sessao_ativa(self, ativa: bool) -> None:
+        self._sessao_ativa = ativa
+        self._sincronizar_inicial(animar=True)
+
+    def atualizar_inicial(self) -> None:
+        """Refaz os números da tela inicial, se ela estiver à vista."""
+        if not self.tela_inicial.isHidden():
+            self.tela_inicial.atualizar()
+
+    def _sincronizar_inicial(self, *, animar: bool) -> None:
+        mostrar = not self._sessao_ativa and all(
+            tag in _ANOTACOES for _, tag, _ in self._mensagens
+        )
+        oculta = self.tela_inicial.isHidden()
+        if mostrar and oculta:
+            self.tela_inicial.atualizar()
+            self.tela_inicial.show()
+            self._fluxo.setStretch(0, 0)
+            if animar:
+                self.tela_inicial.entrar()
+        elif not mostrar and not oculta:
+            # A saída é uma dissolução da foto do palco, como na troca de tema:
+            # a tela some por baixo da própria imagem enquanto a primeira fala
+            # entra. Com a atmosfera desligada, some num quadro.
+            retrato = (
+                self._interno.grab()
+                if animar and self.isVisible() and self._janela.intensidade_atmosfera > 0.0
+                else None
+            )
+            self.tela_inicial.hide()
+            self._fluxo.setStretch(0, 1)
+            if retrato is not None:
+                TransicaoDeTema(self._interno, retrato)
+
     # -------------------------------------------------------------- rolagem
     def _no_fim(self) -> bool:
         barra = self.verticalScrollBar()
@@ -220,6 +288,8 @@ class Conversa(QScrollArea):
         for texto, tag, autor in guardadas:
             self._inserir(texto, tag, autor)
         self._mensagens = guardadas
+        if not self.tela_inicial.isHidden():
+            self.tela_inicial.atualizar()
         self._repintar_pilha()
         if no_fim:
             QTimer.singleShot(0, self.ir_para_o_fim)
