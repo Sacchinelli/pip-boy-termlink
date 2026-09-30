@@ -692,6 +692,34 @@ def teste_config() -> None:
     os.environ["GEMINI_API_KEY"] = "AIzaTESTE1234567890"
     cfg = AppConfiguration.load(base)
     checar(cfg.redacted_key() == "AIza…7890", "chave é mascarada em log")
+    chave_inteira = "AIza" + "S" * 31 + "wxyz"
+    os.environ["GEMINI_API_KEY"] = chave_inteira
+    cfg_inteira = AppConfiguration.load(base)
+    checar(
+        chave_inteira not in repr(cfg_inteira) and chave_inteira not in str(cfg_inteira),
+        "o repr da configuração não carrega a chave — um log do objeto não a vaza",
+    )
+    import logging as registro
+
+    from pipboy import FormatadorSemSegredo
+    from pipboy.config import mascarar_segredos
+
+    formatador = FormatadorSemSegredo("%(message)s")
+    try:
+        raise ConnectionError(f"wss://exemplo/ws?key={chave_inteira} fechou")
+    except ConnectionError:
+        linha = registro.LogRecord(
+            "pip_boy", registro.WARNING, __file__, 1, "caiu: %s", (chave_inteira,), sys.exc_info()
+        )
+    formatada = formatador.format(linha)
+    checar(
+        chave_inteira not in formatada and formatada.count("AIza…wxyz") == 2,
+        "o log mascara a chave na mensagem, nos argumentos e no traço de pilha",
+    )
+    checar(
+        mascarar_segredos("sem chave: AIzaTESTE1234567890") == "sem chave: AIzaTESTE1234567890",
+        "e só mexe no que tem o formato de uma chave do Google",
+    )
     checar("esc" not in cfg.hotkey_toggle.lower(), "atalho global não sequestra Esc")
     checar("f12" not in cfg.hotkey_toggle.lower(), "atalho global não sequestra F12")
 
@@ -1728,6 +1756,195 @@ def teste_temporarios_da_suite() -> None:
         Path(tempfile.mkdtemp()).parent == Path(_TEMP),
         "um mkdtemp() qualquer nasce dentro da pasta da suíte, e não solto no TEMP da máquina",
     )
+
+
+def teste_dados_de_fora() -> None:
+    """O que chega de fora — do modelo, de um arquivo — entra limpo no caderno.
+
+    O contrato: tags de HTML conhecidas saem e entidades são desfeitas, mas
+    texto de jogo com sinais de menor e maior fica ("Press <E> to interact");
+    os campos têm tamanho máximo; as buscas por termo usam a mesma limpeza da
+    gravação; e os booleanos do modelo são lidos pelo que dizem — "false" é
+    falso.
+    """
+    print("dados de fora")
+    from pipboy.tools import ToolDispatcher, booleano
+    from pipboy.vocabulary import (
+        MAX_EXEMPLO,
+        MAX_TERMO,
+        MAX_TRADUCAO,
+        interpretar_linha,
+        limpar_campo,
+    )
+
+    checar(
+        limpar_campo("<b>ammo</b>") == "ammo"
+        and limpar_campo('<span style="x">loot</span> <I>drop</I>') == "loot drop"
+        and limpar_campo("ammo &amp; loot") == "ammo & loot"
+        and limpar_campo("uma<br>linha") == "uma linha"
+        and limpar_campo("a\x00b\x1fc") == "a b c",
+        "tags conhecidas saem, entidades se desfazem, controle vira espaço",
+    )
+    checar(
+        limpar_campo("Press <E> to interact") == "Press <E> to interact"
+        and limpar_campo("<insert name>") == "<insert name>"
+        and limpar_campo("List<T>") == "List<T>" and limpar_campo("x < y") == "x < y",
+        "texto de jogo com < e > fica — só a marcação conhecida sai",
+    )
+    cortado = limpar_campo("x" * 500, MAX_TRADUCAO)
+    checar(
+        len(cortado) == MAX_TRADUCAO and cortado.endswith("…"),
+        "o que passa do limite é cortado com reticências, no tamanho exato",
+    )
+    checar(
+        interpretar_linha(["<b>bounty</b>", "recompensa<br><i>Press <E> to claim it.</i>", "Red Dead"])
+        == ("bounty", "recompensa", "Press <E> to claim it.", "Red Dead"),
+        "a importação limpa o termo também, e não come o <E> do exemplo",
+    )
+
+    store = VocabularyStore(Path(tempfile.mkdtemp()) / "fora.sqlite3")
+    entrada, _ = store.registrar("<b>ammo</b>", "muni&ccedil;&atilde;o", "I'm low on <i>ammo</i>.")
+    checar(
+        (entrada.termo, entrada.traducao, entrada.exemplo) == ("ammo", "munição", "I'm low on ammo."),
+        f"o que o modelo grava com marcação entra limpo ({entrada.termo!r}, {entrada.traducao!r})",
+    )
+    checar(
+        store.avaliar("<b>ammo</b>", True)["termo"] == "ammo" and store.entrada("<i>ammo</i>") is not None,
+        "e é achado pelo mesmo termo marcado: a busca usa a limpeza da gravação",
+    )
+    try:
+        store.registrar("x" * (MAX_TERMO + 1), "y")
+        checar(False, "um termo longo demais é recusado, e não cortado")
+    except ValueError:
+        checar(store.entrada("x" * MAX_TERMO) is None, "um termo longo demais é recusado, e não cortado")
+    longa, _ = store.registrar("loot", "t" * 999, "e" * 999)
+    checar(
+        len(longa.traducao) == MAX_TRADUCAO and len(longa.exemplo) == MAX_EXEMPLO,
+        "tradução e exemplo longos entram cortados no limite",
+    )
+
+    checar(
+        (booleano("false"), booleano("False "), booleano("true"), booleano("SIM"), booleano(True), booleano(0))
+        == (False, False, True, True, True, False),
+        "o booleano do modelo é lido pelo que diz: o texto \"false\" é falso",
+    )
+    ferramentas = ToolDispatcher(store, jogo="Fallout")
+    ferramentas.dispatch("avaliar_vocabulario", {"termo": "loot", "acertou": "false"})
+    entrada_loot = store.entrada("loot")
+    checar(
+        entrada_loot is not None and entrada_loot.erros == 1 and entrada_loot.acertos == 0,
+        "um erro dito como texto conta como erro, e não como acerto",
+    )
+    resposta = ferramentas.dispatch(
+        "registrar_vocabulario", {"termo": "z" * 500, "traducao": "nada"}
+    )
+    checar(
+        "erro" in resposta and store.total() == 2,
+        "o modelo que tenta gravar um termo de 500 caracteres recebe um erro, e nada entra",
+    )
+    store.close()
+
+def teste_resgate_dos_bancos() -> None:
+    """Um banco danificado não impede o programa de abrir, e nada é apagado.
+
+    O contrato: só corrupção de verdade dispara o resgate (banco travado ou
+    sem permissão, não); o arquivo danificado é guardado ao lado, com o
+    diário; o caderno volta da cópia mais recente que abrir, pulando cópia
+    danificada; sem cópia, começa vazio; e o banco que não termina de abrir
+    solta o arquivo — senão, no Windows, ele nem poderia ser guardado.
+    """
+    print("resgate dos bancos")
+    import sqlite3
+
+    from pipboy.banco import Resgate, abrir_com_resgate, aviso_de_resgate, e_corrupcao
+    from pipboy.historico import HistoricoStore
+
+    lixo = b"isto nao e um banco " * 200
+    pasta = Path(tempfile.mkdtemp())
+    (pasta / "vocabulario.sqlite3").write_bytes(lixo)
+    try:
+        VocabularyStore(pasta / "vocabulario.sqlite3")
+        checar(False, "um caderno danificado não abre")
+    except sqlite3.DatabaseError as erro:
+        checar(e_corrupcao(erro), "o erro de um arquivo que não é banco conta como corrupção")
+    try:
+        (pasta / "vocabulario.sqlite3").rename(pasta / "movido.sqlite3")
+        checar(True, "o caderno que não terminou de abrir soltou o arquivo")
+        (pasta / "movido.sqlite3").rename(pasta / "vocabulario.sqlite3")
+    except OSError as erro:
+        checar(False, f"o caderno que não terminou de abrir soltou o arquivo ({erro})")
+    checar(
+        not e_corrupcao(sqlite3.OperationalError("database is locked"))
+        and not e_corrupcao(ValueError("file is not a database")),
+        "banco travado não é corrupção — e nem o que não é erro do SQLite",
+    )
+
+    copias = pasta / "backups"
+    copias.mkdir()
+    boa = VocabularyStore(copias / "vocabulario-2026-09-28.sqlite3")
+    boa.registrar("bounty", "recompensa")
+    boa.close()
+    (copias / "vocabulario-2026-09-29.sqlite3").write_bytes(lixo)
+    # Uma cópia boa MAIS VELHA, com outro conteúdo: a escolha tem de ser a
+    # mais recente que abre, e não a primeira que abre.
+    velha = VocabularyStore(copias / "vocabulario-2026-09-20.sqlite3")
+    for termo_velho in ("um", "dois", "tres"):
+        velha.registrar(termo_velho, "x")
+    velha.close()
+    store, resgate = abrir_com_resgate(VocabularyStore, pasta / "vocabulario.sqlite3", copias=copias)
+    checar(
+        store.total() == 1 and resgate is not None and resgate.restaurado_de is not None
+        and resgate.restaurado_de.name == "vocabulario-2026-09-28.sqlite3",
+        "o caderno volta da cópia mais recente que abre, pulando a danificada",
+    )
+    assert resgate is not None
+    checar(
+        resgate.guardado_como.exists() and resgate.guardado_como.read_bytes() == lixo
+        and resgate.guardado_como.name.startswith("vocabulario.danificado-"),
+        f"e o arquivo danificado é guardado ao lado, intacto ({resgate.guardado_como.name})",
+    )
+    aviso = aviso_de_resgate("O caderno de vocabulário", resgate)
+    checar(
+        "restaurado da cópia de 28/09" in aviso and resgate.guardado_como.name in aviso
+        and "Nada foi apagado" in aviso,
+        "o aviso diz de que dia é a cópia e onde ficou o arquivo danificado",
+    )
+    store.close()
+
+    sem_copia = Path(tempfile.mkdtemp())
+    (sem_copia / "historico.sqlite3").write_bytes(lixo)
+    historico, resgate_h = abrir_com_resgate(HistoricoStore, sem_copia / "historico.sqlite3")
+    checar(
+        historico.total_sessoes() == 0 and resgate_h is not None and resgate_h.restaurado_de is None
+        and "recomeçou vazio" in aviso_de_resgate("O histórico de conversas", resgate_h),
+        "sem cópia, o banco recomeça vazio — e o aviso diz isso",
+    )
+    historico.close()
+    checar(
+        "começou um caderno novo" in aviso_de_resgate("O caderno de vocabulário", Resgate(Path("x.sqlite3"))),
+        "o caderno sem cópia avisa que começou um novo",
+    )
+
+    saudavel = Path(tempfile.mkdtemp())
+    inteiro, nenhum = abrir_com_resgate(VocabularyStore, saudavel / "vocabulario.sqlite3")
+    checar(nenhum is None and sorted(p.name for p in saudavel.iterdir())[0] == "vocabulario.sqlite3",
+           "um banco saudável abre direto, sem resgate nenhum")
+    inteiro.close()
+
+    travado = Path(tempfile.mkdtemp())
+    (travado / "vocabulario.sqlite3").write_bytes(lixo)
+
+    def abrir_travado(_caminho: Path) -> VocabularyStore:
+        raise sqlite3.OperationalError("database is locked")
+
+    try:
+        abrir_com_resgate(abrir_travado, travado / "vocabulario.sqlite3")
+        checar(False, "um banco travado não é mexido: o erro sobe e o arquivo fica")
+    except sqlite3.OperationalError:
+        checar(
+            [p.name for p in travado.iterdir()] == ["vocabulario.sqlite3"],
+            "um banco travado não é mexido: o erro sobe e o arquivo fica",
+        )
 
 
 def teste_backup() -> None:
@@ -3011,6 +3228,13 @@ def teste_lancamento_sem_console() -> None:
             not any(type(h) is logging.StreamHandler for h in LOGGER.handlers),
             f"sem console, nenhum StreamHandler é instalado ({instalados})",
         )
+        from pipboy import FormatadorSemSegredo
+
+        checar(
+            bool(LOGGER.handlers)
+            and all(isinstance(h.formatter, FormatadorSemSegredo) for h in LOGGER.handlers),
+            "todo destino do log passa pelo formatador que mascara a chave",
+        )
         checar(
             any(isinstance(h, RotatingFileHandler) for h in LOGGER.handlers),
             f"e o registro em arquivo continua de pé ({instalados})",
@@ -3346,6 +3570,8 @@ def main() -> int:
         teste_nivel,
         teste_ferramenta_de_mutantes,
         teste_temporarios_da_suite,
+        teste_dados_de_fora,
+        teste_resgate_dos_bancos,
     ):
         try:
             teste()

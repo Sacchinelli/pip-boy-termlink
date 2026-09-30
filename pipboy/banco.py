@@ -27,12 +27,18 @@ devagar é muito melhor que um caderno que não abre.
 from __future__ import annotations
 
 import logging
+import shutil
 import sqlite3
 import unicodedata
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TypeVar
 
 LOGGER = logging.getLogger("pip_boy.banco")
+
+T = TypeVar("T")
 
 # Versão do formato dos carimbos de tempo. 0 (ausente) é o formato antigo: ISO
 # com o fuso LOCAL de quem gravou. 1 é ISO em UTC. Ver ``migrar_para_utc``.
@@ -179,3 +185,105 @@ def conectar(path: Path) -> sqlite3.Connection:
     except sqlite3.Error:
         LOGGER.info("WAL indisponível em %s; seguindo no modo padrão.", path.name, exc_info=True)
     return conexao
+
+# ------------------------------------------------------------------ Resgate
+# SQLITE_CORRUPT e SQLITE_NOTADB: os dois códigos que querem dizer "este
+# arquivo não é mais um banco legível". Todo o resto — travado por outro
+# processo ou por um antivírus, sem permissão, disco cheio — é passageiro ou é
+# do ambiente, e mexer no arquivo por causa deles seria destruir um caderno
+# perfeitamente bom.
+_CODIGOS_DE_CORRUPCAO = (11, 26)
+_FRASES_DE_CORRUPCAO = ("file is not a database", "database disk image is malformed")
+
+
+@dataclass(frozen=True, slots=True)
+class Resgate:
+    """O que se fez com um banco que não abria: onde ele foi guardado e o que entrou no lugar."""
+
+    guardado_como: Path
+    restaurado_de: Path | None = None
+
+
+def e_corrupcao(erro: BaseException) -> bool:
+    """Se o erro diz que o arquivo está danificado — e não travado ou inacessível.
+
+    Quem decide é o código de erro do SQLite (ou, sem ele, a mensagem): travado
+    e sem permissão chegam com os códigos deles, e corrupção nunca chega como
+    OperationalError — excluir essa classe à parte não decidiria nada.
+    """
+    if not isinstance(erro, sqlite3.DatabaseError):
+        return False
+    codigo = getattr(erro, "sqlite_errorcode", None)
+    if codigo is not None:
+        return (int(codigo) & 0xFF) in _CODIGOS_DE_CORRUPCAO
+    mensagem = str(erro).lower()
+    return any(frase in mensagem for frase in _FRASES_DE_CORRUPCAO)
+
+
+def abrir_com_resgate(
+    abrir: Callable[[Path], T], caminho: Path, *, copias: Path | None = None
+) -> tuple[T, Resgate | None]:
+    """Abre o banco; se ele estiver danificado, guarda-o ao lado e segue sem ele.
+
+    O arquivo danificado nunca é apagado: vai para
+    ``nome.danificado-AAAAMMDD-HHMMSS.sqlite3``, com os arquivos do diário
+    (-wal, -shm) junto, para quem quiser tentar recuperá-lo. No lugar dele
+    entra a cópia mais recente de ``copias`` que abra (as cópias diárias do
+    caderno; uma cópia danificada é pulada em favor da anterior), ou um banco
+    vazio. Sem isto, um caderno danificado impedia o programa de abrir, e o
+    jogador ficava preso até descobrir sozinho qual arquivo renomear numa
+    pasta que ele nem sabe que existe — com sete dias de cópias guardadas ao
+    lado.
+
+    Devolve o banco aberto e o ``Resgate`` (``None`` quando abriu direto).
+    """
+    try:
+        return abrir(caminho), None
+    except sqlite3.DatabaseError as erro:
+        if not e_corrupcao(erro):
+            raise
+        # Uma linha, sem o traço: a pilha de um arquivo danificado não ajuda
+        # ninguém, e a mensagem do SQLite já diz o que houve.
+        LOGGER.warning(
+            "O banco %s está danificado (%s); guardando e seguindo sem ele.", caminho.name, erro
+        )
+
+    momento = datetime.now(timezone.utc).astimezone().strftime("%Y%m%d-%H%M%S")
+    guardado = caminho.with_name(f"{caminho.stem}.danificado-{momento}{caminho.suffix}")
+    caminho.replace(guardado)
+    for sufixo in ("-wal", "-shm"):
+        diario = caminho.with_name(caminho.name + sufixo)
+        if diario.exists():
+            diario.replace(guardado.with_name(guardado.name + sufixo))
+
+    if copias is not None and copias.is_dir():
+        # O nome da cópia é a data (vocabulario-AAAA-MM-DD.sqlite3), então a
+        # ordem alfabética inversa é da mais nova para a mais velha.
+        for copia in sorted(copias.glob(f"{caminho.stem}-*{caminho.suffix}"), reverse=True):
+            shutil.copy2(copia, caminho)
+            try:
+                return abrir(caminho), Resgate(guardado, copia)
+            except sqlite3.DatabaseError as erro:
+                if not e_corrupcao(erro):
+                    raise
+                LOGGER.warning("A cópia %s também está danificada; tentando a anterior.", copia.name)
+                caminho.unlink(missing_ok=True)
+    return abrir(caminho), Resgate(guardado)
+
+
+def aviso_de_resgate(o_que: str, resgate: Resgate) -> str:
+    """O que dizer ao jogador sobre um banco resgatado, em uma frase só."""
+    if resgate.restaurado_de is not None:
+        # "vocabulario-2026-09-29" → "29/09".
+        _, _, data = resgate.restaurado_de.stem.partition("-")
+        partes = data.split("-")
+        quando = f"de {partes[2]}/{partes[1]}" if len(partes) == 3 else "mais recente"
+        destino = f"foi restaurado da cópia {quando}"
+    elif o_que.startswith("O caderno"):
+        destino = "não tinha cópia para restaurar, e o programa começou um caderno novo"
+    else:
+        destino = "recomeçou vazio"
+    return (
+        f"{o_que} não abria — o arquivo estava danificado — e {destino}. Nada foi apagado: "
+        f"o arquivo danificado foi guardado como {resgate.guardado_como.name}, na pasta de dados."
+    )

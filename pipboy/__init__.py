@@ -18,6 +18,20 @@ __version__ = "3.0.0"
 LOGGER = logging.getLogger("pip_boy")
 
 
+class FormatadorSemSegredo(logging.Formatter):
+    """O formato do log, com toda chave do Google mascarada (ver config.mascarar_segredos).
+
+    Na linha inteira JÁ FORMATADA — mensagem, argumentos e traço de pilha —,
+    e não só na mensagem: a chave que vaze por uma exceção aparece no traço,
+    e é ali que um filtro só de mensagem a deixaria passar.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        from .config import mascarar_segredos
+
+        return mascarar_segredos(super().format(record))
+
+
 def configure_logging(directory: Path) -> None:
     """Log rotativo em arquivo, sem sequestrar stdout/stderr da aplicação."""
     if LOGGER.handlers:
@@ -25,7 +39,7 @@ def configure_logging(directory: Path) -> None:
 
     LOGGER.setLevel(logging.INFO)
     LOGGER.propagate = False
-    formatter = logging.Formatter(
+    formatter = FormatadorSemSegredo(
         "%(asctime)s | %(levelname)-7s | %(name)s | %(threadName)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )

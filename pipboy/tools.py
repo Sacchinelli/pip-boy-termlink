@@ -18,6 +18,21 @@ from .vocabulary import VocabularyStore
 
 LOGGER = logging.getLogger("pip_boy.tools")
 
+_VERDADEIROS = frozenset({"true", "sim", "yes", "1", "verdadeiro"})
+
+
+def booleano(valor: Any) -> bool:
+    """Um argumento booleano do modelo, lido pelo que ele DIZ.
+
+    O esquema pede booleano, mas o modelo às vezes manda texto — e em Python
+    ``bool("false")`` é ``True``. Com a conversão ingênua, um "errou" dito
+    como texto virava acerto e a repetição espaçada empurrava para longe a
+    palavra que o jogador acabou de errar.
+    """
+    if isinstance(valor, str):
+        return valor.strip().lower() in _VERDADEIROS
+    return bool(valor)
+
 
 def build_tools(*, web_search: bool = False) -> types.ToolListUnion:
     """Declarações enviadas na configuração da sessão.
@@ -178,11 +193,11 @@ class ToolDispatcher:
             quantidade = 10
         quantidade = max(1, min(quantidade, self.MAX_PALAVRAS))
 
-        if bool(args.get("revisao", False)):
+        if booleano(args.get("revisao", False)):
             entradas = self._store.para_revisar(limite=quantidade)
         else:
             entradas = self._store.consultar(
-                limite=quantidade, aleatorio=bool(args.get("aleatorio", False))
+                limite=quantidade, aleatorio=booleano(args.get("aleatorio", False))
             )
 
         palavras: list[dict[str, Any]] = []
@@ -213,7 +228,7 @@ class ToolDispatcher:
         termo = str(args.get("termo", "")).strip()
         if not termo:
             return {"erro": "termo é obrigatório"}
-        acertou = bool(args.get("acertou", False))
+        acertou = booleano(args.get("acertou", False))
         resultado = self._store.avaliar(termo, acertou)
         if self._on_review is not None:
             self._on_review(

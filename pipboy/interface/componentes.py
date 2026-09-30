@@ -1354,6 +1354,10 @@ class RotuloElidido(QLabel):
     def __init__(self, parent: QWidget | None = None, **kwargs: Any) -> None:
         super().__init__(parent, **kwargs)
         self._completo = ""
+        # Texto de verdade, e não HTML adivinhado: o que passa por aqui é dado
+        # (a palavra do caderno no recado da revisão), e o QLabel, por padrão,
+        # renderiza como HTML o texto que COMEÇA com uma tag.
+        self.setTextFormat(Qt.TextFormat.PlainText)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
 
     def definir_texto(self, texto: str) -> None:

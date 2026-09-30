@@ -385,6 +385,7 @@ pip-boy-termlink/
 - O áudio do microfone é enviado ao serviço Gemini. Se você ativar **Ouvir o jogo**, o áudio do jogo — incluindo vozes de outros jogadores em partidas online — também é enviado. Use apenas com quem sabe disso.
 - A retomada de sessão faz o servidor guardar o contexto da conversa por até algumas horas. Se isso for um problema para você, edite `session.py` e remova o campo `session_resumption`.
 - Revise `pipboy.log` antes de compartilhá-lo.
+- **O caderno trata como dado o que chega de fora.** O que o modelo grava — e ele escuta o áudio do jogo, uma fonte que ninguém controla — e o que se importa de um arquivo passam pela mesma limpeza: as tags de HTML conhecidas saem (sem apagar texto de jogo como *Press <E> to interact*), as entidades são desfeitas, e cada campo tem tamanho máximo (um termo de mais de 80 caracteres é recusado; tradução e exemplo são cortados). Na tela, os campos do caderno são sempre texto puro, e nunca HTML interpretado. E os argumentos do modelo são lidos pelo que dizem: um "errou" mandado como texto conta como erro.
 - O **histórico de sessões** (`historico.sqlite3`) guarda a transcrição das suas conversas com o tutor, apenas localmente. Sessões podem ser apagadas uma a uma pelo visualizador; apagar o arquivo remove tudo.
 
 ## Custos
@@ -414,6 +415,7 @@ As respostas de ferramenta também emagreceram: `consultar_vocabulario` devolvia
 
 ## Problemas comuns
 
+- **O programa avisou que o caderno estava danificado:** um arquivo de banco corrompido (queda de energia no meio de uma gravação, disco com defeito) não impede mais o programa de abrir. O arquivo danificado é guardado ao lado, como `vocabulario.danificado-AAAAMMDD-HHMMSS.sqlite3` na pasta de dados — nada é apagado —, e o caderno volta da cópia diária mais recente que abrir (as cópias ficam em `backups/`, uma por dia, as sete últimas). Sem cópia, começa um caderno novo. O histórico de conversas recomeça vazio, porque não tem cópia por projeto. Travamento e falta de permissão não disparam nada disso: o resgate é só para arquivo que deixou de ser um banco legível.
 - **`py` não é reconhecido:** instale o Python 3.10+ marcando "Add to PATH".
 - **A barra de tarefas mostra o ícone do Python:** era assim até a identidade do processo (AppUserModelID) ser declarada no arranque. Se ainda acontecer, o Windows está com o ícone em cache: feche o programa, aguarde alguns segundos e abra de novo.
 - **A janela não abre e o console fala em `PySide6`:** rode `py -m pip install -r requirements.txt`. A interface depende do Qt.
