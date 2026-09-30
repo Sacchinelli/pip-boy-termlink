@@ -32,7 +32,7 @@ import random
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Final
 
-from PySide6.QtCore import QPointF, QRect, QRectF, Qt
+from PySide6.QtCore import QEasingCurve, QPointF, QRect, QRectF, Qt
 
 if TYPE_CHECKING:
     from ..themes import GameTheme
@@ -41,6 +41,7 @@ from PySide6.QtGui import (
     QImage,
     QLinearGradient,
     QPainter,
+    QPen,
     QPixmap,
     QRadialGradient,
     QRegion,
@@ -153,7 +154,166 @@ def atmosfera_de(nome_do_jogo: str) -> Atmosfera:
     return ATMOSFERAS.get(nome_do_jogo, ATMOSFERA_PADRAO)
 
 
+# ------------------------------------------------------------------ Cursor
+# A atmosfera responde ao mouse: uma luz que o segue pela janela, partículas que
+# fogem dele e um enxame que desliza em profundidade conforme ele anda. Tudo
+# isso só é calculado enquanto o cursor se move SOBRE a janela — com o jogador
+# dentro do jogo, o custo é zero.
+#
+# Raio em que as partículas fogem do cursor, e com que força (px/s no contato).
+RAIO_FUGA: Final = 170.0
+FORCA_FUGA: Final = 680.0
+# A luz: um halo largo e um núcleo, somados ao FUNDO. Ela fica atrás do
+# conteúdo, e não no vidro da frente: pintada por cima, ela lavava justamente o
+# texto sob o cursor — o lugar para onde a pessoa está olhando. Atrás, ela
+# atravessa os painéis translúcidos, e por isso o brilho é mais alto do que
+# pareceria necessário.
+#
+# Atrás do conteúdo, o preço dela é repintar a cada quadro TUDO que está sob a
+# caixa que ela ocupa — painéis, rótulos, bolhas, seletores. O halo tinha 460 px
+# de raio, e dos 184 px para fora ele somava menos de 7% de uma cor já
+# atravessando um painel: uma caixa de 920 px por lado para uma borda que não se
+# via. Com 340 px e o degrau do meio no MESMO lugar (a 184 px do centro), a
+# parte visível fica igual e a caixa perde 45% da área.
+RAIO_LUZ: Final = 340.0
+MEIO_LUZ: Final = 184.0 / 340.0
+RAIO_NUCLEO: Final = 150.0
+# O quanto da luz aparece numa janela de fundo liso — o histórico, a revisão, o
+# progresso. O brilho dela foi medido para ATRAVESSAR os painéis translúcidos
+# da janela principal e do caderno, que deixam passar cerca de um terço; num
+# fundo sem painel na frente, com a força inteira, ela vira uma bola de luz
+# sobre o conteúdo.
+ATENUACAO_NO_FUNDO_NU: Final = 0.34
+# Abaixo disto, em pixels por quadro, a luz é dada como parada: ela é copiada em
+# pixels inteiros, e um vigésimo de pixel não muda nenhum deles.
+LUZ_PARADA: Final = 0.05
+BRILHO_LUZ: Final = 0.50
+BRILHO_NUCLEO: Final = 0.46
+# Quanto o enxame desliza AO CONTRÁRIO do cursor, entre o centro e a borda.
+PARALAXE: Final = 22.0
+# Rapidez com que a luz alcança o cursor, em 1/s. Alta o bastante para seguir,
+# baixa o bastante para ter peso: esse pequeno atraso é o que faz o movimento
+# parecer fluido em vez de colado ao ponteiro.
+SEGUIMENTO: Final = 11.0
+# O anel que acompanha o cursor, com mais pressa que a luz, e que cresce sobre o
+# que se pode clicar — o cursor dos sites que respondem ao mouse, desenhado no
+# vidro da janela ao lado do ponteiro do sistema, sem substituí-lo.
+RAIO_ANEL: Final = 13.0
+RAIO_ANEL_CLICAVEL: Final = 22.0
+SEGUIMENTO_ANEL: Final = 22.0
+# Sobre um botão, um seletor ou um cartão, o anel deixa de ser círculo e ABRAÇA
+# o contorno do que vai ser clicado — o cursor das páginas que respondem ao
+# mouse. Ele se transforma com a mesma pressa com que persegue o cursor; o
+# miolo, quase nada, só para o contorno ler como alvo e não como moldura.
+MIOLO_ABRACO: Final = 0.07
+# A onda que sai de cada clique: o quanto cresce e quanto tempo dura.
+RAIO_ONDA: Final = 46.0
+DURACAO_ONDA: Final = 0.55
+
+# A tremulação do tubo vem em RAJADAS: um soluço de brilho de tempos em tempos,
+# e não uma oscilação sem fim. Ela é a única camada sem recorte possível — um
+# brilho sobre a janela inteira —, e contínua ela repintava TUDO a cada quadro:
+# 10 ms por quadro no tema do Fallout, trinta vezes por segundo, aberto atrás do
+# próprio Fallout. Em rajadas o tubo continua malcuidado, e o quadro cheio só é
+# pago enquanto ele treme. Rara, a rajada pode ser mais forte do que a
+# oscilação contínua podia.
+DURACAO_RAJADA: Final = 0.45
+ESPERA_RAJADA: Final = (2.5, 7.0)
+FORCA_RAJADA: Final = 1.6
+
+# O rastro do cursor: faíscas no material do jogo que ficam para trás quando o
+# mouse anda e somem em menos de um segundo — brasa subindo no Witcher, neve
+# caindo no Skyrim, dados escorrendo no Cyberpunk. Uma a cada PASSO_RASTRO px
+# percorridos, e nunca mais que MAXIMO_RASTRO vivas: o rastro acompanha o
+# gesto, sem encher a janela de fumaça. Cada faísca é uma caixinha a repintar,
+# como uma partícula do enxame.
+PASSO_RASTRO: Final = 16.0
+MAXIMO_RASTRO: Final = 40
+# Por quadro, no máximo: um puxão de mouse de 600 px não despeja trinta de uma vez.
+SEMEADURA_MAXIMA: Final = 6
+VIDA_RASTRO: Final = (0.35, 0.75)
+BRILHO_RASTRO: Final = 0.75
+
+
+def so_o_cursor(atmosfera: Atmosfera) -> Atmosfera:
+    """A receita sem movimento próprio: sem partícula, tremulação ou interferência.
+
+    Para as janelas que só se mexem quando o cursor mexe: o material do jogo
+    fica — o fundo, o vidro, a cor da luz, e o tipo de partícula, que é o que o
+    rastro do cursor imita —, e a janela fica parada até alguém passar por ela.
+    """
+    return replace(atmosfera, densidade=0, tremulacao=0.0, interferencia=0.0)
+
+
 # ------------------------------------------------------------------- Partículas
+# Os desenhos prontos de partícula, por forma e cor. Ver ``desenho_de_particula``.
+_DESENHOS: dict[tuple[bool, str], QPixmap] = {}
+
+
+def desenho_de_particula(dados: bool, cor: QColor) -> QPixmap:
+    """A partícula desenhada UMA vez, em força cheia, na cor das camadas vivas.
+
+    Cada quadro montava um gradiente por partícula — três cores, três paradas,
+    um pincel — para desenhar sempre a mesma forma em outro lugar e com outra
+    força: 0,40 ms por enxame de 46 motes, a 30 quadros por segundo, a tarde
+    inteira, atrás do jogo. Copiado pronto, com a força como opacidade, custa
+    0,11. A soma é linear, e escalar o desenho é o mesmo que escalar cada cor
+    do gradiente. ``dados`` pede o rastro vertical da chuva de dados; o resto
+    é redondo.
+    """
+    chave = (dados, cor.name())
+    pronto = _DESENHOS.get(chave)
+    if pronto is not None:
+        return pronto
+    transparente = QColor(cor)
+    transparente.setAlpha(0)
+    if dados:
+        # O rastro de um dado: some para cima, acende embaixo.
+        imagem = QImage(4, 64, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem.fill(Qt.GlobalColor.transparent)
+        gradiente = QLinearGradient(0, 0, 0, 64)
+        gradiente.setColorAt(0.0, transparente)
+        gradiente.setColorAt(1.0, cor)
+        pintor = QPainter(imagem)
+        pintor.fillRect(imagem.rect(), gradiente)
+        pintor.end()
+    else:
+        # Halo suave em volta do núcleo: sem ele a partícula vira um pontinho
+        # duro, que é exatamente a aparência de "bolinha desenhada".
+        lado = 48
+        raio = lado / 2
+        imagem = QImage(lado, lado, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem.fill(Qt.GlobalColor.transparent)
+        halo = QRadialGradient(QPointF(raio, raio), raio)
+        halo.setColorAt(0.0, cor)
+        meio = QColor(cor)
+        meio.setAlphaF(0.28)
+        halo.setColorAt(0.45, meio)
+        halo.setColorAt(1.0, transparente)
+        pintor = QPainter(imagem)
+        pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pintor.setPen(Qt.PenStyle.NoPen)
+        pintor.setBrush(halo)
+        pintor.drawEllipse(QPointF(raio, raio), raio, raio)
+        pintor.end()
+    pronto = QPixmap.fromImage(imagem)
+    _DESENHOS[chave] = pronto
+    return pronto
+
+
+@dataclass(slots=True)
+class _Faisca:
+    """Uma faísca do rastro do cursor. ``vida`` é o que resta; ``duracao``, com quanto nasceu."""
+
+    x: float
+    y: float
+    vx: float
+    vy: float
+    tamanho: float
+    vida: float
+    duracao: float
+
+
 @dataclass(slots=True)
 class _Particula:
     x: float
@@ -173,6 +333,14 @@ class _Enxame:
     faz a neve cair mais devagar exatamente quando o computador está ocupado.
     """
 
+    # Opacidade de cada modo: base e quanto a oscilação soma a ela.
+    ALFAS: Final = {
+        "motes": (0.18, 0.42),
+        "brasas": (0.20, 0.55),
+        "neve": (0.30, 0.25),
+        "poeira": (0.10, 0.16),
+        "estatica": (0.25, 0.45),
+    }
     def __init__(self, modo: str, densidade: int, semente: int) -> None:
         self._modo = modo
         self._rng = random.Random(semente)
@@ -214,11 +382,26 @@ class _Enxame:
             return -8
         return self._rng.uniform(0, altura)
 
-    def avancar(self, dt: float) -> None:
+    def avancar(self, dt: float, fuga: QPointF | None = None) -> None:
+        """Move o enxame. ``fuga`` é o cursor, no espaço das partículas.
+
+        Perto dele, cada partícula é empurrada para longe — mais forte quanto
+        mais perto, e nada a partir de ``RAIO_FUGA``. A chuva de dados só
+        desvia para o lado: empurrada para cima, ela pareceria subir.
+        """
         for i, p in enumerate(self._particulas):
             p.x += p.vx * dt
             p.y += p.vy * dt
             p.fase += dt * 2.2
+            if fuga is not None and self._modo != "estatica":
+                dx, dy = p.x - fuga.x(), p.y - fuga.y()
+                distancia2 = dx * dx + dy * dy
+                if 1e-6 < distancia2 < RAIO_FUGA * RAIO_FUGA:
+                    distancia = math.sqrt(distancia2)
+                    empurrao = (1.0 - distancia / RAIO_FUGA) ** 2 * FORCA_FUGA * dt
+                    p.x += dx / distancia * empurrao
+                    if self._modo != "dados":
+                        p.y += dy / distancia * empurrao
             if self._modo == "estatica":
                 p.vida -= dt
                 if p.vida <= 0:
@@ -237,7 +420,7 @@ class _Enxame:
     # pode produzir e que nenhum teste offscreen enxerga.
     MARGEM = 3
 
-    def caixas(self) -> list[QRect]:
+    def caixas(self, deslocamento: QPointF | None = None) -> list[QRect]:
         """Onde cada partícula pinta AGORA, em pixels inteiros.
 
         Serve à repintura por região: o cenário une estas caixas antes e
@@ -252,60 +435,79 @@ class _Enxame:
                 # oscilação no pico. Ver o desenho em ``pintar``.
                 raio = p.tamanho * 1.25 * 3.2
                 area = QRectF(p.x - raio, p.y - raio, raio * 2, raio * 2)
+            if deslocamento is not None:
+                area.translate(deslocamento)
             caixas.append(
                 area.adjusted(-self.MARGEM, -self.MARGEM, self.MARGEM, self.MARGEM)
                 .toAlignedRect()
             )
         return caixas
 
-    def pintar(self, pintor: QPainter, cor: QColor) -> None:
+    def pintar(self, pintor: QPainter, cor: QColor, deslocamento: QPointF | None = None) -> None:
         if not self._particulas:
             return
+        desenho = desenho_de_particula(self._modo == "dados", cor)
+        fonte = QRectF(desenho.rect())
         pintor.save()
+        if deslocamento is not None:
+            pintor.translate(deslocamento)
         # Composição aditiva: partículas de luz SOMAM ao fundo em vez de o
         # cobrir. É a diferença entre uma faísca e um ponto de tinta.
         pintor.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
-        pintor.setPen(Qt.PenStyle.NoPen)
+        pintor.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
 
+        if self._modo == "dados":
+            for p in self._particulas:
+                pintor.setOpacity(min(1.0, 0.25 + 0.35 * (0.5 + 0.5 * math.sin(p.fase))))
+                pintor.drawPixmap(QRectF(p.x, p.y, 1.4, p.tamanho), desenho, fonte)
+            pintor.restore()
+            return
+
+        base, variacao = self.ALFAS.get(self._modo, (0.3, 0.0))
         for p in self._particulas:
-            if self._modo == "dados":
-                brilho = 0.25 + 0.35 * (0.5 + 0.5 * math.sin(p.fase))
-                c = QColor(cor)
-                c.setAlphaF(min(1.0, brilho))
-                gradiente = QLinearGradient(p.x, p.y, p.x, p.y + p.tamanho)
-                transparente = QColor(cor)
-                transparente.setAlpha(0)
-                gradiente.setColorAt(0.0, transparente)
-                gradiente.setColorAt(1.0, c)
-                pintor.setBrush(gradiente)
-                pintor.drawRect(QRectF(p.x, p.y, 1.4, p.tamanho))
-                continue
-
             oscilacao = 0.5 + 0.5 * math.sin(p.fase)
-            alfa = {
-                "motes": 0.18 + 0.42 * oscilacao,
-                "brasas": 0.20 + 0.55 * oscilacao,
-                "neve": 0.30 + 0.25 * oscilacao,
-                "poeira": 0.10 + 0.16 * oscilacao,
-                "estatica": 0.25 + 0.45 * oscilacao,
-            }.get(self._modo, 0.3)
-
-            raio = p.tamanho * (1.0 + 0.25 * oscilacao)
-            c = QColor(cor)
-            c.setAlphaF(min(1.0, alfa))
-            # Halo suave em volta do núcleo: sem ele a partícula vira um
-            # pontinho duro, que é exatamente a aparência de "bolinha desenhada".
-            halo = QRadialGradient(QPointF(p.x, p.y), raio * 3.2)
-            halo.setColorAt(0.0, c)
-            meio = QColor(c)
-            meio.setAlphaF(c.alphaF() * 0.28)
-            halo.setColorAt(0.45, meio)
-            fim = QColor(c)
-            fim.setAlpha(0)
-            halo.setColorAt(1.0, fim)
-            pintor.setBrush(halo)
-            pintor.drawEllipse(QPointF(p.x, p.y), raio * 3.2, raio * 3.2)
+            raio = p.tamanho * (1.0 + 0.25 * oscilacao) * 3.2
+            pintor.setOpacity(min(1.0, base + variacao * oscilacao))
+            pintor.drawPixmap(
+                QRectF(p.x - raio, p.y - raio, raio * 2, raio * 2), desenho, fonte
+            )
         pintor.restore()
+
+
+def _aproximar(atual: QRectF, alvo: QRectF, passo: float) -> QRectF:
+    """``atual`` andando ``passo`` (de 0 a 1) do caminho até ``alvo``, lado a lado."""
+    return QRectF(
+        atual.x() + (alvo.x() - atual.x()) * passo,
+        atual.y() + (alvo.y() - atual.y()) * passo,
+        atual.width() + (alvo.width() - atual.width()) * passo,
+        atual.height() + (alvo.height() - atual.height()) * passo,
+    )
+
+
+def _distancia(a: QRectF, b: QRectF) -> float:
+    """Quanto falta, somando os quatro lados, de uma caixa até a outra."""
+    return (
+        abs(a.x() - b.x()) + abs(a.y() - b.y())
+        + abs(a.width() - b.width()) + abs(a.height() - b.height())
+    )
+
+
+def _juntar_pares(antes: list[QRect], agora: list[QRect]) -> list[QRect]:
+    """As caixas de antes e de agora, com cada par que se toca numa caixa só.
+
+    A mesma partícula, um quadro depois, está a um pixel de onde estava: as duas
+    caixas quase coincidem, e montar a região com as duas custava o dobro de
+    retângulos. Uma partícula que renasceu longe fica com as duas — a união
+    delas cobriria a janela.
+    """
+    caixas: list[QRect] = []
+    for a, b in zip(antes, agora, strict=False):
+        if a.intersects(b):
+            caixas.append(a.united(b))
+        else:
+            caixas += (a, b)
+    menor = min(len(antes), len(agora))
+    return caixas + antes[menor:] + agora[menor:]
 
 
 # ---------------------------------------------------------------------- Cenário
@@ -332,11 +534,291 @@ class Cenario:
         self._sujas: list[QRect] = []
         self.movimento = True
         self._intensidade = 1.0
+        # O cursor que a atmosfera persegue (None = fora da janela), a luz que
+        # o alcança com atraso, a força dela (acende e apaga) e o deslize do
+        # enxame. Ver ``definir_cursor``.
+        self._cursor: QPointF | None = None
+        self._luz = QPointF()
+        self._forca_luz = 0.0
+        self._paralaxe = QPointF()
+        # Onde a luz estava e está: a região do FUNDO a repintar. Ver
+        # ``regiao_da_luz``.
+        self._luz_suja: list[QRect] = []
+        self._anel = QPointF()
+        self._raio_anel = RAIO_ANEL
+        self._sobre_clicavel = False
+        # A forma desenhada do anel — uma caixa e o canto dela: círculo quando o
+        # canto é metade do lado —, o contorno que ele abraça, quando há um, e o
+        # quanto ele já abraçou. Ver ``definir_abraco``.
+        self._caixa_anel = QRectF()
+        self._canto_anel = RAIO_ANEL
+        self._abraco: tuple[QRectF, float] | None = None
+        self._forca_abraco = 0.0
+        # Cada onda de clique: centro e idade, em segundos.
+        self._ondas: list[tuple[QPointF, float]] = []
+        # A luz já desenhada, com a chave (cores e densidade de pixels) de quando
+        # foi feita. Ver ``_desenho_da_luz``.
+        self._desenho_luz: QPixmap | None = None
+        self._chave_luz: tuple[str, str, float] | None = None
+        # A rajada de tremulação em curso (segundos desde o começo; None = o
+        # tubo está quieto), quanto falta para a próxima, e se este quadro é o
+        # que apaga a última. Ver ``_avancar_tremulacao``.
+        self._rajada: float | None = None
+        self._proxima_rajada = 0.0
+        self._apagar_rajada = False
+        self._sorteio_rajada = random.Random(0)
+        # O rastro: as faíscas vivas, onde o cursor estava no quadro anterior
+        # e quanto ele andou desde a última faísca. Ver ``_avancar_rastro``.
+        self._rastro: list[_Faisca] = []
+        self._cursor_anterior: QPointF | None = None
+        self._percorrido = 0.0
+        self._sorteio_rastro = random.Random(0)
 
     # -- configuração
+    def definir_cursor(self, ponto: QPointF | None, *, sobre_clicavel: bool = False) -> None:
+        """Onde está o cursor, em coordenadas da janela; ``None`` quando saiu.
+
+        A luz e o anel nascem EM CIMA do cursor quando ele entra, em vez de
+        atravessarem a janela vindos de onde apagaram da última vez.
+        ``sobre_clicavel`` faz o anel crescer: ele anuncia o que responde a um
+        clique antes do clique.
+        """
+        if ponto is not None and self._forca_luz <= 0.001:
+            self._luz = QPointF(ponto)
+            self._anel = QPointF(ponto)
+            self._caixa_anel = QRectF(
+                ponto.x() - RAIO_ANEL, ponto.y() - RAIO_ANEL, 2 * RAIO_ANEL, 2 * RAIO_ANEL
+            )
+            self._canto_anel = RAIO_ANEL
+        self._cursor = None if ponto is None else QPointF(ponto)
+        self._sobre_clicavel = sobre_clicavel and ponto is not None
+        if ponto is None:
+            self._abraco = None
+
+    def definir_abraco(self, abraco: tuple[QRectF, float] | None) -> None:
+        """O contorno que o anel abraça, em coordenadas da janela, e o canto dele.
+
+        ``None`` solta: o anel volta a ser círculo em volta do cursor. Quem
+        chama a cada quadro é a janela, e não só a cada movimento, porque o
+        botão magnético continua andando depois que o cursor para — e o anel
+        vai junto com ele.
+        """
+        self._abraco = None if abraco is None or self._cursor is None else abraco
+
+    @property
+    def abracando(self) -> bool:
+        return self._abraco is not None
+
+    def _alvo_do_anel(self) -> tuple[QRectF, float]:
+        """A forma que o anel persegue: o contorno abraçado, ou o círculo."""
+        if self._abraco is not None:
+            return self._abraco
+        r = self._raio_anel
+        return QRectF(self._anel.x() - r, self._anel.y() - r, 2 * r, 2 * r), r
+
+    def apagar_cursor(self) -> None:
+        """Esquece o cursor de uma vez: luz apagada, sem anel, onda ou faísca.
+
+        Para a janela que se esconde com o cursor em cima dela: fechada, ela
+        não recebe o aviso de que o cursor saiu, e reaberta mostraria a luz
+        acesa onde ele estava da última vez.
+        """
+        self._cursor = None
+        self._cursor_anterior = None
+        self._forca_luz = 0.0
+        self._ondas.clear()
+        self._rastro.clear()
+        self._luz_suja = []
+
+    def pulsar(self, ponto: QPointF) -> None:
+        """Uma onda sai do ponto do clique: a resposta imediata a qualquer toque."""
+        if self.movimento:
+            self._ondas.append((QPointF(ponto), 0.0))
+
+    @property
+    def anel(self) -> QRectF:
+        """A caixa do anel como está desenhado agora: círculo, ou o contorno abraçado."""
+        return QRectF(self._caixa_anel)
+
+    @property
+    def ondas(self) -> int:
+        return len(self._ondas)
+
+    @property
+    def cursor(self) -> QPointF | None:
+        return self._cursor
+
+    @property
+    def luz(self) -> tuple[QPointF, float]:
+        """Posição e força atuais da luz que segue o cursor."""
+        return QPointF(self._luz), self._forca_luz
+
+    @property
+    def intensidade(self) -> float:
+        return self._intensidade
+
+    @property
+    def paralaxe(self) -> QPointF:
+        return QPointF(self._paralaxe)
+
+    def _alvo_paralaxe(self) -> QPointF:
+        if self._cursor is None:
+            return QPointF()
+        largura, altura = self._tamanho
+        if largura <= 0 or altura <= 0:
+            return QPointF()
+        # Do centro para a borda, o enxame anda até PARALAXE no sentido oposto
+        # ao do cursor: o que está "atrás" da janela se move ao contrário de
+        # quem olha, e é isso que o olho lê como profundidade.
+        return QPointF(
+            (0.5 - self._cursor.x() / largura) * 2 * PARALAXE,
+            (0.5 - self._cursor.y() / altura) * 2 * PARALAXE,
+        )
+
+    @property
+    def seguindo_cursor(self) -> bool:
+        """A luz ou o enxame ainda estão a caminho de onde o cursor os quer?
+
+        Com o cursor parado e tudo assentado, não há o que animar: o relógio de
+        quadros pode parar mesmo com o mouse em cima da janela.
+        """
+        if not self.movimento:
+            return False
+        alvo_forca = 1.0 if self._cursor is not None else 0.0
+        if abs(self._forca_luz - alvo_forca) > 0.001:
+            return True
+        if self._ondas or self._rastro:
+            return True
+        if self._cursor is None:
+            return False
+        alvo_raio = RAIO_ANEL_CLICAVEL if self._sobre_clicavel else RAIO_ANEL
+        if abs(self._raio_anel - alvo_raio) > 0.1:
+            return True
+        falta_anel = self._cursor - self._anel
+        if abs(falta_anel.x()) + abs(falta_anel.y()) > 0.5:
+            return True
+        alvo_caixa, alvo_canto = self._alvo_do_anel()
+        if _distancia(self._caixa_anel, alvo_caixa) > 0.5 or abs(self._canto_anel - alvo_canto) > 0.1:
+            return True
+        if abs(self._forca_abraco - (1.0 if self._abraco is not None else 0.0)) > 0.01:
+            return True
+        falta = self._cursor - self._luz
+        falta_paralaxe = self._alvo_paralaxe() - self._paralaxe
+        return (
+            abs(falta.x()) + abs(falta.y()) > 0.5
+            or abs(falta_paralaxe.x()) + abs(falta_paralaxe.y()) > 0.1
+        )
+
+    @property
+    def precisa_quadros(self) -> bool:
+        """O relógio de quadros tem trabalho: camada viva, ou luz a caminho."""
+        return self.tem_camada_viva or self.seguindo_cursor
+
+    def _caixa_luz(self) -> QRect | None:
+        if self._forca_luz <= 0.001:
+            return None
+        return QRectF(
+            self._luz.x() - RAIO_LUZ, self._luz.y() - RAIO_LUZ, RAIO_LUZ * 2, RAIO_LUZ * 2
+        ).toAlignedRect()
+
+    def regiao_da_luz(self) -> QRegion:
+        """O pedaço do fundo que a luz ocupava e ocupa, para repintar só ele."""
+        regiao = QRegion()
+        for caixa in self._luz_suja:
+            regiao += QRegion(caixa)
+        return regiao
+
+    def _seguir_cursor(self, dt: float) -> None:
+        passo = 1.0 - math.exp(-SEGUIMENTO * dt)
+        alvo_forca = 1.0 if self._cursor is not None else 0.0
+        self._forca_luz += (alvo_forca - self._forca_luz) * (1.0 - math.exp(-6.0 * dt))
+        if abs(self._forca_luz - alvo_forca) <= 0.001:
+            self._forca_luz = alvo_forca
+        if self._cursor is not None:
+            self._luz += (self._cursor - self._luz) * passo
+            passo_anel = 1.0 - math.exp(-SEGUIMENTO_ANEL * dt)
+            self._anel += (self._cursor - self._anel) * passo_anel
+            alvo_raio = RAIO_ANEL_CLICAVEL if self._sobre_clicavel else RAIO_ANEL
+            self._raio_anel += (alvo_raio - self._raio_anel) * passo_anel
+            alvo_caixa, alvo_canto = self._alvo_do_anel()
+            self._caixa_anel = _aproximar(self._caixa_anel, alvo_caixa, passo_anel)
+            self._canto_anel += (alvo_canto - self._canto_anel) * passo_anel
+            alvo_abraco = 1.0 if self._abraco is not None else 0.0
+            self._forca_abraco += (alvo_abraco - self._forca_abraco) * passo_anel
+        self._paralaxe += (self._alvo_paralaxe() - self._paralaxe) * passo
+        self._ondas = [(c, idade + dt) for c, idade in self._ondas if idade + dt < DURACAO_ONDA]
+        self._avancar_rastro(dt)
+
+    @property
+    def faiscas(self) -> int:
+        """Quantas faíscas do rastro estão vivas."""
+        return len(self._rastro)
+
+    def _avancar_rastro(self, dt: float) -> None:
+        """Envelhece as faíscas e semeia novas no caminho que o cursor fez.
+
+        As novas nascem ao longo do segmento entre onde o cursor estava no
+        quadro anterior e onde está agora, e não todas no ponto final: um
+        movimento rápido deixa um traço, e não um tufo.
+        """
+        vivas: list[_Faisca] = []
+        for faisca in self._rastro:
+            faisca.vida -= dt
+            if faisca.vida > 0.0:
+                faisca.x += faisca.vx * dt
+                faisca.y += faisca.vy * dt
+                vivas.append(faisca)
+        self._rastro = vivas
+        if self._cursor is None:
+            self._cursor_anterior = None
+            self._percorrido = 0.0
+            return
+        if self._cursor_anterior is not None:
+            falta = self._cursor - self._cursor_anterior
+            self._percorrido += math.hypot(falta.x(), falta.y())
+            quantas = int(self._percorrido // PASSO_RASTRO)
+            if quantas:
+                self._percorrido -= quantas * PASSO_RASTRO
+                semeadas = min(quantas, SEMEADURA_MAXIMA)
+                for k in range(semeadas):
+                    self._semear(self._cursor_anterior + falta * ((k + 1) / semeadas))
+                # Passou do teto: saem as mais velhas, que já estão sumindo.
+                excesso = len(self._rastro) - MAXIMO_RASTRO
+                if excesso > 0:
+                    del self._rastro[:excesso]
+        self._cursor_anterior = QPointF(self._cursor)
+
+    def _semear(self, ponto: QPointF) -> None:
+        """Uma faísca no material do jogo: ela se move como as partículas dele."""
+        r = self._sorteio_rastro
+        modo = self._efetiva.particulas
+        if modo == "brasas":
+            vx, vy = r.uniform(-14, 14), r.uniform(-46, -22)
+        elif modo == "motes":
+            vx, vy = r.uniform(-9, 9), r.uniform(-24, -8)
+        elif modo == "neve":
+            vx, vy = r.uniform(-12, 6), r.uniform(24, 52)
+        elif modo == "dados":
+            vx, vy = 0.0, r.uniform(90, 200)
+        else:
+            # Poeira, estática ou nenhuma partícula: um brilho que se espalha.
+            vx, vy = r.uniform(-16, 16), r.uniform(-16, 16)
+        tamanho = r.uniform(5.0, 11.0) if modo == "dados" else r.uniform(1.0, 2.1)
+        duracao = r.uniform(*VIDA_RASTRO)
+        self._rastro.append(
+            _Faisca(
+                ponto.x() + r.uniform(-3, 3), ponto.y() + r.uniform(-3, 3),
+                vx, vy, tamanho, duracao, duracao,
+            )
+        )
     def definir(self, tema: GameTheme, atmosfera: Atmosfera) -> None:
         self._tema = tema
         self._atmosfera = atmosfera
+        self._sorteio_rajada = random.Random(atmosfera.semente)
+        self._proxima_rajada = self._sorteio_rajada.uniform(*ESPERA_RAJADA)
+        self._rajada = None
+        self._sorteio_rastro = random.Random(atmosfera.semente * 3)
+        self._rastro.clear()
         self._invalidar()
         self._faixas.clear()
 
@@ -409,21 +891,55 @@ class Cenario:
         if not self.movimento:
             return
         antes = self._caixas_vivas()
+        luz_antes = self._caixa_luz()
+        onde_estava, forca_antes = QPointF(self._luz), self._forca_luz
         self._t += dt
+        self._seguir_cursor(dt)
+        luz_agora = self._caixa_luz()
+        andou = self._luz - onde_estava
+        if (
+            abs(andou.x()) + abs(andou.y()) < LUZ_PARADA
+            and abs(self._forca_luz - forca_antes) < 1e-4
+        ):
+            # Parada e acesa por igual, a luz não tem o que repintar. Com o
+            # cursor descansando sobre a janela — lendo a conversa, com a mão no
+            # mouse —, a caixa inteira dela era repintada a cada quadro das
+            # partículas, trinta vezes por segundo, idêntica.
+            self._luz_suja = []
+        else:
+            self._luz_suja = [c for c in (luz_antes, luz_agora) if c is not None]
         if self._enxame is not None:
-            self._enxame.avancar(dt)
+            # O cursor está em coordenadas da janela; o enxame é desenhado
+            # deslocado pelo parallax, e é contra ESSA posição que ele foge.
+            fuga = None if self._cursor is None else self._cursor - self._paralaxe
+            self._enxame.avancar(dt, fuga)
         if self._efetiva.interferencia > 0:
             self._avancar_interferencia(dt)
+        if self._efetiva.tremulacao > 0:
+            self._avancar_tremulacao(dt)
         # O que mudou é a união de onde as camadas vivas ESTAVAM com onde elas
         # ESTÃO: a caixa nova cobre a partícula desenhada, a velha apaga o
         # rastro que ela deixaria para trás.
-        self._sujas = antes + self._caixas_vivas()
+        self._sujas = _juntar_pares(antes, self._caixas_vivas())
 
     def _caixas_vivas(self) -> list[QRect]:
         """Caixas ocupadas pelas camadas que se movem, no estado atual."""
         caixas: list[QRect] = []
         if self._enxame is not None:
-            caixas += self._enxame.caixas()
+            caixas += self._enxame.caixas(self._paralaxe)
+        if self._forca_luz > 0.001:
+            caixas.append(self._caixa_anel.adjusted(-4, -4, 4, 4).toAlignedRect())
+        for centro, _ in self._ondas:
+            r = RAIO_ONDA + 4
+            caixas.append(QRectF(centro.x() - r, centro.y() - r, 2 * r, 2 * r).toAlignedRect())
+        dados = self._efetiva.particulas == "dados"
+        for faisca in self._rastro:
+            if dados:
+                area = QRectF(faisca.x, faisca.y, 1.4, faisca.tamanho)
+            else:
+                raio = faisca.tamanho * 3.2
+                area = QRectF(faisca.x - raio, faisca.y - raio, raio * 2, raio * 2)
+            caixas.append(area.adjusted(-3, -3, 3, 3).toAlignedRect())
         if self._faixas:
             largura = self._tamanho[0] or 1
             for y, altura, _ in self._faixas:
@@ -444,11 +960,12 @@ class Cenario:
 
         Duas camadas não têm recorte possível e devolvem ``None``, pedindo o
         quadro cheio: a tremulação do tubo, que é uma variação de brilho sobre
-        a imagem inteira, e o primeiro quadro depois de uma troca de tema.
+        a imagem inteira — enquanto dura uma rajada, e no quadro que a apaga —,
+        e o primeiro quadro depois de uma troca de tema.
         """
         if not self.movimento:
             return QRegion()
-        if self._efetiva.tremulacao > 0:
+        if self._efetiva.tremulacao > 0 and (self._rajada is not None or self._apagar_rajada):
             return None
         regiao = QRegion()
         for caixa in self._sujas:
@@ -463,8 +980,32 @@ class Cenario:
         interferência: para eles o relógio de quadros repintava,
         indefinidamente, uma imagem idêntica à anterior.
         """
+        # O enxame, e não o nome das partículas: com densidade zero — a receita
+        # só do cursor, ou uma intensidade tão baixa que zera a contagem — o
+        # nome continua lá e nenhuma partícula existe, e o relógio corria por
+        # nada.
         a = self._efetiva
-        return bool(a.particulas) or a.tremulacao > 0 or a.interferencia > 0
+        return self._enxame is not None or a.tremulacao > 0 or a.interferencia > 0
+
+    @property
+    def tremendo(self) -> bool:
+        """Há uma rajada de tremulação em curso?"""
+        return self._rajada is not None
+
+    def _avancar_tremulacao(self, dt: float) -> None:
+        """Conta o tempo da rajada em curso, ou o que falta para a próxima."""
+        tremia = self._rajada is not None
+        if self._rajada is None:
+            self._proxima_rajada -= dt
+            if self._proxima_rajada <= 0:
+                self._rajada = 0.0
+        else:
+            self._rajada += dt
+            if self._rajada >= DURACAO_RAJADA:
+                self._rajada = None
+                self._proxima_rajada = self._sorteio_rajada.uniform(*ESPERA_RAJADA)
+        # O brilho da rajada ficou na tela: o quadro seguinte também é cheio.
+        self._apagar_rajada = tremia and self._rajada is None
 
     def _avancar_interferencia(self, dt: float) -> None:
         """Faixas de ruído que aparecem em rajadas, não continuamente.
@@ -493,8 +1034,23 @@ class Cenario:
         if self._estatico is None:
             self._estatico = self._compor_estatico(largura, altura)
         pintor.drawPixmap(0, 0, self._estatico)
+        self.pintar_luz(pintor)
 
-    def pintar_sobreposicao(self, pintor: QPainter, largura: int, altura: int) -> None:
+    def pintar_cursor(self, pintor: QPainter) -> None:
+        """O que acompanha o cursor no vidro: o rastro, o anel e as ondas.
+
+        Separado do resto do vidro para quem desenha o vidro estático por
+        baixo do conteúdo e quer o cursor por cima dele, como o caderno.
+        """
+        if self._tema is None or not self.movimento:
+            return
+        if self._rastro:
+            self._pintar_rastro(pintor, QColor(self._efetiva.cor_viva or self._tema.accent))
+        self._pintar_anel_e_ondas(pintor)
+
+    def pintar_sobreposicao(
+        self, pintor: QPainter, largura: int, altura: int, *, com_cursor: bool = True
+    ) -> None:
         """Camada de vidro, desenhada POR CIMA de todo o conteúdo.
 
         É aqui que mora a diferença entre "um fundo bonito atrás da janela" e
@@ -514,7 +1070,10 @@ class Cenario:
         cor_viva = QColor(a.cor_viva or self._tema.accent)
 
         if self._enxame is not None and self.movimento:
-            self._enxame.pintar(pintor, cor_viva)
+            self._enxame.pintar(pintor, cor_viva, self._paralaxe)
+
+        if com_cursor:
+            self.pintar_cursor(pintor)
 
         if self._faixas and self.movimento:
             pintor.save()
@@ -527,18 +1086,153 @@ class Cenario:
                 pintor.drawRect(QRectF(0, y, largura, h))
             pintor.restore()
 
-        if a.tremulacao > 0 and self.movimento:
-            # Tremulação do tubo: uma oscilação lenta somada a um chiado
-            # rápido de amplitude menor. Uma senoide sozinha parece pulsação
-            # de LED, não tela velha.
-            osc = math.sin(self._t * 5.1) * 0.6 + math.sin(self._t * 31.7) * 0.4
-            if osc > 0:
+        if a.tremulacao > 0 and self.movimento and self._rajada is not None:
+            # O soluço do tubo: o brilho sobe e desce dentro da rajada, com um
+            # chiado rápido por cima. Uma senoide sozinha parece pulsação de
+            # LED, não tela velha.
+            envelope = math.sin(math.pi * min(1.0, self._rajada / DURACAO_RAJADA))
+            chiado = 0.6 + 0.4 * math.sin(self._rajada * 43.0)
+            forca = envelope * chiado * a.tremulacao * FORCA_RAJADA
+            if forca > 0:
                 pintor.save()
                 pintor.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
                 c = QColor(self._tema.primary)
-                c.setAlphaF(min(1.0, osc * a.tremulacao))
+                c.setAlphaF(min(1.0, forca))
                 pintor.fillRect(QRectF(0, 0, largura, altura), c)
                 pintor.restore()
+
+    def _pintar_rastro(self, pintor: QPainter, cor: QColor) -> None:
+        """As faíscas do rastro: somem apagando e encolhendo, como brasa."""
+        dados = self._efetiva.particulas == "dados"
+        desenho = desenho_de_particula(dados, cor)
+        fonte = QRectF(desenho.rect())
+        pintor.save()
+        pintor.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
+        pintor.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        for faisca in self._rastro:
+            resta = faisca.vida / faisca.duracao
+            pintor.setOpacity(min(1.0, BRILHO_RASTRO * resta * self._intensidade))
+            if dados:
+                pintor.drawPixmap(QRectF(faisca.x, faisca.y, 1.4, faisca.tamanho), desenho, fonte)
+                continue
+            raio = faisca.tamanho * 3.2 * (0.6 + 0.4 * resta)
+            pintor.drawPixmap(
+                QRectF(faisca.x - raio, faisca.y - raio, raio * 2, raio * 2), desenho, fonte
+            )
+        pintor.restore()
+
+    def _pintar_anel_e_ondas(self, pintor: QPainter) -> None:
+        """O anel que persegue o cursor e as ondas dos cliques, no vidro."""
+        if self._tema is None:
+            return
+        pintor.save()
+        pintor.setBrush(Qt.BrushStyle.NoBrush)
+        cor = QColor(self._tema.accent)
+        forca = self._forca_luz * self._intensidade
+        if forca > 0.001:
+            crescido = max(0.0, (self._raio_anel - RAIO_ANEL) / (RAIO_ANEL_CLICAVEL - RAIO_ANEL))
+            contorno = QColor(cor)
+            contorno.setAlphaF(min(1.0, 0.85 * forca))
+            caneta = QPen(contorno)
+            caneta.setWidthF(1.6)
+            pintor.setPen(caneta)
+            # Sobre o que é clicável, o anel ganha um miolo: vira alvo. Crescido
+            # em círculo — sobre um alvo grande demais para abraçar — o miolo
+            # é o de sempre; abraçando, quase nada, para não lavar o rótulo do
+            # botão por baixo dele.
+            alfa_miolo = max(
+                0.14 * crescido * (1.0 - self._forca_abraco), MIOLO_ABRACO * self._forca_abraco
+            )
+            if alfa_miolo > 0.002:
+                miolo = QColor(cor)
+                miolo.setAlphaF(min(1.0, alfa_miolo * forca))
+                pintor.setBrush(miolo)
+            # Um retângulo de canto igual à metade do lado é um círculo: a
+            # mesma chamada desenha o anel solto e o anel abraçando.
+            pintor.drawRoundedRect(self._caixa_anel, self._canto_anel, self._canto_anel)
+            pintor.setBrush(Qt.BrushStyle.NoBrush)
+        curva = QEasingCurve(QEasingCurve.Type.OutCubic)
+        for centro, idade in self._ondas:
+            progresso = idade / DURACAO_ONDA
+            raio = 8.0 + (RAIO_ONDA - 8.0) * curva.valueForProgress(progresso)
+            onda = QColor(cor)
+            onda.setAlphaF(max(0.0, 0.75 * (1.0 - progresso)) * self._intensidade)
+            caneta = QPen(onda)
+            caneta.setWidthF(0.6 + 2.2 * (1.0 - progresso))
+            pintor.setPen(caneta)
+            pintor.drawEllipse(centro, raio, raio)
+        pintor.restore()
+
+    def pintar_luz(self, pintor: QPainter, *, atenuacao: float = 1.0) -> None:
+        """A luz que segue o cursor: um halo largo e um núcleo, somados.
+
+        Pública para quem tem fundo próprio e quer só a luz por cima dele, como
+        o histórico; o fundo do cenário a chama sozinho. ``atenuacao`` é para
+        quem a mostra sem painel nenhum na frente: o brilho foi medido para
+        atravessar os painéis translúcidos, e num fundo nu ele estoura.
+
+        O halo tem a cor principal do tema e o núcleo, a de destaque: âmbar no
+        verde do Fallout, ciano no amarelo do Cyberpunk. Uma luz da mesma cor
+        do fundo se confundia com ele; duas cores fazem o ponto quente se ver.
+
+        A força entra como opacidade sobre o desenho pronto: a soma é linear,
+        e escalar o desenho inteiro é o mesmo que escalar cada gradiente.
+        """
+        if self._tema is None or self._forca_luz <= 0.001 or not self.movimento:
+            return
+        dispositivo = pintor.device()
+        densidade = dispositivo.devicePixelRatioF() if dispositivo is not None else 1.0
+        desenho = self._desenho_da_luz(densidade)
+        pintor.save()
+        pintor.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
+        pintor.setOpacity(min(1.0, self._forca_luz * self._intensidade * atenuacao))
+        pintor.drawPixmap(
+            QPointF(self._luz.x() - RAIO_LUZ, self._luz.y() - RAIO_LUZ), desenho
+        )
+        pintor.restore()
+
+    def _desenho_da_luz(self, densidade: float) -> QPixmap:
+        """Halo e núcleo compostos UMA vez por tema, em força cheia.
+
+        Dois gradientes radiais recalculados pixel a pixel a cada quadro
+        custavam 0,59 ms numa caixa de 680 px; copiar o desenho pronto com
+        opacidade custa 0,10. A luz se move a cada quadro, mas o desenho dela
+        não muda.
+        """
+        assert self._tema is not None
+        chave = (self._tema.primary, self._tema.accent, densidade)
+        if self._desenho_luz is not None and self._chave_luz == chave:
+            return self._desenho_luz
+        lado = math.ceil(2 * RAIO_LUZ * densidade)
+        imagem = QImage(lado, lado, QImage.Format.Format_ARGB32_Premultiplied)
+        imagem.setDevicePixelRatio(densidade)
+        imagem.fill(Qt.GlobalColor.transparent)
+        pintor = QPainter(imagem)
+        pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pintor.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
+        pintor.setPen(Qt.PenStyle.NoPen)
+        centro = QPointF(RAIO_LUZ, RAIO_LUZ)
+        camadas = (
+            (RAIO_LUZ, BRILHO_LUZ, self._tema.primary, MEIO_LUZ),
+            (RAIO_NUCLEO, BRILHO_NUCLEO, self._tema.accent, 0.4),
+        )
+        for raio, brilho, cor, degrau in camadas:
+            gradiente = QRadialGradient(centro, raio)
+            perto = QColor(cor)
+            perto.setAlphaF(min(1.0, brilho))
+            meio = QColor(perto)
+            meio.setAlphaF(perto.alphaF() * 0.35)
+            longe = QColor(perto)
+            longe.setAlphaF(0.0)
+            gradiente.setColorAt(0.0, perto)
+            gradiente.setColorAt(degrau, meio)
+            gradiente.setColorAt(1.0, longe)
+            pintor.setBrush(gradiente)
+            pintor.drawEllipse(centro, raio, raio)
+        pintor.end()
+        self._desenho_luz = QPixmap.fromImage(imagem)
+        self._chave_luz = chave
+        return self._desenho_luz
 
     def _compor_vidro(self, largura: int, altura: int) -> QPixmap:
         """Camadas fixas da sobreposição, também cacheadas num pixmap."""

@@ -17,6 +17,7 @@ import logging
 import queue
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -24,15 +25,20 @@ from PySide6.QtCore import (
     QEasingCurve,
     QEvent,
     QPoint,
+    QPointF,
     QPropertyAnimation,
+    QRectF,
+    QSizeF,
     Qt,
     QTimer,
 )
 from PySide6.QtGui import (
+    QColor,
     QFont,
     QFontDatabase,
     QFontMetrics,
     QPainter,
+    QPainterPath,
 )
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -70,10 +76,15 @@ from .caderno import JanelaCaderno
 from .componentes import (
     CampoSelecao,
     Desvanecer,
+    LuzDoCursor,
     TransicaoDeTema,
+    acender_borda,
+    definir_fonte_da_luz,
+    definir_movimento_reduzido,
 )
+from .cursor import CampoMagnetico, RastreadorDeCursor, abraco_de, centro_de
 from .dialogo import avisar
-from .estilo import folha_da_janela
+from .estilo import RAIO_PADRAO, RAIO_POR_FORMA, folha_da_janela
 from .moldura import (
     GripsRedimensionamento,
     aplicar_cantos_do_sistema,
@@ -111,12 +122,19 @@ class Sobreposicao(QWidget):
     """Vidro do aparelho: a camada que fica na frente de tudo.
 
     Transparente a eventos de mouse, para não roubar cliques. É o único widget
-    que repinta a cada quadro.
+    que repinta a cada quadro. ``pintar_bordas`` desenha, por cima do vidro, os
+    contornos que a luz do cursor acende nos painéis da janela.
     """
 
-    def __init__(self, cenario: Cenario, parent: QWidget) -> None:
+    def __init__(
+        self,
+        cenario: Cenario,
+        parent: QWidget,
+        pintar_bordas: Callable[[QPainter], None] | None = None,
+    ) -> None:
         super().__init__(parent)
         self._cenario = cenario
+        self._pintar_bordas = pintar_bordas
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -125,6 +143,8 @@ class Sobreposicao(QWidget):
         pintor = QPainter(self)
         pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
         self._cenario.pintar_sobreposicao(pintor, self.width(), self.height())
+        if self._pintar_bordas is not None:
+            self._pintar_bordas(pintor)
         pintor.end()
 
 
@@ -170,6 +190,10 @@ class Janela(QWidget):
         # meia dúzia de leitores usavam getattr com padrão para contornar a
         # janela em que ela não existia.
         self._intensidade_atmosfera = 1.0
+        # A mesma régua para os botões de todas as janelas: sem atmosfera, a luz
+        # dentro deles fica parada e nenhum é puxado pelo cursor.
+        definir_movimento_reduzido(lambda: self._intensidade_atmosfera <= 0.0)
+        definir_fonte_da_luz(self, self._luz_do_cursor)
         # O total que a lateral mostra agora. É contra ele que uma palavra
         # salva pela sessão se mede, para o sinal dizer QUANTAS entraram.
         self._total_no_caderno = 0
@@ -195,7 +219,7 @@ class Janela(QWidget):
 
         self._configurar_janela()
         self._montar()
-        self._sobreposicao = Sobreposicao(self._cenario, self)
+        self._sobreposicao = Sobreposicao(self._cenario, self, self._pintar_bordas_de_luz)
         self._sobreposicao.setGeometry(self.rect())
         self._sobreposicao.raise_()
         # As alças vêm depois da sobreposição: precisam do mouse, e ela é
@@ -216,9 +240,17 @@ class Janela(QWidget):
                 avancar_cenario=self._avancar_cenario,
                 sondar_jogo=self._sondar_jogo,
                 deve_animar=self._deve_animar,
+                interagindo=lambda: self._cenario.seguindo_cursor,
+                frequencia_da_tela=self._frequencia_da_tela,
             ),
         )
         self._relogios.iniciar()
+        # Depois dos relógios: o primeiro movimento já pede um quadro.
+        self._campo_magnetico = CampoMagnetico(self)
+        self._alvo_do_anel: QWidget | None = None
+        self._rastreador = RastreadorDeCursor(
+            self, self._cursor_mudou, self._clique, self._foco_mudou
+        )
         self._aplicar_preferencias()
         self._aplicar_tema()
         self._registrar_atalhos()
@@ -527,6 +559,9 @@ class Janela(QWidget):
         self._registrar(f"Ambiente: {tema.name}", Tag.SISTEMA)
         if retrato is not None:
             TransicaoDeTema(self, retrato)
+        # O nome do jogo novo se decifra no lugar do antigo, por baixo da
+        # dissolução — e continua depois dela, que é mais curta.
+        self.marca.decifrar()
 
     def _aplicar_tema(self) -> None:
         t = self._tema
@@ -561,8 +596,10 @@ class Janela(QWidget):
         )
         self.setStyleSheet(folha_da_janela(self._tema, self._atmosfera.forma))
         self._posicionar_veu()
+        raio = RAIO_POR_FORMA.get(self._atmosfera.forma, RAIO_PADRAO)
         for campo in self.campos.values():
             campo.definir_cor_seta(t.text_muted)
+            campo.definir_cor_luz(t.primary, raio_borda=raio)
         self._atualizar_pilula()
         self._campainha.aplicar_tema()
         if self._capsula is not None:
@@ -635,12 +672,13 @@ class Janela(QWidget):
         self._relogios.sincronizar_animacao()
         # O controle é de ACESSIBILIDADE, não de gosto: quem o baixa por causa
         # de cintilação ou baixa visão precisa que ele valha em toda superfície
-        # do programa. O caderno tem cenário próprio (sem relógio de quadros) e
-        # ficava de fora — desligar a atmosfera na janela principal continuava
-        # entregando varredura, grão e vinheta em intensidade cheia lá dentro,
-        # porque `movimento = False` só suprime as camadas VIVAS.
-        if self._caderno is not None:
-            self._caderno.definir_intensidade(self._intensidade_atmosfera)
+        # do programa. O caderno e o histórico têm cenário próprio e ficavam de
+        # fora — desligar a atmosfera na janela principal continuava entregando,
+        # lá dentro, varredura, grão e vinheta em intensidade cheia e, depois,
+        # a luz e o rastro do cursor.
+        for satelite in (self._caderno, self._visor_historico):
+            if satelite is not None:
+                satelite.definir_intensidade(self._intensidade_atmosfera)
         self.update()
         self._sobreposicao.update()
 
@@ -692,6 +730,9 @@ class Janela(QWidget):
         aplicar_cantos_do_sistema(self)
         if not self._ja_apareceu:
             self._ja_apareceu = True
+            # O aparelho liga: o nome dele se decifra na primeira vez que a
+            # janela aparece.
+            self.marca.decifrar()
             # O aparecimento tem a mesma cortesia do resto: um fade curto em
             # vez de um estalo — a menos que a atmosfera esteja desligada.
             if self._intensidade_atmosfera > 0.0:
@@ -748,7 +789,7 @@ class Janela(QWidget):
         """
         return (
             self._intensidade_atmosfera > 0.0
-            and self._cenario.tem_camada_viva
+            and self._cenario.precisa_quadros
             and self.isVisible()
             and not self.isMinimized()
         )
@@ -762,12 +803,106 @@ class Janela(QWidget):
         jogo. ``None`` é o pedido explícito do quadro cheio, que a tremulação
         do tubo continua fazendo.
         """
+        # A cada quadro, e não só a cada movimento: o botão magnético segue
+        # andando depois que o cursor para, e o anel que o abraça vai junto.
+        self._cenario.definir_abraco(abraco_de(self._alvo_do_anel, self))
         self._cenario.avancar(passo)
         regiao = self._cenario.regiao_suja()
         if regiao is None:
             self._sobreposicao.update()
-        elif not regiao.isEmpty():
-            self._sobreposicao.update(regiao)
+        else:
+            # A luz do cursor mora no FUNDO da janela: repintá-la é repintar a
+            # janela naquela região, o que leva junto os painéis e o vidro da
+            # frente. E o vidro é translúcido: repintar um pedaço dele já era
+            # repintar tudo o que está atrás. Por isso um pedido só, com as duas
+            # regiões unidas — as caixinhas de partícula e de faísca que caem
+            # dentro da caixa da luz somem nela. A área é a mesma, em muito menos
+            # retângulos, e cada retângulo a mais é um recorte a mais em cada
+            # desenho de cada widget embaixo dele.
+            regiao = regiao.united(self._cenario.regiao_da_luz())
+            if not regiao.isEmpty():
+                self.update(regiao)
+        # Assentada a luz, o passo volta ao de repouso — e, num ambiente sem
+        # partícula, o relógio para, mesmo com o mouse parado sobre a janela.
+        self._relogios.sincronizar_animacao()
+
+    def _luz_do_cursor(self) -> LuzDoCursor | None:
+        """A luz que anda pelo fundo, para os componentes acenderem as bordas.
+
+        A força já vem multiplicada pela intensidade da atmosfera: desligada,
+        ela é zero, e a luz não existe — nem para as bordas.
+        """
+        ponto, forca = self._cenario.luz
+        forca *= self._intensidade_atmosfera
+        if forca <= 0.01:
+            return None
+        return LuzDoCursor(self, ponto, forca, QColor(self._tema.accent))
+
+    def _pintar_bordas_de_luz(self, pintor: QPainter) -> None:
+        """Os contornos dos painéis, acesos pela luz do cursor, no vidro da janela.
+
+        O painel da conversa e o campo de texto não têm contorno em repouso —
+        são superfícies translúcidas sobre a atmosfera — e é justamente isso
+        que a luz revela quando o cursor se aproxima. Desenhados no vidro, e
+        não por eles: a folha de estilo pinta as duas superfícies, e o vidro é
+        a camada que já repinta junto com a luz.
+        """
+        raio = RAIO_POR_FORMA.get(self._atmosfera.forma, RAIO_PADRAO)
+        for painel, canto in ((self.conversa, raio + 4), (self.entrada_texto, raio + 2)):
+            if not painel.isVisible():
+                continue
+            caixa = QRectF(
+                QPointF(painel.mapTo(self, QPoint(0, 0))), QSizeF(painel.size())
+            ).adjusted(0.5, 0.5, -0.5, -0.5)
+            contorno = QPainterPath()
+            contorno.addRoundedRect(caixa, canto, canto)
+            acender_borda(pintor, self._sobreposicao, contorno)
+        # O fio que separa a coluna lateral do palco.
+        if self.coluna_lateral.isVisible():
+            topo = self.coluna_lateral.mapTo(self, QPoint(self.coluna_lateral.width(), 0))
+            fio = QPainterPath(QPointF(topo.x() - 0.5, topo.y()))
+            fio.lineTo(QPointF(topo.x() - 0.5, topo.y() + self.coluna_lateral.height()))
+            acender_borda(pintor, self._sobreposicao, fio, largura=1.6)
+
+    def _frequencia_da_tela(self) -> float:
+        tela = self.screen()
+        return tela.refreshRate() if tela is not None else 0.0
+
+    def _cursor_mudou(self, ponto: QPointF | None, alvo: QWidget | None = None) -> None:
+        """O cursor andou sobre a janela (ou saiu dela, com ``None``).
+
+        A atmosfera ganha uma luz que o segue e partículas que fogem dele, e o
+        botão principal o sente chegando. Com a atmosfera desligada, nada
+        disso existe: é a mesma régua de todo o movimento do programa.
+        """
+        if self._intensidade_atmosfera <= 0.0:
+            ponto = None
+        # O clicável sob o cursor: o anel o abraça, em vez de só crescer.
+        self._alvo_do_anel = alvo if ponto is not None else None
+        self._cenario.definir_cursor(ponto, sobre_clicavel=self._alvo_do_anel is not None)
+        self._cenario.definir_abraco(abraco_de(self._alvo_do_anel, self))
+        self._campo_magnetico.mover(ponto)
+        # Sempre, e não só com o relógio parado: com ele correndo no passo de
+        # repouso, é aqui que ele acelera para acompanhar o cursor.
+        self._relogios.sincronizar_animacao()
+
+    def _foco_mudou(self, alvo: QWidget) -> None:
+        """O teclado levou o foco para outro lugar: a luz vai junto.
+
+        Navegar por Tab era invisível fora do anel de foco de cada widget,
+        enquanto o mouse tinha luz, anel e rastro. Agora o foco de TECLADO
+        move a luz para o meio do campo que o recebeu — com o rastro mostrando
+        o caminho — e o anel o abraça, como faria o cursor. O foco vindo do
+        mouse não passa por aqui: quem clicou já tem o cursor no lugar.
+        """
+        self._cursor_mudou(centro_de(alvo, self), alvo)
+
+    def _clique(self, ponto: QPointF) -> None:
+        """Todo clique na janela solta uma onda do ponto tocado."""
+        if self._intensidade_atmosfera <= 0.0:
+            return
+        self._cenario.pulsar(ponto)
+        self._relogios.sincronizar_animacao()
 
     def _atualizar_medidor(self) -> None:
         self.medidor.definir_ativo(self.sessao_ativa)
@@ -1210,6 +1345,47 @@ class Janela(QWidget):
             self._registrar(
                 f"Áudio do jogo {'ativado' if efetivo else 'desativado'}.", Tag.SISTEMA
             )
+
+    def dica_do_caderno(self, palavra: str) -> str:
+        """O que o caderno sabe sobre ``palavra``, para a dica da fala.
+
+        A conversa passa a reconhecer o próprio vocabulário do jogador: a
+        palavra que ele já ensinou ao caderno chega com a tradução e a data da
+        próxima revisão, sem rede nenhuma — é tudo do banco local. A que ele
+        não tem ensina o gesto, que de outro modo ninguém descobriria.
+        """
+        entrada = self._store.entrada(palavra)
+        if entrada is None:
+            return "Clique para perguntar o que significa"
+        dias = entrada.dias_ate_revisao
+        if dias <= 0:
+            quando = "para revisar"
+        elif dias == 1:
+            quando = "revisar amanhã"
+        else:
+            quando = f"revisar em {dias} dias"
+        return f"{entrada.termo} — {entrada.traducao} · {quando} · do seu caderno"
+
+    def perguntar_sobre(self, palavra: str) -> None:
+        """Escreve no campo a pergunta sobre ``palavra``, tocada numa fala.
+
+        A palavra desconhecida está no meio da frase que o tutor acabou de
+        dizer, e perguntar por ela exigia digitá-la de novo. Escreve, e não
+        envia: a mesma regra das fichas da tela inicial.
+        """
+        self.propor_texto(f"O que significa ‘{palavra}’?")
+
+    def propor_texto(self, texto: str) -> None:
+        """Escreve ``texto`` no campo de digitação, com o foco, e NÃO envia.
+
+        As fichas de exemplo da tela inicial chegam aqui. Enviar é um gesto de
+        quem digita: abre a conversa com a API, e sem sessão só responde
+        "Inicie uma sessão".
+        """
+        # setText já leva o cursor ao fim da linha: a frase fica pronta para
+        # continuar sendo escrita, e não para ser sobrescrita.
+        self.entrada_texto.setText(texto)
+        self.entrada_texto.setFocus()
 
     def enviar_texto(self) -> None:
         texto = self.entrada_texto.text().strip()

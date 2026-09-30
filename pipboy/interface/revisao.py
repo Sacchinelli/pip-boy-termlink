@@ -41,7 +41,9 @@ from PySide6.QtWidgets import (
 from .. import design
 from ..revisao import RodadaDeRevisao
 from ..vocabulary import VocabularyStore
-from .componentes import Botao, RotuloElidido, caminho_forma
+from .atmosfera import ATENUACAO_NO_FUNDO_NU, Cenario, so_o_cursor
+from .componentes import Botao, RotuloElidido, acender_borda, caminho_forma
+from .cursor import CursorVivo
 from .movimento import ImagemQueSai, Transicao, animar_entrada
 
 LARGURA = 520
@@ -257,6 +259,25 @@ class JanelaRevisao(QDialog):
         self._botao_nova.clicked.connect(self._nova_rodada)
         acoes.addWidget(self._botao_nova)
         coluna.addLayout(acoes)
+        # As ações são puxadas pelo cursor que se aproxima, como na janela
+        # principal. Quem responde pelo teclado não é afetado.
+        for botao in (
+            self._botao_sair, self._botao_errei, self._botao_acertei,
+            self._botao_revelar, self._botao_nova,
+        ):
+            botao.tornar_magnetico(4)
+        # A mesma resposta ao cursor das outras janelas: luz pelo fundo, anel,
+        # ondas, rastro e as bordas acesas. Sem movimento próprio no cenário —
+        # quem está revisando está lendo uma palavra —, o relógio daqui só corre
+        # enquanto o cursor se mexe.
+        self._cenario = Cenario()
+        self._cenario.definir_intensidade(janela.intensidade_atmosfera)
+        self._cenario.movimento = janela.intensidade_atmosfera > 0.0
+        self._cenario.definir(janela.tema, so_o_cursor(janela.atmosfera))
+        self._cursor_vivo = CursorVivo(
+            self, self._cenario, cor=lambda: self._janela.tema.accent
+        )
+        self._campo_magnetico = self._cursor_vivo.campo
 
         # A borda acende na cor do resultado e apaga: sobe rápido, desce devagar.
         self._lampejo = 0.0
@@ -401,6 +422,21 @@ class JanelaRevisao(QDialog):
             reduzir=self._movimento_reduzido(),
         )
 
+    # ------------------------------------------------------------- Moldura
+    def resizeEvent(self, evento: Any) -> None:
+        super().resizeEvent(evento)
+        if hasattr(self, "_cursor_vivo"):
+            self._cursor_vivo.reposicionar()
+
+    def showEvent(self, evento: Any) -> None:
+        super().showEvent(evento)
+        self._cursor_vivo.reposicionar()
+
+    def hideEvent(self, evento: Any) -> None:
+        super().hideEvent(evento)
+        # Escondida, ela não recebe o aviso de que o cursor saiu.
+        self._cursor_vivo.esquecer()
+
     # ------------------------------------------------------------- Pintura
     def _repintar_lampejo(self, valor: Any) -> None:
         self._lampejo = float(valor)
@@ -415,6 +451,13 @@ class JanelaRevisao(QDialog):
         pintor.setPen(Qt.PenStyle.NoPen)
         pintor.setBrush(QColor(self._fundo))
         pintor.drawPath(caminho)
+        # A luz do cursor sobre o fundo liso, recortada na moldura e atenuada:
+        # aqui não há painel translúcido na frente dela.
+        pintor.save()
+        pintor.setClipPath(caminho)
+        self._cenario.pintar_luz(pintor, atenuacao=ATENUACAO_NO_FUNDO_NU)
+        pintor.restore()
+        acender_borda(pintor, self, caminho)
         caneta = QPen(QColor(design.misturar(self._borda, self._cor_lampejo, self._lampejo)))
         caneta.setWidthF(1.0 + self._lampejo)
         pintor.setPen(caneta)

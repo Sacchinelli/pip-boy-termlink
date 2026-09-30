@@ -454,6 +454,25 @@ class VocabularyStore:
 
     _VENCIDAS_WHERE = "(proxima_revisao = '' OR proxima_revisao <= ?)"
 
+    def entrada(self, termo: str) -> Entrada | None:
+        """A palavra do caderno com este termo, ou ``None`` se ela não está lá.
+
+        Uma consulta pelo índice único de ``termo``, que ignora maiúsculas: é
+        o que permite perguntar ao caderno, no meio de uma fala, se aquela
+        palavra ali já foi ensinada.
+        """
+        termo = " ".join(termo.split()).strip()
+        if not termo:
+            return None
+        with self._lock:
+            # O COLLATE aqui é redundante — a COLUNA já é NOCASE, e é dela que
+            # vem a comparação —, e está escrito como nas consultas irmãs para
+            # a leitura não depender de lembrar esse detalhe do esquema.
+            linha = self._connection.execute(
+                "SELECT * FROM vocabulario WHERE termo = ? COLLATE NOCASE", (termo,)
+            ).fetchone()
+        return None if linha is None else self._linha_para_entrada(linha)
+
     def para_revisar(self, limite: int = 10) -> list[Entrada]:
         """Palavras vencidas, da mais atrasada para a mais recente.
 

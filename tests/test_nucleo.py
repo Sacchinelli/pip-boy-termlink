@@ -105,6 +105,18 @@ def teste_vocabulario() -> None:
     checar(store.total() == 1, "índice único ignora maiúsculas")
 
     store.registrar("ghoul", "carniçal")
+
+    # -- Consulta por termo: é o que permite perguntar ao caderno, no meio de
+    #    uma fala, se aquela palavra ali já foi ensinada.
+    achada = store.entrada("WasteLand")
+    checar(
+        achada is not None and achada.termo == "wasteland" and achada.traducao == "ermo",
+        "o caderno acha uma palavra pelo termo, sem se importar com maiúsculas",
+    )
+    checar(store.entrada("  ghoul  ") is not None, "e com espaços sobrando em volta")
+    checar(store.entrada("stimpak") is None, "o que não está lá devolve nada")
+    checar(store.entrada("   ") is None, "e um termo vazio não vira uma varredura")
+
     destino = Path(tempfile.mkdtemp()) / "anki.txt"
     checar(store.exportar_csv(destino) == 2, "exportação TSV para Anki")
     checar("\t" in destino.read_text(encoding="utf-8"), "separador é tabulação")

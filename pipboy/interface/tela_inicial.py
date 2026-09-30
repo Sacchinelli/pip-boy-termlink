@@ -11,7 +11,8 @@ Esta tela responde às três perguntas de quem abre um programa de voz:
   Elden Ring, "Conectar" no Cyberpunk — e o atalho que funciona de dentro do
   jogo, que é onde o programa é usado.
 * **O que eu digo?** Três exemplos, um deles com uma palavra vencida do próprio
-  caderno quando existe uma: ninguém sabe o que perguntar a um microfone.
+  caderno quando existe uma: ninguém sabe o que perguntar a um microfone. Cada
+  exemplo é uma ficha que se toca: o clique o escreve no campo de texto.
 * **O que dá para fazer sem sessão?** Revisar, abrir o caderno e o histórico,
   com os números de agora e a tecla de cada um. Nada disso gasta a chave.
 
@@ -23,10 +24,11 @@ aparece é a ``Conversa``.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from PySide6.QtCore import QEvent, QRectF, QSize, Qt
+from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import (
     QColor,
     QEnterEvent,
@@ -35,6 +37,7 @@ from PySide6.QtGui import (
     QHoverEvent,
     QPainter,
     QPen,
+    QTransform,
 )
 from PySide6.QtWidgets import (
     QAbstractButton,
@@ -47,7 +50,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import design
-from .componentes import Holofote, caminho_forma
+from .componentes import Holofote, RotuloDecifravel, acender_borda, caminho_forma
 from .movimento import animar_entrada
 
 
@@ -108,6 +111,12 @@ class CartaoAcao(QAbstractButton):
     """
 
     RESPIRO = 14
+    # O cartão inclina em direção ao cursor, até este ângulo em cada eixo, com
+    # uma perspectiva curta o bastante para a inclinação se VER num cartão
+    # pequeno. A folga em volta do corpo é o espaço que a inclinação ocupa.
+    INCLINACAO = 12.0
+    DISTANCIA = 340.0
+    FOLGA_3D = 6
 
     def __init__(
         self, glifo: str, titulo: str, tecla: str, *, janela: Any, parent: QWidget | None = None
@@ -119,14 +128,14 @@ class CartaoAcao(QAbstractButton):
         self._detalhe = ""
         self._destaque = False
         self._sob_cursor = False
+        self._focado = False
         self.setText(titulo)
         self.setAccessibleName(titulo)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self._holofote = Holofote(
-            self, reduzir=lambda: bool(janela.intensidade_atmosfera <= 0.0)
-        )
+        self._reduzir: Callable[[], bool] = lambda: bool(janela.intensidade_atmosfera <= 0.0)
+        self._holofote = Holofote(self, reduzir=self._reduzir)
 
     @property
     def detalhe(self) -> str:
@@ -150,7 +159,7 @@ class CartaoAcao(QAbstractButton):
         # junto quando o tamanho do texto muda.
         titulo = QFontMetrics(self._janela.fonte("corpo_forte")).height()
         detalhe = QFontMetrics(self._janela.fonte("micro")).height()
-        return QSize(190, self.RESPIRO * 2 + titulo + 4 + detalhe)
+        return QSize(190, self.RESPIRO * 2 + titulo + 4 + detalhe + 2 * self.FOLGA_3D)
 
     def minimumSizeHint(self) -> QSize:
         return QSize(150, self.sizeHint().height())
@@ -166,7 +175,41 @@ class CartaoAcao(QAbstractButton):
             m_titulo.horizontalAdvance(self.text()) + 8 + tecla,
             m_micro.horizontalAdvance(self._detalhe),
         )
-        return glifo + conteudo + self.RESPIRO * 2 + 4
+        return glifo + conteudo + self.RESPIRO * 2 + 4 + 2 * self.FOLGA_3D
+
+    def inclinacao(self) -> tuple[float, float]:
+        """Os ângulos, em torno de Y e de X, com que o cartão segue o cursor.
+
+        O lado sob o cursor afunda e o oposto sobe, como um cartão de verdade
+        empurrado com o dedo. A inclinação acompanha a luz: acende junto ao
+        entrar e volta ao plano junto ao sair. Pelo teclado não há de onde
+        inclinar — o cartão só acende.
+        """
+        luz = self._holofote.valor
+        cursor = self._holofote.cursor
+        if luz <= 0.01 or cursor is None or self._reduzir():
+            return 0.0, 0.0
+        if self._focado and not self._sob_cursor:
+            return 0.0, 0.0
+        largura, altura = max(1, self.width()), max(1, self.height())
+        dx = max(-1.0, min(1.0, (cursor.x() / largura - 0.5) * 2))
+        dy = max(-1.0, min(1.0, (cursor.y() / altura - 0.5) * 2))
+        # Sinais escolhidos olhando a tela: com eles, o lado sob o cursor afasta.
+        return -dx * self.INCLINACAO * luz, dy * self.INCLINACAO * luz
+
+    def _transformacao(self) -> QTransform | None:
+        giro_y, giro_x = self.inclinacao()
+        if giro_y == 0.0 and giro_x == 0.0:
+            return None
+        centro = QPointF(self.rect().center())
+        realce = 1.0 + 0.035 * self._holofote.valor
+        transformacao = QTransform()
+        transformacao.translate(centro.x(), centro.y())
+        transformacao.rotate(giro_y, Qt.Axis.YAxis, self.DISTANCIA)
+        transformacao.rotate(giro_x, Qt.Axis.XAxis, self.DISTANCIA)
+        transformacao.scale(realce, realce)
+        transformacao.translate(-centro.x(), -centro.y())
+        return transformacao
 
     # -- presença
     def enterEvent(self, evento: QEnterEvent) -> None:
@@ -187,11 +230,13 @@ class CartaoAcao(QAbstractButton):
 
     def focusInEvent(self, evento: QFocusEvent) -> None:
         super().focusInEvent(evento)
+        self._focado = True
         self._holofote.acender(True)
         self.update()
 
     def focusOutEvent(self, evento: QFocusEvent) -> None:
         super().focusOutEvent(evento)
+        self._focado = False
         self._holofote.acender(self._sob_cursor)
         self.update()
 
@@ -202,19 +247,25 @@ class CartaoAcao(QAbstractButton):
         forma = janela.atmosfera.forma
         pintor = QPainter(self)
         pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pintor.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        transformacao = self._transformacao()
+        if transformacao is not None:
+            pintor.setTransform(transformacao)
 
         # Afunda 1 px enquanto pressionado, como o Botao.
         recuo = 1.0 if self.isDown() else 0.0
-        area = QRectF(self.rect()).adjusted(0.5, 0.5 + recuo, -0.5, -0.5 + recuo)
+        f = self.FOLGA_3D
+        area = QRectF(self.rect()).adjusted(0.5 + f, 0.5 + f + recuo, -0.5 - f, -0.5 - f + recuo)
         fundo = t.surface_alta
         cor = t.accent if self._destaque else t.primary
         borda = design.misturar(t.border, t.accent, 0.45) if self._destaque else t.border
         focado = self.hasFocus()
+        contorno = caminho_forma(area, forma, design.RAIO)
         self._holofote.pintar(
-            pintor, caminho_forma(area, forma, design.RAIO),
-            fundo=fundo, cor=cor, borda=borda,
+            pintor, contorno, fundo=fundo, cor=cor, borda=borda,
             foco=self if focado and not self._sob_cursor else None,
         )
+        acender_borda(pintor, self, contorno)
         if focado:
             anel = QPen(QColor(design.garantir_contraste(cor, fundo, 3.0)))
             anel.setWidthF(1.6)
@@ -281,6 +332,138 @@ class CartaoAcao(QAbstractButton):
         pintor.end()
 
 
+class FichaSugestao(QAbstractButton):
+    """Um exemplo do que dizer que se toca: o clique o escreve no campo de texto.
+
+    Os exemplos eram uma linha de texto parada — diziam o que perguntar, mas
+    não davam um jeito de começar. Cada um virou uma ficha que acende e sobe de
+    leve sob o cursor, como os cartões ao lado, e que leva a frase para o campo
+    de texto, com o foco e o cursor no fim, pronta para ir.
+
+    Leva, e não envia. Enviar abre uma conversa com a API, e sem sessão ativa
+    só produz "Inicie uma sessão antes de enviar mensagens": quem decide
+    mandar é quem aperta Enter.
+
+    Pintada por inteiro, como o ``CartaoAcao``, e pelo mesmo ``Holofote``.
+    """
+
+    RESPIRO_X = 13
+    RESPIRO_Y = 5
+    # Quanto a ficha sobe sob o cursor. A altura do widget já reserva esse
+    # espaço em cima: um widget não pinta fora de si.
+    SUBIDA = 2.0
+
+    def __init__(self, frase: str, *, janela: Any, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._janela = janela
+        self._frase = ""
+        self._sob_cursor = False
+        self._focado = False
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.setToolTip("Escreve esta pergunta no campo de texto, sem enviar")
+        self._reduzir: Callable[[], bool] = lambda: bool(janela.intensidade_atmosfera <= 0.0)
+        self._holofote = Holofote(self, reduzir=self._reduzir)
+        self.definir_frase(frase)
+
+    @property
+    def frase(self) -> str:
+        return self._frase
+
+    def definir_frase(self, frase: str) -> None:
+        self._frase = frase
+        self.setText(f"“{frase}”")
+        self.setAccessibleName(f"Escrever no campo de texto: {frase}")
+        self.updateGeometry()
+        self.update()
+
+    def _fonte(self) -> Any:
+        return self._janela.fonte("vocab", ui=False)
+
+    def sizeHint(self) -> QSize:
+        metricas = QFontMetrics(self._fonte())
+        return QSize(
+            metricas.horizontalAdvance(self.text()) + 2 * self.RESPIRO_X,
+            metricas.height() + 2 * self.RESPIRO_Y + round(self.SUBIDA),
+        )
+
+    def minimumSizeHint(self) -> QSize:
+        return self.sizeHint()
+
+    @property
+    def elevacao(self) -> float:
+        """Quanto a ficha subiu agora, em pixels."""
+        return 0.0 if self._reduzir() else self.SUBIDA * self._holofote.valor
+
+    @property
+    def corpo(self) -> QRectF:
+        """A ficha desenhada, já subida: é o que o anel do cursor abraça."""
+        return QRectF(self.rect()).adjusted(0.5, 0.5 + self.SUBIDA, -0.5, -0.5).translated(
+            0.0, -self.elevacao
+        )
+
+    @property
+    def raio_borda(self) -> float:
+        """O canto da ficha: pílula no tema arredondado; o do tema nos outros."""
+        forma = self._janela.atmosfera.forma
+        return {"chanfrada": 3.0, "reta": 2.0}.get(forma, self.corpo.height() / 2)
+
+    # -- presença
+    def enterEvent(self, evento: QEnterEvent) -> None:
+        self._sob_cursor = True
+        self._holofote.seguir(evento.position())
+        self._holofote.acender(True)
+        super().enterEvent(evento)
+
+    def leaveEvent(self, evento: QEvent) -> None:
+        self._sob_cursor = False
+        self._holofote.acender(self.hasFocus())
+        super().leaveEvent(evento)
+
+    def event(self, evento: QEvent) -> bool:
+        if evento.type() == QEvent.Type.HoverMove and isinstance(evento, QHoverEvent):
+            self._holofote.seguir(evento.position())
+        return super().event(evento)
+
+    def focusInEvent(self, evento: QFocusEvent) -> None:
+        super().focusInEvent(evento)
+        self._focado = True
+        self._holofote.acender(True)
+
+    def focusOutEvent(self, evento: QFocusEvent) -> None:
+        super().focusOutEvent(evento)
+        self._focado = False
+        self._holofote.acender(self._sob_cursor)
+
+    # -- desenho
+    def paintEvent(self, _evento: Any) -> None:
+        t = self._janela.tema
+        forma = self._janela.atmosfera.forma
+        pintor = QPainter(self)
+        pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+        area = self.corpo
+        caminho = caminho_forma(area, forma, area.height() / 2)
+        fundo = t.surface_alta
+        self._holofote.pintar(
+            pintor, caminho, fundo=fundo, cor=t.accent, borda=t.border,
+            foco=self if self._focado and not self._sob_cursor else None,
+        )
+        acender_borda(pintor, self, caminho)
+        if self.hasFocus():
+            anel = QPen(QColor(design.garantir_contraste(t.accent, fundo, 3.0)))
+            anel.setWidthF(1.6)
+            pintor.setPen(anel)
+            pintor.setBrush(Qt.BrushStyle.NoBrush)
+            pintor.drawPath(
+                caminho_forma(area.adjusted(2.5, 2.5, -2.5, -2.5), forma, area.height() / 2 - 2.5)
+            )
+        pintor.setFont(self._fonte())
+        pintor.setPen(QColor(design.garantir_contraste(t.info_text, fundo)))
+        pintor.drawText(area, int(Qt.AlignmentFlag.AlignCenter), self.text())
+        pintor.end()
+
+
 class TelaInicial(QWidget):
     """O que a conversa mostra enquanto não há conversa."""
 
@@ -314,8 +497,10 @@ class TelaInicial(QWidget):
             return item
 
         self.glifo = rotulo("inicialGlifo")
-        self.titulo = rotulo("inicialTitulo")
-        self.titulo.setText("Pronto para ouvir")
+        # O título se decifra quando a tela chega, como um terminal que liga.
+        self.titulo = RotuloDecifravel("Pronto para ouvir", objectName="inicialTitulo")
+        self.titulo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.titulo.setWordWrap(True)
         self.corpo = rotulo("inicialCorpo")
         self.sequencia = rotulo("inicialSequencia")
 
@@ -338,9 +523,17 @@ class TelaInicial(QWidget):
         pilha.setSpacing(design.ESPACO_XS)
         self.secao_exemplos = rotulo("inicialSecao")
         self.secao_exemplos.setText("EXPERIMENTE DIZER")
-        self.exemplos = rotulo("inicialExemplos")
         pilha.addWidget(self.secao_exemplos)
-        pilha.addWidget(self.exemplos)
+        # As fichas lado a lado, centradas; uma sobre a outra quando não cabem.
+        self._fileira_fichas = QBoxLayout(QBoxLayout.Direction.LeftToRight)
+        self._fileira_fichas.setSpacing(design.ESPACO_SM)
+        self.fichas = [FichaSugestao("", janela=janela) for _ in range(3)]
+        self._fileira_fichas.addStretch(1)
+        for ficha in self.fichas:
+            ficha.clicked.connect(lambda _marcado=False, f=ficha: janela.propor_texto(f.frase))
+            self._fileira_fichas.addWidget(ficha, 0, Qt.AlignmentFlag.AlignHCenter)
+        self._fileira_fichas.addStretch(1)
+        pilha.addLayout(self._fileira_fichas)
 
         rodape = QWidget()
         base = QVBoxLayout(rodape)
@@ -373,7 +566,7 @@ class TelaInicial(QWidget):
         self.titulo.setFont(janela.fonte("display", ui=False))
         for item, papel in (
             (self.corpo, "corpo"), (self.sequencia, "legenda"), (self.secao_exemplos, "secao"),
-            (self.exemplos, "vocab"), (self.atalhos, "micro"), (self.diagnostico, "micro"),
+            (self.atalhos, "micro"), (self.diagnostico, "micro"),
         ):
             item.setFont(janela.fonte(papel, ui=papel != "vocab"))
 
@@ -411,15 +604,14 @@ class TelaInicial(QWidget):
             if resumo.conversas else "Nenhuma ainda"
         )
 
-        # Espaços inseparáveis DENTRO de cada exemplo: a quebra de linha só
-        # cai entre um exemplo e outro, nunca no meio de uma pergunta.
         palavra = resumo.palavra or "loot"
         frases = (
-            f"“O que significa ‘{palavra}’?”",
-            "“Como se diz ‘mochila’ em inglês?”",
-            "“Qual a diferença entre ‘will’ e ‘going to’?”",
+            f"O que significa ‘{palavra}’?",
+            "Como se diz ‘mochila’ em inglês?",
+            "Qual a diferença entre ‘will’ e ‘going to’?",
         )
-        self.exemplos.setText("     ".join(f.replace(" ", " ") for f in frases))
+        for ficha, frase in zip(self.fichas, frases, strict=True):
+            ficha.definir_frase(frase)
 
         self.atalhos.setText(
             "Atalhos globais: "
@@ -435,7 +627,6 @@ class TelaInicial(QWidget):
             #inicialCorpo {{ color: {t.text_muted}; }}
             #inicialSequencia {{ color: {t.accent_text}; }}
             #inicialSecao {{ color: {t.text_muted}; letter-spacing: 1px; }}
-            #inicialExemplos {{ color: {t.info_text}; }}
             #inicialRodape {{ color: {t.text_muted}; }}
         """)
         for cartao in (self.cartao_revisar, self.cartao_caderno, self.cartao_historico):
@@ -462,14 +653,27 @@ class TelaInicial(QWidget):
         )
         if self._fileira.direction() != direcao:
             self._fileira.setDirection(direcao)
+        # As fichas: numa linha quando as três cabem, uma sobre a outra quando não.
+        fichas = sum(f.sizeHint().width() for f in self.fichas)
+        cabem = fichas + (len(self.fichas) - 1) * design.ESPACO_SM <= disponivel
+        direcao_fichas = (
+            QBoxLayout.Direction.LeftToRight if cabem else QBoxLayout.Direction.TopToBottom
+        )
+        if self._fileira_fichas.direction() != direcao_fichas:
+            self._fileira_fichas.setDirection(direcao_fichas)
 
     @property
     def empilhada(self) -> bool:
         return self._fileira.direction() == QBoxLayout.Direction.TopToBottom
 
+    @property
+    def fichas_empilhadas(self) -> bool:
+        return self._fileira_fichas.direction() == QBoxLayout.Direction.TopToBottom
+
     def entrar(self) -> None:
-        """Cascata de cima para baixo, na ordem de leitura."""
+        """Cascata de cima para baixo, na ordem de leitura, e o título se decifrando."""
         animar_entrada(
             [bloco for bloco in self._blocos if not bloco.isHidden()],
             reduzir=bool(self._janela.intensidade_atmosfera <= 0.0),
         )
+        self.titulo.decifrar()

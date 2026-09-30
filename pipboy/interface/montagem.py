@@ -51,6 +51,7 @@ from .componentes import (
     Desvanecer,
     Medidor,
     Pilula,
+    RotuloDecifravel,
     RotuloElidido,
 )
 from .conversa import Conversa
@@ -116,13 +117,13 @@ class Moldura:
 class Lateral:
     """A coluna de escolhas: tudo que se decide ANTES de falar."""
 
-    marca: QLabel
+    marca: RotuloDecifravel
     submarca: QLabel
     # Os seletores também por nome, além do atributo: é assim que o travamento
     # de sessão percorre todos de uma vez, sem uma lista escrita à mão que
     # esqueceria o campo seguinte.
     campos: dict[str, CampoSelecao]
-    rotulos_secao: list[QLabel]
+    rotulos_secao: list[RotuloDecifravel]
     rotulos_campo: list[QLabel]
     campo_jogo: CampoSelecao
     campo_persona: CampoSelecao
@@ -255,7 +256,8 @@ def _lateral(janela: Janela, alvo: QWidget) -> Lateral:
     coluna.setContentsMargins(24, 22, 24, 16)
     coluna.setSpacing(0)
 
-    marca = QLabel(objectName="marca")
+    # O nome do aparelho e os títulos das seções se decifram sob o cursor.
+    marca = RotuloDecifravel(objectName="marca")
     coluna.addWidget(marca)
     submarca = QLabel(objectName="submarca")
     submarca.setWordWrap(True)
@@ -267,7 +269,7 @@ def _lateral(janela: Janela, alvo: QWidget) -> Lateral:
     # ficavam fora do alcance de qualquer repintura. Enquanto a rampa era fixa
     # isso nunca apareceu; com o tamanho do texto ajustável, seriam os únicos
     # rótulos da coluna a não crescer.
-    rotulos_secao: list[QLabel] = []
+    rotulos_secao: list[RotuloDecifravel] = []
     rotulos_campo: list[QLabel] = []
 
     def secao(titulo: str) -> None:
@@ -279,7 +281,7 @@ def _lateral(janela: Janela, alvo: QWidget) -> Lateral:
         linha = QHBoxLayout()
         linha.setContentsMargins(0, 0, 0, 0)
         linha.setSpacing(10)
-        rotulo = QLabel(titulo.upper(), objectName="secao")
+        rotulo = RotuloDecifravel(titulo.upper(), objectName="secao")
         rotulo.setFont(janela.fonte("secao"))
         rotulos_secao.append(rotulo)
         linha.addWidget(rotulo)
@@ -442,9 +444,11 @@ def _rodape(janela: Janela, alvo: QWidget) -> Rodape:
     # Uma porta só para o caderno. A exportação morava aqui e era a única coisa
     # que se podia fazer com o vocabulário salvo; agora ela é uma das ações lá
     # dentro, ao lado de ver, buscar e apagar.
+    # Os botões de ação também são magnéticos, com uma folga menor que a do
+    # INICIAR: o ímã deles é um aceno, não um convite.
     botao_caderno = Botao(
         f"{GLIFO_CADERNO}   Abrir caderno", variante="sutil",
-        paleta=janela.paleta, forma=janela.atmosfera.forma,
+        paleta=janela.paleta, forma=janela.atmosfera.forma, magnetico=True, folga_ima=4,
     )
     botao_caderno.setFont(janela.fonte("corpo_forte"))
     botao_caderno.setToolTip("Ver, buscar e exportar o vocabulário salvo (Ctrl+B)")
@@ -453,7 +457,7 @@ def _rodape(janela: Janela, alvo: QWidget) -> Rodape:
 
     botao_historico = Botao(
         "◷   Histórico", variante="sutil",
-        paleta=janela.paleta, forma=janela.atmosfera.forma,
+        paleta=janela.paleta, forma=janela.atmosfera.forma, magnetico=True, folga_ima=4,
     )
     botao_historico.setFont(janela.fonte("corpo_forte"))
     botao_historico.setToolTip(
@@ -494,7 +498,7 @@ def _palco(janela: Janela, alvo: QWidget) -> Palco:
 
     botao_mudo = Botao(
         f"{GLIFO_MIC_ATIVO}   Mudo", variante="acento", paleta=janela.paleta,
-        forma=janela.atmosfera.forma,
+        forma=janela.atmosfera.forma, magnetico=True, folga_ima=4,
     )
     botao_mudo.setFont(janela.fonte("corpo_forte"))
     botao_mudo.clicked.connect(janela.alternar_mudo)
@@ -502,9 +506,11 @@ def _palco(janela: Janela, alvo: QWidget) -> Palco:
     botao_mudo.setEnabled(False)
     barra.addWidget(botao_mudo)
 
+    # Magnético: o botão principal é puxado na direção do cursor quando ele
+    # chega perto, e acende antes do toque. É o convite da janela inteira.
     botao_acao = Botao(
         variante="primario", paleta=janela.paleta, forma=janela.atmosfera.forma,
-        largura_min=150,
+        largura_min=150, magnetico=True,
     )
     botao_acao.setFont(janela.fonte("corpo_forte"))
     botao_acao.clicked.connect(janela.alternar_sessao)
@@ -525,7 +531,8 @@ def _palco(janela: Janela, alvo: QWidget) -> Palco:
     entrada_texto.returnPressed.connect(janela.enviar_texto)
     linha.addWidget(entrada_texto, 1)
     botao_enviar = Botao(
-        "Enviar", variante="sutil", paleta=janela.paleta, forma=janela.atmosfera.forma
+        "Enviar", variante="sutil", paleta=janela.paleta, forma=janela.atmosfera.forma,
+        magnetico=True, folga_ima=4,
     )
     botao_enviar.setFont(janela.fonte("corpo_forte"))
     botao_enviar.clicked.connect(janela.enviar_texto)
