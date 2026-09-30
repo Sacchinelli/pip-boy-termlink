@@ -544,7 +544,7 @@ def main() -> int:
     checar(not revisao.grab().isNull(), "cartões de revisão desenham")
     revisao._revelar()
     aplicacao.processEvents()
-    revisao._responder(True)
+    revisao._responder("acerto")
     aplicacao.processEvents()
     checar(not revisao.grab().isNull(), "revisão sobrevive a revelar e responder")
     revisao.close()
@@ -1214,9 +1214,9 @@ def main() -> int:
             f"revelar não empurra os botões ({posicao_botoes} → {posicao_resposta})",
         )
 
-        rodada_ui._responder(True)
+        rodada_ui._responder("acerto")
         aplicacao.processEvents()
-        checar(rodada_ui._barra.resultados == [True], "acertar pinta o primeiro segmento")
+        checar(rodada_ui._barra.resultados == ["acerto"], "acertar pinta o primeiro segmento")
         checar(
             primeiro.termo in rodada_ui._recado.toolTip() and "volta" in rodada_ui._recado.toolTip(),
             f"e o recado diz quando a palavra volta ({rodada_ui._recado.toolTip()})",
@@ -1233,16 +1233,16 @@ def main() -> int:
         segundo = rodada_ui._rodada.atual
         assert segundo is not None
         rodada_ui._revelar()
-        rodada_ui._responder(False)
+        rodada_ui._responder("erro")
         aplicacao.processEvents()
-        checar(rodada_ui._barra.resultados == [True, False], "errar pinta o segmento seguinte")
+        checar(rodada_ui._barra.resultados == ["acerto", "erro"], "errar pinta o segmento seguinte")
         checar(
             rodada_ui._recado.toolTip() == f"{segundo.termo} volta na próxima rodada",
             f"e a palavra errada volta na próxima rodada ({rodada_ui._recado.toolTip()})",
         )
 
         rodada_ui._revelar()
-        rodada_ui._responder(False)
+        rodada_ui._responder("erro")
         aplicacao.processEvents()
         checar(
             rodada_ui._termo.text() == "1 acerto · 2 erros",
@@ -1268,7 +1268,7 @@ def main() -> int:
         janela.campo_atmosfera.setCurrentText("Desligada")
         aplicacao.processEvents()
         rodada_ui._revelar()
-        rodada_ui._responder(True)
+        rodada_ui._responder("acerto")
         checar(
             not rodada_ui._cartao.findChildren(ImagemQueSai),
             "com a atmosfera desligada o cartão troca num quadro",
@@ -1426,6 +1426,365 @@ def main() -> int:
     )
     calmo.close()
     janela.campo_atmosfera.setCurrentText(atmosfera_progresso)
+    aplicacao.processEvents()
+
+    print("o progresso que planeja")
+    from datetime import date as DiaPlano
+    from datetime import timedelta as IntervaloPlano
+
+    from PySide6.QtCore import QRectF as CaixaPlano
+    from PySide6.QtGui import QColor as CorPlano
+
+    from pipboy.interface import progresso as mod_progresso_plano
+    from pipboy.interface.progresso import (
+        FORMAS_DO_DIA,
+        caminho_do_dia,
+        descrever_dia,
+        descrever_previsao,
+        grade_do_calendario,
+        rotulo_do_dia,
+    )
+    from pipboy.interface.progresso import JanelaProgresso as ProgressoPlano
+
+    quarta = DiaPlano(2026, 9, 23)
+    checar(
+        [rotulo_do_dia(quarta + IntervaloPlano(days=i), quarta) for i in range(4)]
+        == ["hoje", "amanhã", "sex", "sáb"],
+        "a previsão chama os dias como se chama: hoje, amanhã, e o dia da semana",
+    )
+    dados_plano = [(quarta + IntervaloPlano(days=i), n) for i, n in enumerate((4, 1, 0))]
+    checar(
+        descrever_previsao(dados_plano, 0) == ("qua, 23/09 · hoje", "4 palavras vencem hoje")
+        and descrever_previsao(dados_plano, 1) == ("qui, 24/09", "1 palavra vence")
+        and descrever_previsao(dados_plano, 2)[1] == "nenhuma palavra vence",
+        "a ficha de um dia diz a data e quantas vencem, no singular e no plural",
+    )
+    grade_plano = grade_do_calendario(quarta, 3)
+    checar(
+        len(grade_plano) == 3 and grade_plano[0][0] == DiaPlano(2026, 9, 7)
+        and grade_plano[-1][2] == quarta and grade_plano[-1][3:] == [None] * 4,
+        "o calendário tem uma coluna por semana, de segunda a domingo, e o futuro fica vazio",
+    )
+    checar(
+        descrever_dia(quarta, quarta, False) == ("qua, 23/09 · hoje", "ainda sem estudo hoje")
+        and descrever_dia(quarta - IntervaloPlano(days=1), quarta, True)[1] == "dia de estudo",
+        "a ficha de um dia do calendário diz se houve estudo — e que hoje ainda dá tempo",
+    )
+    caixa_plano = CaixaPlano(0, 0, 11, 11)
+    contornos_plano = {
+        forma: caminho_do_dia(caixa_plano, forma).toFillPolygon().boundingRect().size().toTuple()
+        for forma in set(FORMAS_DO_DIA.values()) | {"macio"}
+    }
+    areas_plano = {
+        forma: round(sum(1 for y in range(11) for x in range(11)
+                         if caminho_do_dia(caixa_plano, forma).contains(QPointF(x + 0.5, y + 0.5))))
+        for forma in contornos_plano
+    }
+    checar(
+        len(set(areas_plano.values())) >= 5,
+        f"cada forma de dia desenha diferente — estrela, losango, bloco, chanfro, círculo ({areas_plano})",
+    )
+
+    atmosfera_plano = janela.campo_atmosfera.currentText()
+    jogo_plano = janela.campo_jogo.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    janela.campo_jogo.setCurrentText("Skyrim")
+    aplicacao.processEvents()
+    caderno_plano = VocabularyStore(dados / "progresso-plano.sqlite3")
+    for termo_plano in ("draugr", "shout", "jarl"):
+        caderno_plano.registrar(termo_plano, "x", "", "Skyrim")
+    janela.marcar_estudo()
+    painel_plano = ProgressoPlano(janela, caderno_plano, parent=janela)
+    try:
+        painel_plano.show()
+        aplicacao.processEvents()
+        checar(
+            painel_plano.grafico_semanas.crescimento.atraso
+            < painel_plano.grafico_previsao.crescimento.atraso
+            < painel_plano.calendario.crescimento.atraso
+            < painel_plano.regua.crescimento.atraso,
+            "a previsão e o calendário entram depois das semanas e antes do domínio, na ordem de leitura",
+        )
+        checar(
+            painel_plano.calendario.forma == "estrela",
+            "no céu do norte, cada dia de estudo é uma estrela",
+        )
+        aguardar(lambda: not painel_plano.calendario.crescimento.ativo
+                 and not painel_plano.grafico_previsao.crescimento.ativo)
+        hoje_plano = painel_plano.calendario._hoje
+        calendario_img = painel_plano.calendario.grab().toImage()
+        razao_plano = calendario_img.devicePixelRatio()
+
+        def cor_no_dia(coluna: int, linha: int) -> CorPlano:
+            centro = painel_plano.calendario.caixa(coluna, linha).center()
+            return calendario_img.pixelColor(round(centro.x() * razao_plano), round(centro.y() * razao_plano))
+
+        ultima_plano = len(painel_plano.calendario._colunas) - 1
+        cor_hoje = cor_no_dia(ultima_plano, hoje_plano.weekday())
+        cor_antes = cor_no_dia(ultima_plano - 3, hoje_plano.weekday())
+        acento_plano = CorPlano(janela.tema.accent)
+        checar(
+            abs(cor_hoje.red() - acento_plano.red()) + abs(cor_hoje.green() - acento_plano.green())
+            + abs(cor_hoje.blue() - acento_plano.blue()) < 40
+            and cor_antes != cor_hoje,
+            f"hoje, com estudo, acende no acento; três semanas atrás, sem estudo, fica apagado "
+            f"({cor_hoje.name()} / {cor_antes.name()})",
+        )
+        centro_hoje = painel_plano.calendario.caixa(ultima_plano, hoje_plano.weekday()).center()
+        mover_em(painel_plano.calendario, centro_hoje.x(), centro_hoje.y())
+        checar(
+            painel_plano.calendario.apontado == ultima_plano * 7 + hoje_plano.weekday(),
+            "o cursor sobre um dia do calendário o aponta",
+        )
+        mover_em(painel_plano.calendario, 1, 1)
+        checar(painel_plano.calendario.apontado is None, "e a coluna dos nomes não aponta dia nenhum")
+        previsao_plano = painel_plano.grafico_previsao
+        mover_em(previsao_plano, previsao_plano.width() / 14, previsao_plano.height() / 2)
+        checar(previsao_plano.apontado == 0, "o cursor sobre a primeira barra aponta hoje")
+        checar(
+            painel_plano.botao_revisar.isVisible()
+            and painel_plano.botao_revisar.text() == f"Revisar ({caderno_plano.pendentes()})",
+            "com dívida, o painel oferece revisá-la, com o tamanho dela no botão",
+        )
+        painel_plano.botao_revisar.click()
+        checar(
+            painel_plano.result() == ProgressoPlano.REVISAR,
+            "e sair por ele avisa quem abriu o painel para abrir os cartões",
+        )
+    finally:
+        painel_plano.close()
+
+    # O caderno, avisado, abre a revisão em seguida.
+    exec_original_plano = mod_progresso_plano.JanelaProgresso.exec
+    janela.abrir_caderno()
+    aplicacao.processEvents()
+    caderno_janela_plano = janela._caderno
+    revisoes_plano: list[int] = []
+    try:
+        mod_progresso_plano.JanelaProgresso.exec = lambda _self: ProgressoPlano.REVISAR  # type: ignore[method-assign]
+        caderno_janela_plano._abrir_revisao = lambda: revisoes_plano.append(1)  # type: ignore[method-assign]
+        caderno_janela_plano._abrir_progresso()
+        mod_progresso_plano.JanelaProgresso.exec = lambda _self: 1  # type: ignore[method-assign]
+        caderno_janela_plano._abrir_progresso()
+    finally:
+        mod_progresso_plano.JanelaProgresso.exec = exec_original_plano  # type: ignore[method-assign]
+        del caderno_janela_plano._abrir_revisao
+        caderno_janela_plano.close()
+    checar(revisoes_plano == [1], "o caderno abre os cartões quando o painel sai por Revisar, e só aí")
+
+    print("o progresso cabe na tela")
+    from pipboy.interface.progresso import (
+        ALTURA_GRAFICO,
+        ALTURA_GRAFICO_MINIMA,
+        MARGEM_DA_TELA,
+    )
+
+    # Um caderno de seis jogos: o painel inteiro passa da altura da tela de
+    # teste, e só assim abrir "cabendo" prova alguma coisa.
+    caderno_tela = VocabularyStore(dados / "progresso-tela.sqlite3")
+    for indice_tela in range(12):
+        caderno_tela.registrar(
+            f"palavra{indice_tela}", "x", "",
+            ("Fallout", "Skyrim", "GTA", "Red Dead", "Elden Ring", "Cyberpunk 2077")[indice_tela % 6],
+        )
+    painel_tela = ProgressoPlano(janela, caderno_tela, parent=janela)
+    try:
+        painel_tela.show()
+        aplicacao.processEvents()
+        area_tela = painel_tela.screen().availableGeometry()
+        limite_tela = area_tela.height() - 2 * MARGEM_DA_TELA
+        # Exatamente a altura que há, e não "no máximo": o Qt já limita toda
+        # janela recém-aberta a dois terços da tela, e "não passar dela" ele
+        # faz sozinho. O que o painel garante é USAR a altura disponível.
+        checar(
+            painel_tela.sizeHint().height() > limite_tela
+            and painel_tela.height() == max(painel_tela.minimumSizeHint().height(), limite_tela),
+            f"um painel mais alto que a tela abre ocupando a área útil dela, nem mais nem menos "
+            f"({painel_tela.sizeHint().height()} → {painel_tela.height()}, de {area_tela.height()})",
+        )
+        painel_tela.caber_na_altura(4000)
+        aplicacao.processEvents()
+        checar(
+            painel_tela.height() == painel_tela.sizeHint().height()
+            and painel_tela.rolagem.verticalScrollBar().maximum() == 0
+            and painel_tela.grafico_semanas.height() == ALTURA_GRAFICO,
+            "numa tela alta, abre inteiro, no tamanho de sempre e sem rolar",
+        )
+        painel_tela.caber_na_altura(560)
+        aplicacao.processEvents()
+        fundo_fechar = painel_tela._botao_fechar.mapTo(
+            painel_tela, painel_tela._botao_fechar.rect().bottomLeft()
+        ).y()
+        checar(
+            painel_tela.height() == 560 and fundo_fechar < painel_tela.height()
+            and painel_tela.barra_nivel.isVisible(),
+            f"numa tela baixa, a janela é da altura que há, e o botão de fechar fica nela ({fundo_fechar})",
+        )
+        checar(
+            painel_tela.grafico_semanas.height() == ALTURA_GRAFICO_MINIMA
+            and painel_tela.rolagem.verticalScrollBar().maximum() > 0,
+            "os gráficos encolhem primeiro, e só o que ainda sobra rola",
+        )
+        checar(
+            painel_tela.moldura_graficos.geometry() == painel_tela.rolagem.geometry(),
+            "e a moldura do jogo acompanha a rolagem",
+        )
+    finally:
+        painel_tela.close()
+        caderno_tela.close()
+
+    print("os gráficos se leem")
+    from pipboy.interface.progresso import (
+        ler_calendario,
+        ler_dominio,
+        ler_jogos,
+        ler_previsao,
+        ler_semanas,
+    )
+    from pipboy.interface.revisao import BarraDaRodada, ler_rodada
+
+    checar(
+        ler_semanas([("03/08", 0), ("10/08", 2)]) == "Palavras novas por semana: 03/08, 0; esta semana, 2."
+        and ler_previsao(dados_plano) == "Palavras que vencem nos próximos 3 dias: hoje, 4; amanhã, 1; sex, 0."
+        and ler_dominio(4, 2, 1) == "Domínio: 4 novas, 2 aprendendo, 1 dominadas."
+        and ler_jogos([("Fallout", 3), ("Red Dead", 1)]) == "Palavras por jogo: Fallout, 3; Red Dead, 1.",
+        "cada gráfico se diz em palavras, com os mesmos números das barras",
+    )
+    checar(
+        ler_calendario({quarta, quarta - IntervaloPlano(days=1), quarta - IntervaloPlano(days=30)}, quarta, 3)
+        == "2 dias de estudo nas últimas 3 semanas; hoje já teve estudo."
+        and ler_calendario(set(), quarta, 3).endswith("hoje ainda não teve estudo."),
+        "o calendário conta só os dias da janela dele, e diz se hoje já foi",
+    )
+    painel_lido = ProgressoPlano(janela, caderno_plano, parent=janela)
+    graficos_lidos = [
+        painel_lido.grafico_semanas, painel_lido.grafico_previsao, painel_lido.calendario,
+        painel_lido.regua, *([painel_lido.grafico_jogos] if painel_lido.grafico_jogos else []),
+    ]
+    checar(
+        all(g.accessibleName() and g.accessibleDescription() for g in graficos_lidos)
+        and painel_lido.grafico_semanas.accessibleDescription() == ler_semanas(caderno_plano.novas_por_semana(8))
+        and painel_lido.grafico_previsao.accessibleDescription() == ler_previsao(caderno_plano.previsao(7)),
+        "no painel, todo gráfico tem nome e descrição para o leitor de tela",
+    )
+    painel_lido.deleteLater()
+    barra_lida = BarraDaRodada(janela)
+    barra_lida.recomecar(3)
+    barra_lida.registrar("acerto")
+    barra_lida.registrar("erro")
+    checar(
+        barra_lida.accessibleDescription() == ler_rodada(3, ["acerto", "erro"])
+        == "2 de 3 cartões respondidos: 1 acerto, 0 difíceis, 1 erro.",
+        "e a barra da rodada conta o que já foi respondido, a cada resposta",
+    )
+    barra_lida.deleteLater()
+
+    vazio_plano = VocabularyStore(dados / "progresso-vazio.sqlite3")
+    painel_vazio = ProgressoPlano(janela, vazio_plano, parent=janela)
+    checar(not painel_vazio.botao_revisar.isVisibleTo(painel_vazio), "sem dívida, o botão de revisar nem aparece")
+    painel_vazio.deleteLater()
+    vazio_plano.close()
+    caderno_plano.close()
+    janela.campo_jogo.setCurrentText(jogo_plano)
+    janela.campo_atmosfera.setCurrentText(atmosfera_plano)
+    aplicacao.processEvents()
+
+    print("o nível de cada jogo")
+    from PySide6.QtCore import QRectF as CaixaNivel
+    from PySide6.QtGui import QColor as CorNivel
+    from PySide6.QtGui import QImage as ImagemNivel
+    from PySide6.QtGui import QPainter as PintorNivel
+
+    from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_NIVEL
+    from pipboy.interface.progresso import (
+        BARRA_PADRAO,
+        BARRAS_DE_NIVEL,
+        cor_da_barra,
+        pintar_barra_de_nivel,
+        rotulo_do_nivel,
+    )
+    from pipboy.interface.progresso import JanelaProgresso as ProgressoNivel
+    from pipboy.nivel import REGRA_DO_XP, xp_do_caderno
+    from pipboy.themes import TEMAS as TEMAS_NIVEL
+
+    estilos_nivel = {
+        nome: BARRAS_DE_NIVEL.get(r.icones, BARRA_PADRAO) for nome, r in RECEITAS_NIVEL.items()
+    }
+    proprios_nivel = [e for n, e in estilos_nivel.items() if n != "Genérico / Outro"]
+    checar(
+        len(set(proprios_nivel)) == len(proprios_nivel) == 9
+        and estilos_nivel["Genérico / Outro"] == BARRA_PADRAO,
+        f"nove jogos, nove barras de experiência, e o neutro com a simples ({estilos_nivel})",
+    )
+    checar(
+        rotulo_do_nivel("Fallout", 7) == "LVL 7"
+        and rotulo_do_nivel("FPS / Multiplayer", 3) == "Cabo · 3"
+        and rotulo_do_nivel("FPS / Multiplayer", 40) == "General · 40"
+        and rotulo_do_nivel("RPG / Aventura (geral)", 12) == "Veterano · 12"
+        and rotulo_do_nivel("Cyberpunk 2077", 5) == "Reputação 5"
+        and rotulo_do_nivel("Genérico / Outro", 4) == "Nível 4",
+        "o nível é dito do jeito do jogo: LVL, patente, título, reputação",
+    )
+
+    tema_nivel = TEMAS_NIVEL["Skyrim"]
+
+    def barra_pintada(estilo: str, fracao: float) -> ImagemNivel:
+        imagem = ImagemNivel(240, 40, ImagemNivel.Format.Format_ARGB32_Premultiplied)
+        imagem.fill(0)
+        pintor = PintorNivel(imagem)
+        pintar_barra_de_nivel(pintor, CaixaNivel(10, 10, 220, 20), fracao, estilo, tema_nivel)
+        pintor.end()
+        return imagem
+
+    def tinta_acesa(imagem: ImagemNivel, estilo: str) -> int:
+        acento_nivel = CorNivel(cor_da_barra(estilo, tema_nivel))
+        return sum(
+            1 for y in range(imagem.height()) for x in range(imagem.width())
+            if (c := imagem.pixelColor(x, y)).alpha() > 200
+            and abs(c.red() - acento_nivel.red()) + abs(c.green() - acento_nivel.green())
+            + abs(c.blue() - acento_nivel.blue()) < 30
+        )
+
+    nao_crescem, sem_trilho = [], []
+    for estilo_nivel in set(BARRAS_DE_NIVEL.values()) | {BARRA_PADRAO}:
+        vazia = barra_pintada(estilo_nivel, 0.0)
+        if not any(vazia.pixelColor(x, y).alpha() for y in range(40) for x in range(240)):
+            sem_trilho.append(estilo_nivel)
+        if not (
+            tinta_acesa(barra_pintada(estilo_nivel, 0.25), estilo_nivel)
+            < tinta_acesa(barra_pintada(estilo_nivel, 0.75), estilo_nivel)
+        ):
+            nao_crescem.append(estilo_nivel)
+    checar(not sem_trilho, f"vazia, toda barra ainda mostra o trilho ({sem_trilho})")
+    checar(not nao_crescem, f"e toda barra acende mais quanto mais XP ({nao_crescem})")
+    checar(
+        cor_da_barra("blocos", TEMAS_NIVEL["Fallout"]) == TEMAS_NIVEL["Fallout"].primary
+        and cor_da_barra("tracos", TEMAS_NIVEL["FPS / Multiplayer"]) == TEMAS_NIVEL["FPS / Multiplayer"].accent,
+        "no terminal, a barra é do verde do fósforo; nos outros, do acento do jogo",
+    )
+    retratos_nivel = {e: barra_pintada(e, 0.5) for e in set(BARRAS_DE_NIVEL.values()) | {BARRA_PADRAO}}
+    iguais_nivel = sorted(
+        (a, b) for a in retratos_nivel for b in retratos_nivel if a < b and retratos_nivel[a] == retratos_nivel[b]
+    )
+    checar(not iguais_nivel, f"e cada uma desenha diferente das outras ({iguais_nivel})")
+
+    jogo_nivel = janela.campo_jogo.currentText()
+    for nome_nivel, estilo_esperado, rotulo_esperado in (
+        ("Fallout", "blocos", "LVL"), ("Red Dead", "nucleo", "Rank"), ("FPS / Multiplayer", "tracos", "Recruta"),
+    ):
+        janela.campo_jogo.setCurrentText(nome_nivel)
+        aplicacao.processEvents()
+        painel_nivel = ProgressoNivel(janela, store, parent=janela)
+        barra_nivel = painel_nivel.barra_nivel
+        checar(
+            barra_nivel.estilo == estilo_esperado and barra_nivel.rotulo.startswith(rotulo_esperado)
+            and barra_nivel.nivel.xp == xp_do_caderno(store.estatisticas())
+            and barra_nivel.toolTip() == REGRA_DO_XP,
+            f"no {nome_nivel}, o nível vem como {rotulo_esperado}, na barra {estilo_esperado} — "
+            f"com a regra do XP a um passar de cursor ({barra_nivel.rotulo})",
+        )
+        painel_nivel.deleteLater()
+    janela.campo_jogo.setCurrentText(jogo_nivel)
     aplicacao.processEvents()
 
     print("histórico que orienta")
@@ -1928,8 +2287,8 @@ def main() -> int:
 
     revisao_ima = RevisaoIma(janela, store, parent=janela)
     checar(
-        len(revisao_ima._campo_magnetico.botoes) == 5,
-        "as ações da revisão também",
+        len(revisao_ima._campo_magnetico.botoes) == 9,
+        f"as ações da revisão também — as dos dois jeitos ({len(revisao_ima._campo_magnetico.botoes)})",
     )
     revisao_ima.close()
 
@@ -3883,7 +4242,13 @@ def main() -> int:
     from PySide6.QtGui import QColor as CorIcone
 
     from pipboy.interface.atmosfera import ATMOSFERAS as RECEITAS_ICONE
-    from pipboy.interface.icones import ICONES, estilo_de_icone, pintar_icone
+    from pipboy.interface.icones import (
+        GLIFOS_PADRAO,
+        ICONES,
+        NOMES_DE_ICONE,
+        estilo_de_icone,
+        pintar_icone,
+    )
 
     conjuntos = {nome: r.icones for nome, r in RECEITAS_ICONE.items()}
     checar(all(c == "" or c in ICONES for c in conjuntos.values()), "todo jogo pede um conjunto que existe")
@@ -3893,8 +4258,9 @@ def main() -> int:
         "nove jogos com os seus ícones, nenhum copiado, e o neutro com os glifos de sempre",
     )
     checar(
-        all(set(desenhos) == {"caderno", "historico"} for desenhos in ICONES.values()),
-        "cada conjunto desenha o caderno e o histórico",
+        all(set(desenhos) == set(NOMES_DE_ICONE) for desenhos in ICONES.values())
+        and set(GLIFOS_PADRAO) == set(NOMES_DE_ICONE),
+        "cada conjunto desenha as quatro portas, e o neutro tem glifo para todas",
     )
 
     def retrato_do_icone(nome: str, estilo: str, lado: int = 24) -> QImage:
@@ -3909,7 +4275,7 @@ def main() -> int:
 
     fora_icone, vazios_icone = [], []
     for estilo_icone in ICONES:
-        for nome_icone in ("caderno", "historico"):
+        for nome_icone in NOMES_DE_ICONE:
             imagem_icone = retrato_do_icone(nome_icone, estilo_icone)
             tinta_icone = [
                 (x, y) for y in range(60) for x in range(60) if imagem_icone.pixelColor(x, y).alpha()
@@ -3921,7 +4287,7 @@ def main() -> int:
     checar(not vazios_icone, f"todo ícone desenha alguma coisa ({vazios_icone})")
     checar(not fora_icone, f"e fica dentro da caixa que lhe deram ({fora_icone})")
     retratos_icone = {
-        (e, n): retrato_do_icone(n, e) for e in ICONES for n in ("caderno", "historico")
+        (e, n): retrato_do_icone(n, e) for e in ICONES for n in NOMES_DE_ICONE
     }
     iguais_icone = sorted(
         (a, b) for a in retratos_icone for b in retratos_icone
@@ -3931,6 +4297,21 @@ def main() -> int:
     checar(
         retrato_do_icone("caderno", "desconhecido") == retrato_do_icone("caderno", ""),
         "estilo desconhecido cai nos glifos de sempre, como o tema neutro",
+    )
+
+    def altura_da_tinta(imagem: QImage) -> int:
+        linhas = [y for y in range(imagem.height()) if any(imagem.pixelColor(x, y).alpha() for x in range(imagem.width()))]
+        return (linhas[-1] - linhas[0] + 1) if linhas else 0
+
+    glifos_miudos = [
+        nome_glifo for nome_glifo in NOMES_DE_ICONE
+        if altura_da_tinta(retrato_do_icone(nome_glifo, "", lado=36)) < 36 * 0.4
+    ]
+    checar(
+        not glifos_miudos
+        and altura_da_tinta(retrato_do_icone("historico", "", lado=36))
+        > altura_da_tinta(retrato_do_icone("historico", "", lado=16)),
+        f"sem desenho próprio, o glifo cresce com a caixa — ao lado de um título, não sai miúdo ({glifos_miudos})",
     )
 
     # Na janela: as portas e o trilho desenham o ícone do jogo em vigor.
@@ -4283,6 +4664,268 @@ def main() -> int:
     janela.campo_jogo.setCurrentText(jogo_janelas)
     janela.campo_atmosfera.setCurrentText(atmosfera_janelas)
     aplicacao.processEvents()
+
+    print("a revisão e o progresso vestem o jogo")
+    from pipboy.interface.progresso import JanelaProgresso as ProgressoDoJogo
+    from pipboy.interface.revisao import JanelaRevisao as RevisaoDoJogo
+
+    caderno_do_jogo = VocabularyStore(dados / "revisao-do-jogo.sqlite3")
+    caderno_do_jogo.registrar("bounty", "recompensa", "A bounty on your head.", "Red Dead")
+    caderno_do_jogo.registrar("outlaw", "fora da lei", "", "Red Dead")
+    jogo_rp = janela.campo_jogo.currentText()
+    atmosfera_rp = janela.campo_atmosfera.currentText()
+    janela.campo_atmosfera.setCurrentText("Completa")
+    janela.campo_jogo.setCurrentText("Red Dead")
+    aplicacao.processEvents()
+    rodada_jogo = RevisaoDoJogo(janela, caderno_do_jogo, parent=janela)
+    rodada_jogo.show()
+    aplicacao.processEvents()
+    checar(
+        rodada_jogo.titulo.text() == "Cartas na mesa" == janela.tema.nome_da_revisao
+        and rodada_jogo.subtitulo.text() == "revisão de vocabulário"
+        and rodada_jogo.windowTitle() == "Revisão",
+        "no velho oeste, revisar é pôr as cartas na mesa — com a função escrita ao lado e na barra",
+    )
+    checar(
+        rodada_jogo.icone_titulo.nome == "revisao"
+        and rodada_jogo.icone_titulo.width() == QFontMetrics(rodada_jogo.titulo.font()).height(),
+        "e as cartas abertas em leque ao lado do título, na altura da letra dele",
+    )
+    checar(
+        rodada_jogo._progresso.text() == "CARTÃO 1 DE 2",
+        f"o contador não repete o nome que o título já disse ({rodada_jogo._progresso.text()})",
+    )
+    moldura_rev = rodada_jogo.moldura_cartao
+    checar(
+        moldura_rev.parentWidget() is rodada_jogo._cartao.parentWidget()
+        and moldura_rev.isVisible() and moldura_rev.geometry() == rodada_jogo._cartao.geometry(),
+        "a moldura do cartaz contorna o cartão, por cima dele e do tamanho dele",
+    )
+    checar(
+        moldura_rev.progresso_da_montagem < 1.0,
+        "e se monta quando a rodada abre",
+    )
+    margens_rev = rodada_jogo._cartao.layout().contentsMargins()
+    checar(
+        margens_rev.left() >= FAIXA_JANELAS and margens_rev.top() >= FAIXA_JANELAS,
+        "o termo se afasta da moldura, para o ornamento não passar por cima dele",
+    )
+    aguardar(lambda: moldura_rev.progresso_da_montagem >= 1.0, 3000)
+    rodada_jogo.close()
+
+    painel_jogo = ProgressoDoJogo(janela, caderno_do_jogo, parent=janela)
+    painel_jogo.show()
+    aplicacao.processEvents()
+    checar(
+        painel_jogo.titulo.text() == "Desafios" == janela.tema.nome_do_progresso
+        and painel_jogo.subtitulo.text() == "progresso do caderno"
+        and painel_jogo.icone_titulo.nome == "progresso",
+        "o progresso do velho oeste é a tela de desafios, com a estrela de xerife",
+    )
+    moldura_prog = painel_jogo.moldura_graficos
+    checar(
+        moldura_prog.isVisible() and moldura_prog.geometry() == painel_jogo.rolagem.geometry()
+        and painel_jogo.rolagem.widget() is painel_jogo.painel
+        and painel_jogo.grafico_semanas.parentWidget() is painel_jogo.painel,
+        "a moldura contorna os gráficos, e só eles",
+    )
+    painel_jogo.close()
+
+    janela.campo_jogo.setCurrentText("FPS / Multiplayer")
+    aplicacao.processEvents()
+    rodada_visor = RevisaoDoJogo(janela, caderno_do_jogo, parent=janela)
+    rodada_visor.show()
+    aplicacao.processEvents()
+    checar(
+        rodada_visor.titulo.text() == "Estande de tiro"
+        and not rodada_visor.moldura_cartao.isVisible()
+        and rodada_visor._cartao.layout().contentsMargins().left() == 0,
+        "no visor, o estande de tiro — sem moldura de painel, e sem folga à toa",
+    )
+    rodada_visor.close()
+
+    janela.abrir_caderno()
+    aplicacao.processEvents()
+    caderno_portas = janela._caderno
+    checar(
+        caderno_portas.botao_revisar.icone == "revisao"
+        and caderno_portas.botao_progresso.icone == "progresso"
+        and caderno_portas.botao_revisar.text().startswith("Revisar")
+        and caderno_portas.botao_progresso.text() == "Progresso",
+        "no caderno, as duas portas trazem o objeto do jogo ao lado do nome de sempre",
+    )
+    caderno_portas.close()
+    caderno_do_jogo.close()
+    janela.campo_jogo.setCurrentText(jogo_rp)
+    janela.campo_atmosfera.setCurrentText(atmosfera_rp)
+    aplicacao.processEvents()
+
+    print("a revisão que pede a palavra")
+    from PySide6.QtTest import QTest
+
+    from pipboy.interface.revisao import (
+        MODO_ESCREVER,
+        MODO_LEMBRAR,
+        VOZES_DA_ESCRITA,
+        voz_da_escrita,
+    )
+    from pipboy.interface.revisao import JanelaRevisao as RevisaoEscrita
+    from pipboy.themes import TEMAS as TEMAS_ESCRITA
+
+    recusas = [voz_da_escrita(nome)[1] for nome in TEMAS_ESCRITA]
+    convites = [voz_da_escrita(nome)[0] for nome in TEMAS_ESCRITA]
+    checar(
+        set(VOZES_DA_ESCRITA) <= set(TEMAS_ESCRITA) and len(VOZES_DA_ESCRITA) == len(TEMAS_ESCRITA) - 1
+        and len(set(recusas)) == len(recusas)
+        and all("{n}" in r and "{total}" in r for r in recusas),
+        "cada jogo recusa uma tentativa do seu jeito, e toda recusa diz quantas letras acertou",
+    )
+    checar(len(set(convites)) >= 8, f"e o campo convida na voz do jogo ({len(set(convites))} convites)")
+
+    def enter(alvo: QWidget) -> None:
+        QApplication.sendEvent(
+            alvo, QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier)
+        )
+
+    caderno_escrita = VocabularyStore(dados / "revisao-escrita.sqlite3")
+    caderno_escrita.registrar("to scavenge", "vasculhar", "We need to scavenge for parts.", "Fallout")
+    caderno_escrita.registrar("bounty", "recompensa", "There's a bounty on your head.", "Red Dead")
+    caderno_escrita.registrar("ammo", "munição", "", "Fallout")
+    jogo_escrita = janela.campo_jogo.currentText()
+    modo_escrita = janela.modo_de_revisao()
+    janela.definir_modo_de_revisao(MODO_LEMBRAR)
+    janela.campo_jogo.setCurrentText("Fallout")
+    aplicacao.processEvents()
+    escrita = RevisaoEscrita(janela, caderno_escrita, parent=janela)
+    # Os sons da rodada, anotados em vez de tocados.
+    sons_escrita: list[str] = []
+    tocar_original = janela._campainha.tocar
+    janela._campainha.tocar = sons_escrita.append  # type: ignore[method-assign]
+    try:
+        escrita.show()
+        escrita.activateWindow()
+        aplicacao.processEvents()
+        checar(
+            escrita.modo == MODO_LEMBRAR and escrita.chips_modo[MODO_LEMBRAR].isChecked()
+            and not escrita.chips_modo[MODO_ESCREVER].isChecked(),
+            "a rodada começa no jeito guardado — lembrar, na primeira vez",
+        )
+        # Controle positivo: fora do campo, a letra é o atalho da nota.
+        escrita._revelar()
+        checar(
+            escrita._botao_dificil.isVisible() and escrita._botao_errei.isVisible()
+            and escrita._botao_acertei.isVisible(),
+            "revelada a resposta, são três notas: errei, difícil e acertei",
+        )
+        escrita._botao_acertei.setFocus()
+        QTest.keyClick(escrita._botao_acertei, Qt.Key.Key_D)
+        aplicacao.processEvents()
+        checar(
+            escrita._barra.resultados == ["dificil"] and escrita._rodada.dificeis == 1,
+            "lembrando, o D marca o cartão como difícil",
+        )
+        escrita.definir_modo(MODO_ESCREVER)
+        aplicacao.processEvents()
+        checar(
+            janela.modo_de_revisao() == MODO_ESCREVER and escrita.chips_modo[MODO_ESCREVER].isChecked()
+            and not escrita.chips_modo[MODO_LEMBRAR].isChecked(),
+            "trocar de jeito acende o outro chip e fica guardado para a próxima rodada",
+        )
+        cartao_escrita = escrita._rodada.atual
+        assert cartao_escrita is not None and cartao_escrita.termo == "bounty"
+        checar(
+            escrita._termo.text() == "recompensa" and not escrita._escrita.isHidden()
+            and escrita._verso.isHidden(),
+            "escrevendo, o cartão vira: a tradução na frente",
+        )
+        checar(
+            escrita._escrita.frase.text() in (
+                "There&#x27;s a _____ on your head.", "There's a _____ on your head.",
+            ),
+            f"e a frase do jogo com o buraco no lugar da palavra ({escrita._escrita.frase.text()})",
+        )
+        checar(
+            escrita._escrita.campo.placeholderText() == "> digite a senha_"
+            and escrita._escrita.campo.accessibleName() == "Escreva a palavra em inglês",
+            "no terminal, o campo pede a senha — e o leitor de tela ouve o nome de sempre",
+        )
+        campo_escrita = escrita._escrita.campo
+        campo_escrita.setFocus()
+        aplicacao.processEvents()
+        enter(campo_escrita)
+        checar(
+            escrita._erradas == 0 and escrita._escrita.retorno.text() == "",
+            "Enter no campo vazio não gasta tentativa",
+        )
+        QTest.keyClicks(campo_escrita, "bad")
+        aplicacao.processEvents()
+        checar(
+            campo_escrita.text() == "bad" and escrita._barra.resultados == ["dificil"],
+            "no campo, A, D e E são letras: digitar não responde cartão nenhum",
+        )
+        altura_escrita = escrita.height()
+        botoes_escrita = escrita._botao_conferir.mapTo(escrita, escrita._botao_conferir.rect().topLeft()).y()
+        enter(campo_escrita)
+        aplicacao.processEvents()
+        retorno_escrita = escrita._escrita.retorno.text()
+        checar(
+            "Semelhança=1/6" in retorno_escrita and escrita._escrita.pista.text() == "b _ _ _ _ _",
+            f"errar mostra a semelhança, como o terminal, e a pista ({escrita._escrita.pista.text()})",
+        )
+        checar(escrita._barra.resultados == ["dificil"], "e ainda não dá nota: sobram tentativas")
+        checar(
+            escrita.height() == altura_escrita
+            and escrita._botao_conferir.mapTo(escrita, escrita._botao_conferir.rect().topLeft()).y() == botoes_escrita,
+            "o retorno e a pista já tinham lugar: errar não empurra os botões",
+        )
+        campo_escrita.setText("Bounty")
+        enter(campo_escrita)
+        aplicacao.processEvents()
+        checar(
+            escrita._barra.resultados == ["dificil", "dificil"]
+            and escrita._botao_proximo.isVisible() and campo_escrita.isReadOnly(),
+            "certa depois de errar é difícil, e o cartão espera o Enter do próximo",
+        )
+        checar(
+            "bounty" in escrita._escrita.frase.text() and "_____" not in escrita._escrita.frase.text(),
+            "a frase volta inteira, com a palavra no lugar do buraco",
+        )
+        enter(campo_escrita)
+        aplicacao.processEvents()
+        cartao_escrita = escrita._rodada.atual
+        assert cartao_escrita is not None and cartao_escrita.termo == "ammo"
+        checar(
+            escrita._escrita.frase.isHidden() and campo_escrita.text() == "" and not campo_escrita.isReadOnly(),
+            "o mesmo Enter passa ao próximo; sem a palavra no exemplo, a frase se esconde",
+        )
+        escrita._nao_sei()
+        aplicacao.processEvents()
+        checar(
+            escrita._barra.resultados[-1] == "erro" and "ammo" in escrita._escrita.retorno.text(),
+            "não saber é honesto: a palavra aparece e a nota é erro",
+        )
+        enter(campo_escrita)
+        aplicacao.processEvents()
+        checar(
+            escrita._termo.text() == "0 acertos · 2 difíceis · 1 erro",
+            f"o resumo conta os difíceis à parte ({escrita._termo.text()})",
+        )
+        checar(
+            sons_escrita == ["vocab", "vocab", "erro"],
+            f"cada nota soa na voz do jogo: difícil e acerto como palavra ganha, erro como erro ({sons_escrita})",
+        )
+        entrada_bounty = caderno_escrita.entrada("bounty")
+        checar(
+            entrada_bounty is not None and entrada_bounty.acertos == 1 and entrada_bounty.intervalo_dias == 1,
+            "no banco, difícil conta como lembrada e agenda a volta",
+        )
+    finally:
+        janela._campainha.tocar = tocar_original  # type: ignore[method-assign]
+        escrita.close()
+        caderno_escrita.close()
+        janela.definir_modo_de_revisao(modo_escrita)
+        janela.campo_jogo.setCurrentText(jogo_escrita)
+        aplicacao.processEvents()
 
     print("cada jogo mira do seu jeito")
     from PySide6.QtGui import QColor as CorMira

@@ -18,7 +18,7 @@ import re
 import sqlite3
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from .banco import agora, carimbo, conectar, migrar_para_utc, padrao_de_busca, texto_de_busca
@@ -499,12 +499,15 @@ class VocabularyStore:
                 ).fetchone()[0]
             )
 
-    def avaliar(self, termo: str, acertou: bool) -> dict[str, object]:
+    def avaliar(
+        self, termo: str, acertou: bool, *, hesitou: bool = False
+    ) -> dict[str, object]:
         """Registra o resultado de uma revisão e agenda a próxima.
 
         SM-2 simplificado: sem notas de 0 a 5 (inviáveis numa conversa por
-        voz), apenas acertou/errou. A ``facilidade`` faz o papel do fator E do
-        algoritmo original, limitada entre 1.3 e 3.0.
+        voz), apenas acertou/errou — e, na revisão offline, ``hesitou``: o
+        *difícil*, acertou mas custou. A ``facilidade`` faz o papel do fator E
+        do algoritmo original, limitada entre 1.3 e 3.0.
         """
         termo = " ".join(termo.split()).strip()
         with self._lock:
@@ -520,14 +523,23 @@ class VocabularyStore:
 
             if acertou:
                 acertos += 1
-                if intervalo <= 0:
-                    intervalo = 1
-                elif intervalo == 1:
-                    intervalo = 3
+                if hesitou:
+                    # Difícil: lembrou, mas custou. O intervalo cresce devagar
+                    # (×1,2, como o "Hard" do Anki) e a facilidade cai um
+                    # pouco — nem o salto de um acerto limpo, que empurraria
+                    # para longe uma palavra ainda frágil, nem o recomeço de
+                    # um erro, que jogaria fora o que a pessoa sabia.
+                    intervalo = 1 if intervalo <= 0 else max(intervalo + 1, round(intervalo * 1.2))
+                    facilidade = max(1.3, facilidade - 0.15)
                 else:
-                    intervalo = max(intervalo + 1, round(intervalo * facilidade))
+                    if intervalo <= 0:
+                        intervalo = 1
+                    elif intervalo == 1:
+                        intervalo = 3
+                    else:
+                        intervalo = max(intervalo + 1, round(intervalo * facilidade))
+                    facilidade = min(3.0, facilidade + 0.1)
                 intervalo = min(intervalo, MAX_INTERVALO_DIAS)
-                facilidade = min(3.0, facilidade + 0.1)
                 # Em UTC, como todo carimbo gravado (ver banco.agora). O
                 # ``.astimezone()`` que estava aqui devolvia o fuso LOCAL, e
                 # esta é a coluna que o SQL compara como TEXTO para responder
@@ -555,6 +567,7 @@ class VocabularyStore:
         return {
             "termo": str(row["termo"]),
             "acertou": acertou,
+            "hesitou": bool(acertou and hesitou),
             "proxima_revisao_em_dias": intervalo,
             "acertos": acertos,
             "erros": erros,
@@ -823,6 +836,40 @@ class VocabularyStore:
             segunda = data - timedelta(days=data.weekday())
             resultado.append((segunda.strftime("%d/%m"), por_semana.get(_semana_de(data), 0)))
         return resultado
+
+    def previsao(self, dias: int = 7) -> list[tuple[date, int]]:
+        """Quantas palavras vencem em cada um dos próximos dias, a partir de hoje.
+
+        Hoje junta a dívida inteira — o que já venceu, o que nunca foi
+        revisado e o que vence até a meia-noite —, porque é o que uma revisão
+        feita agora cobra. Os outros dias contam só o que vence neles. É a
+        previsão de carga do Anki: saber que amanhã vencem trinta muda a
+        decisão de revisar hoje.
+
+        No fuso LOCAL, como o gráfico de semanas: a revisão marcada para as
+        23h de hoje vence hoje, e não no amanhã que já começou em Greenwich.
+        Data ilegível conta como vencida, como em ``Entrada.dias_ate_revisao``.
+        """
+        dias = max(1, dias)
+        hoje = datetime.now(timezone.utc).astimezone().date()
+        with self._lock:
+            rows = self._connection.execute("SELECT proxima_revisao FROM vocabulario").fetchall()
+        contagem = [0] * dias
+        for r in rows:
+            texto = str(r["proxima_revisao"] or "")
+            try:
+                quando = datetime.fromisoformat(texto) if texto else None
+            except ValueError:
+                quando = None
+            if quando is None:
+                contagem[0] += 1
+                continue
+            if quando.tzinfo is None:
+                quando = quando.astimezone()
+            adiante = (quando.astimezone().date() - hoje).days
+            if adiante < dias:
+                contagem[max(0, adiante)] += 1
+        return [(hoje + timedelta(days=i), n) for i, n in enumerate(contagem)]
 
     def por_jogo(self, limite: int = 6) -> list[tuple[str, int]]:
         """Total de termos por jogo, do maior para o menor."""

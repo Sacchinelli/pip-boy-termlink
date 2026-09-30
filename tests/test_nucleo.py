@@ -1038,6 +1038,8 @@ def teste_design() -> None:
         "verbo do botão de partida": [t.start_label for t in TEMAS.values()],
         "nome do caderno": [t.nome_do_caderno for t in TEMAS.values()],
         "nome do histórico": [t.nome_do_historico for t in TEMAS.values()],
+        "nome da revisão": [t.nome_da_revisao for t in TEMAS.values()],
+        "nome do progresso": [t.nome_do_progresso for t in TEMAS.values()],
         "timbre declarado": [(r.forma, r.grave, r.agudo) for r in RECEITAS.values()],
     }
     for nome_coluna, valores in colunas.items():
@@ -1349,6 +1351,311 @@ def teste_revisao() -> None:
         checar(True, "responder após o fim deveria falhar")
 
     checar(store.pendentes() == 1, "só a errada continua vencida no banco")
+
+
+def teste_revisao_escrita() -> None:
+    """O modo de escrever e a nota difícil.
+
+    O contrato: a resposta se confere sem caixa, sem acento e sem o "to" do
+    infinitivo; um erro de digitação numa palavra longa é *quase*; a frase
+    ganha um buraco onde a palavra estava (flexionada ou não); a pista dá o
+    começo e o tamanho; e a nota sai do que aconteceu — de primeira, acerto;
+    depois de errar ou por uma letra, difícil; na última tentativa, erro. No
+    banco, difícil afasta a palavra MENOS que um acerto limpo, e não a traz
+    de volta como um erro.
+    """
+    print("revisão escrita")
+    from pipboy.revisao import (
+        ACERTO,
+        DIFICIL,
+        ERRO,
+        TENTATIVAS,
+        RodadaDeRevisao,
+        conferir,
+        distancia,
+        lacuna,
+        normalizar,
+        nota_da_escrita,
+        pista,
+        trechos,
+    )
+
+    checar(
+        normalizar("  Ammo. ") == "ammo" and normalizar("Don\u2019t") == "don't"
+        and normalizar("CAFÉ") == "cafe",
+        "a resposta se compara sem caixa, sem acento, sem pontuação solta e com o apóstrofo reto",
+    )
+    checar(
+        conferir("Scavenge", "to scavenge").certa and conferir("to scavenge", "to scavenge").certa
+        and conferir("bounty", "a bounty").certa,
+        "o \"to\" do infinitivo e o artigo são opcionais",
+    )
+    checar(
+        distancia("recieve", "receive") == 1 and distancia("kitten", "sitting") == 3,
+        "duas letras trocadas de lugar pesam como um erro só",
+    )
+    quase = conferir("scavange", "to scavenge")
+    checar(
+        not quase.certa and quase.quase and quase.letras_no_lugar == 7 and quase.letras == 8,
+        f"uma letra errada numa palavra longa é quase ({quase.letras_no_lugar}/{quase.letras})",
+    )
+    checar(
+        not conferir("shot", "shoot").quase and not conferir("lot", "loot").quase,
+        "numa palavra curta, uma letra trocada já é outra palavra",
+    )
+    longe = conferir("scrap", "to scavenge")
+    checar(
+        longe.no_lugar == (True, True, False, False, False) and longe.letras_no_lugar == 2,
+        f"letra a letra, a tentativa diz o que já está no lugar ({longe.no_lugar})",
+    )
+    checar(
+        lacuna("We need to scavenge for parts.", "to scavenge") == "We need to _____ for parts."
+        and lacuna("He scavenged the ruins.", "to scavenge") == "He _____ the ruins."
+        and lacuna("Bounties everywhere.", "bounty") == "_____ everywhere."
+        and lacuna("I'm low on ammo now", "low on ammo") == "I'm _____ now",
+        "a frase ganha um buraco no lugar da palavra, flexionada ou não",
+    )
+    checar(
+        lacuna("Stay in stealth mode.", "loot") is None and lacuna("", "ammo") is None
+        and lacuna("Reloading the pistol.", "load") is None,
+        "sem a palavra na frase (nem dentro de outra), não há buraco — e o exemplo se esconde",
+    )
+    checar(
+        trechos("A bounty, then another bounty.", "bounty") == [(2, 8), (23, 29)],
+        "cada aparição da palavra é achada, para a frase inteira voltar com elas acesas",
+    )
+    checar(
+        pista("to scavenge") == "s _ _ _ _ _ _ _" and pista("to scavenge", 2) == "s c _ _ _ _ _ _"
+        and pista("low on ammo") == "l _ _   _ _   _ _ _ _",
+        "a pista dá o começo e o tamanho, com as palavras separadas",
+    )
+    checar(
+        nota_da_escrita(conferir("ammo", "ammo"), 0) == ACERTO
+        and nota_da_escrita(conferir("ammo", "ammo"), 1) == DIFICIL
+        and nota_da_escrita(quase, 0) == DIFICIL
+        and nota_da_escrita(longe, 0) is None
+        and nota_da_escrita(longe, TENTATIVAS - 1) == ERRO,
+        "de primeira é acerto; depois da pista ou por uma letra, difícil; na última, erro",
+    )
+
+    store = VocabularyStore(Path(tempfile.mkdtemp()) / "escrita.sqlite3")
+    for termo in ("limpo", "custoso"):
+        store.registrar(termo, "x")
+        store.avaliar(termo, True)
+        store.avaliar(termo, True)
+    limpo = store.avaliar("limpo", True)
+    custoso = store.avaliar("custoso", True, hesitou=True)
+    checar(
+        3 < int(custoso["proxima_revisao_em_dias"]) < int(limpo["proxima_revisao_em_dias"])
+        and custoso["acertos"] == 3 and custoso["hesitou"] is True,
+        f"difícil ainda afasta a palavra, mas menos que um acerto limpo "
+        f"({custoso['proxima_revisao_em_dias']} contra {limpo['proxima_revisao_em_dias']} dias)",
+    )
+    store.registrar("novo", "x")
+    checar(
+        store.avaliar("novo", True, hesitou=True)["proxima_revisao_em_dias"] == 1,
+        "a primeira revisão difícil agenda para amanhã, como a primeira certa",
+    )
+    depois = store.avaliar("custoso", True)
+    checar(
+        int(depois["proxima_revisao_em_dias"]) < round(int(custoso["proxima_revisao_em_dias"]) * 2.7),
+        "e o esforço pesa na facilidade: o acerto seguinte salta menos",
+    )
+    store.close()
+
+    rodada_store = VocabularyStore(Path(tempfile.mkdtemp()) / "rodada-escrita.sqlite3")
+    for termo in ("um", "dois", "tres"):
+        rodada_store.registrar(termo, "x")
+    rodada = RodadaDeRevisao(rodada_store)
+    rodada.responder(True)
+    rodada.responder(True, hesitou=True)
+    rodada.responder(False)
+    checar(
+        (rodada.acertos, rodada.dificeis, rodada.erros) == (1, 1, 1) and rodada.terminada,
+        "a rodada conta acertos, difíceis e erros em separado",
+    )
+    rodada_store.close()
+
+
+def teste_previsao_e_calendario() -> None:
+    """A previsão de carga e os dias de estudo, que o painel desenha.
+
+    O contrato: hoje junta a dívida inteira (nova, vencida, ilegível e o que
+    vence até a meia-noite); os outros dias contam só o que vence neles; o que
+    passa da janela não aparece. E os dias de estudo são os da tabela da
+    sequência, a partir da data pedida, sem derrubar nada por um dia ilegível.
+    """
+    print("previsão e calendário")
+    from datetime import date as Dia
+    from datetime import datetime as Instante
+    from datetime import timedelta as Intervalo
+    from datetime import timezone as Fuso
+
+    from pipboy.banco import carimbo
+    from pipboy.historico import HistoricoStore
+
+    store = VocabularyStore(Path(tempfile.mkdtemp()) / "previsao.sqlite3")
+    for termo in ("nova", "vencida", "ilegivel", "amanha", "em3", "longe"):
+        store.registrar(termo, "x")
+    agora_local = Instante.now(Fuso.utc).astimezone()
+    meio_dia = agora_local.replace(hour=12, minute=0, second=0, microsecond=0)
+    datas = {
+        "vencida": carimbo((meio_dia - Intervalo(days=2)).astimezone(Fuso.utc)),
+        "ilegivel": "quando der",
+        "amanha": carimbo((meio_dia + Intervalo(days=1)).astimezone(Fuso.utc)),
+        "em3": carimbo((meio_dia + Intervalo(days=3)).astimezone(Fuso.utc)),
+        "longe": carimbo((meio_dia + Intervalo(days=10)).astimezone(Fuso.utc)),
+    }
+    for termo, quando in datas.items():
+        store._connection.execute(
+            "UPDATE vocabulario SET proxima_revisao = ? WHERE termo = ?", (quando, termo)
+        )
+    store._connection.commit()
+    previsao = store.previsao(7)
+    hoje = agora_local.date()
+    checar(
+        [dia for dia, _ in previsao] == [hoje + Intervalo(days=i) for i in range(7)],
+        "a previsão tem sete dias seguidos, a começar de hoje",
+    )
+    checar(
+        [n for _, n in previsao] == [3, 1, 0, 1, 0, 0, 0],
+        f"hoje junta a nova, a vencida e a ilegível; cada outro dia conta o seu ({[n for _, n in previsao]})",
+    )
+    checar(sum(n for _, n in previsao) == 5, "e o que vence depois da janela fica de fora")
+    store.close()
+
+    historico = HistoricoStore(Path(tempfile.mkdtemp()) / "calendario.sqlite3")
+    for atras in (0, 1, 5, 40):
+        historico.marcar_atividade((hoje - Intervalo(days=atras)).isoformat())
+    historico._connection.execute("INSERT INTO atividade (dia) VALUES ('ontem')")
+    historico._connection.commit()
+    dias = historico.dias_de_estudo(hoje - Intervalo(days=30))
+    checar(
+        dias == {hoje, hoje - Intervalo(days=1), hoje - Intervalo(days=5)}
+        and all(isinstance(d, Dia) for d in dias),
+        f"os dias de estudo desde a data pedida, sem o dia ilegível ({sorted(dias)})",
+    )
+    historico.close()
+
+
+def teste_nivel() -> None:
+    """O nível do caderno: a regra do XP e a curva, sem banco nenhum.
+
+    O contrato é o que a dica de ferramenta promete — 10 por palavra, 5 por
+    revisão certa, 25 por dominada — e uma curva em que cada nível pede 100
+    XP a mais que o anterior, a partir do nível 1 no zero.
+    """
+    print("nível")
+    from pipboy.nivel import REGRA_DO_XP, Nivel, nivel_de, xp_do_caderno, xp_para
+    from pipboy.vocabulary import Estatisticas
+
+    checar(
+        xp_do_caderno(Estatisticas(total=3, vencidas=2, dominadas=1, acertos=4, erros=9)) == 75,
+        "o XP soma palavras, revisões certas e dominadas — errar e vencer não tiram nada",
+    )
+    checar(
+        [xp_para(n) for n in range(1, 6)] == [0, 100, 300, 600, 1000],
+        "cada nível pede 100 XP a mais que o anterior",
+    )
+    checar(
+        nivel_de(0) == Nivel(1, 0, 0, 100) and nivel_de(99).numero == 1
+        and nivel_de(100) == Nivel(2, 100, 100, 300) and nivel_de(4500).numero == 10
+        and nivel_de(-5).numero == 1,
+        "o nível começa no 1, sobe exatamente no limiar e não desce abaixo do começo",
+    )
+    meio = nivel_de(150)
+    checar(
+        meio.fracao == 0.25 and meio.faltam == 150,
+        f"a fração é o trecho do nível já percorrido, e o que falta é o resto ({meio.fracao}, {meio.faltam})",
+    )
+    checar(
+        "10 XP por palavra" in REGRA_DO_XP and "5 por revisão certa" in REGRA_DO_XP
+        and "25 por palavra dominada" in REGRA_DO_XP,
+        "a regra que a tela mostra é a que o código conta",
+    )
+
+
+def teste_ferramenta_de_mutantes() -> None:
+    """A ferramenta de testes de mutação, rodada num projeto de brinquedo.
+
+    O contrato: a especificação mal escrita é recusada; o trecho sumido ou
+    repetido é relatado em vez de plantado; a cópia deixa de fora o .env, o
+    .git e o build; o defeito vai para a CÓPIA, nunca para o original; e um
+    mutante que a suíte não pega aparece como escapado.
+    """
+    print("ferramenta de mutantes")
+    import importlib.util
+
+    caminho = Path(__file__).resolve().parent.parent / "ferramentas" / "mutantes.py"
+    especificacao = importlib.util.spec_from_file_location("mutantes", caminho)
+    assert especificacao is not None and especificacao.loader is not None
+    mutantes = importlib.util.module_from_spec(especificacao)
+    sys.modules["mutantes"] = mutantes
+    especificacao.loader.exec_module(mutantes)
+
+    brinquedo = Path(tempfile.mkdtemp()) / "brinquedo"
+    (brinquedo / "pipboy").mkdir(parents=True)
+    (brinquedo / "tests").mkdir()
+    (brinquedo / "build").mkdir()
+    (brinquedo / ".env").write_text("GEMINI_API_KEY=segredo", encoding="utf-8")
+    (brinquedo / "pipboy" / "conta.py").write_text(
+        "def dobro(x):\n    return x * 2\n\n\ndef metade(x):\n    return x / 2\n", encoding="utf-8"
+    )
+    # A "suíte" do brinquedo só confere o dobro — a metade não tem teste.
+    (brinquedo / "tests" / "test_nucleo.py").write_text(
+        "import sys\nsys.path.insert(0, '.')\nfrom pipboy.conta import dobro\n"
+        "print('  ok   dobro' if dobro(3) == 6 else '  FALHA  dobro')\n",
+        encoding="utf-8",
+    )
+    (brinquedo / "pipboy" / "__init__.py").write_text("", encoding="utf-8")
+
+    copia = mutantes.copiar_projeto(brinquedo, Path(tempfile.mkdtemp()))
+    checar(
+        (copia / "pipboy" / "conta.py").is_file() and not (copia / ".env").exists()
+        and not (copia / "build").exists(),
+        "a cópia leva o código e os testes, e deixa o .env e o build para trás",
+    )
+
+    especie = Path(tempfile.mkdtemp()) / "espec.py"
+    especie.write_text(
+        "MUTANTES = [\n"
+        "    ('dobro vira triplo', 'pipboy/conta.py', 'return x * 2', 'return x * 3', 'nucleo'),\n"
+        "    ('metade vira terço', 'pipboy/conta.py', 'return x / 2', 'return x / 3', 'nucleo'),\n"
+        "    ('trecho sumido', 'pipboy/conta.py', 'return x ** 2', 'return 0', 'nucleo'),\n"
+        "    ('trecho repetido', 'pipboy/conta.py', 'def ', 'def _', 'nucleo'),\n"
+        "]\n",
+        encoding="utf-8",
+    )
+    lidos = mutantes.ler_especificacao(especie)
+    problemas = mutantes.problemas(lidos, brinquedo)
+    checar(
+        len(lidos) == 4 and len(problemas) == 2
+        and "sumiu" in problemas[0] and "aparece 2 vezes" in problemas[1],
+        f"trecho sumido ou repetido é relatado, e não plantado ({problemas})",
+    )
+    mal_escrita = Path(tempfile.mkdtemp()) / "mal.py"
+    mal_escrita.write_text("MUTANTES = [('só o nome',)]\n", encoding="utf-8")
+    try:
+        mutantes.ler_especificacao(mal_escrita)
+        checar(False, "especificação mal escrita é recusada")
+    except SystemExit:
+        checar(True, "especificação mal escrita é recusada")
+
+    pego = mutantes.rodar_mutante(lidos[0], brinquedo)
+    escapou = mutantes.rodar_mutante(lidos[1], brinquedo)
+    checar(
+        pego.pego and not escapou.pego,
+        "o defeito no que tem teste é pego; o defeito no que não tem, escapa",
+    )
+    checar(
+        "return x * 2" in (brinquedo / "pipboy" / "conta.py").read_text(encoding="utf-8"),
+        "e o arquivo original nunca é tocado",
+    )
+    checar(
+        mutantes.falhas_da_saida("  ok   a\nTraceback (x)\n  FALHA  b\n", "nucleo") == ("FALHA  b",)
+        and len(mutantes.falhas_da_saida("Traceback (x)\n", "interface")) == 1,
+        "traço de pilha só reprova a suíte de interface; no núcleo, há testes que o provocam",
+    )
 
 
 def teste_backup() -> None:
@@ -2961,6 +3268,10 @@ def main() -> int:
         teste_lancamento_sem_console,
         teste_fontes_embutidas,
         teste_dicas,
+        teste_revisao_escrita,
+        teste_previsao_e_calendario,
+        teste_nivel,
+        teste_ferramenta_de_mutantes,
     ):
         try:
             teste()
