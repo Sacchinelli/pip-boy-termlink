@@ -80,8 +80,3 @@ def nivel_de(samples: np.ndarray) -> float:
 def rms_level(data: bytes) -> float:
     """Nível médio do bloco em PCM, para o medidor da interface."""
     return nivel_de(pcm_to_array(data))
-
-
-def silence(num_samples: int) -> bytes:
-    """Bloco de silêncio com o tamanho pedido."""
-    return b"\x00\x00" * num_samples
